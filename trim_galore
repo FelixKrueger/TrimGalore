@@ -25,7 +25,7 @@ use Cwd;
 
 ## this script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 08 April 2016
+## last modified on 27 June 2016
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -33,7 +33,7 @@ BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 my $trimmer_version = '0.4.2_dev';
 
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -143,13 +143,13 @@ sub trim{
   $report =~ s/$/_trimming_report.txt/;
 
   if ($no_report_file) {
-    $report = File::Spec->devnull;
-    open (REPORT,'>',$report) or die "Failed to write to file '$report': $!\n";
-    # warn "Redirecting report output to /dev/null\n";
+      $report = File::Spec->devnull;
+      open (REPORT,'>',$report) or die "Failed to write to file '$report': $!\n";
+      # warn "Redirecting report output to /dev/null\n";
   }
   else{
-    open (REPORT,'>',$output_dir.$report) or die "Failed to write to file '$report': $!\n";
-    warn "Writing report to '$output_dir$report'\n";
+      open (REPORT,'>',$output_dir.$report) or die "Failed to write to file '$report': $!\n";
+      warn "Writing report to '$output_dir$report'\n";
   }
 
   warn "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
@@ -220,6 +220,12 @@ sub trim{
     warn "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
     print REPORT "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
   }
+
+  if ($trim_n){
+      warn "Removing Ns from the start and end of reads\n";
+      print REPORT "Removing Ns from the start and end of reads\n";
+  }
+
 
   if ($validate){ # only for paired-end files
 
@@ -310,64 +316,64 @@ sub trim{
 
   ### Proceeding differently for RRBS and other type of libraries
   if ($rrbs){
-
-    ### Skipping quality filtering for RRBS libraries if a quality cutoff of 0 was specified
-    if ($cutoff == 0){
-      warn "Quality cutoff selected was 0    -    Skipping quality trimming altogether\n\n";
-      sleep (3);
-    }
-    else{
-
-      $temp = $filename;
-      $temp =~ s/^.*\///; # replacing optional file path information
-      $temp =~ s/$/_qual_trimmed.fastq/;
-      open (TEMP,'>',$output_dir.$temp) or die "Can't write to '$temp': $!";
-
-      warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
-      sleep (3);
-
-      open (QUAL,"$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
-
-      my $qual_count = 0;
-
-      while (1){
-	my $l1 = <QUAL>;
-	my $seq = <QUAL>;
-	my $l3 = <QUAL>;
-	my $qual = <QUAL>;
-	last unless (defined $qual);
-	
-	$qual_count++;
-	if ($qual_count%10000000 == 0){
-	  warn "$qual_count sequences processed\n";
-	}
-	print TEMP "$l1$seq$l3$qual";
+      
+      ### Skipping quality filtering for RRBS libraries if a quality cutoff of 0 was specified
+      if ($cutoff == 0){
+	  warn "Quality cutoff selected was 0    -    Skipping quality trimming altogether\n\n";
+	  sleep (3);
       }
+      else{
+	  
+	  $temp = $filename;
+	  $temp =~ s/^.*\///; # replacing optional file path information
+	  $temp =~ s/$/_qual_trimmed.fastq/;
+	  open (TEMP,'>',$output_dir.$temp) or die "Can't write to '$temp': $!";
+	  
+	  warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
+	  sleep (3);
+	  
+	  open (QUAL,"$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
 
-      warn "\n  >>> Quality trimming completed <<<\n$qual_count sequences processed in total\n\n";
-      close QUAL or die "Unable to close QUAL filehandle: $!\n";
-      sleep (3);
-
-    }
+	  my $qual_count = 0;
+	  
+	  while (1){
+	      my $l1 = <QUAL>;
+	      my $seq = <QUAL>;
+	      my $l3 = <QUAL>;
+	      my $qual = <QUAL>;
+	      last unless (defined $qual);
+	
+	      $qual_count++;
+	      if ($qual_count%10000000 == 0){
+		  warn "$qual_count sequences processed\n";
+	      }
+	      print TEMP "$l1$seq$l3$qual";
+	  }
+	  
+	  warn "\n  >>> Quality trimming completed <<<\n$qual_count sequences processed in total\n\n";
+	  close QUAL or die "Unable to close QUAL filehandle: $!\n";
+	  sleep (3);
+	  
+      }
   }
-
-
+  
+  
   if ($output_filename =~ /\.fastq$/){
-    $output_filename =~ s/\.fastq$/_trimmed.fq/;
+      $output_filename =~ s/\.fastq$/_trimmed.fq/;
   }
   elsif ($output_filename =~ /\.fastq\.gz$/){
     $output_filename =~ s/\.fastq\.gz$/_trimmed.fq/;
   }
   elsif ($output_filename =~ /\.fq$/){
-    $output_filename =~ s/\.fq$/_trimmed.fq/;
+      $output_filename =~ s/\.fq$/_trimmed.fq/;
   }
   elsif ($output_filename =~ /\.fq\.gz$/){
-    $output_filename =~ s/\.fq\.gz$/_trimmed.fq/;
+      $output_filename =~ s/\.fq\.gz$/_trimmed.fq/;
   }
   else{
-    $output_filename =~ s/$/_trimmed.fq/;
+      $output_filename =~ s/$/_trimmed.fq/;
   }
-
+  
   if ($gzip or $filename =~ /\.gz$/){
     if ($dont_gzip){
       open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
@@ -376,13 +382,13 @@ sub trim{
       ### 6 Jan 2014: had a request to also gzip intermediate files to save disk space
       #  if ($validate){
       # open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
-      # }
-      $output_filename .= '.gz';
-      open (OUT,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+	# }
+	$output_filename .= '.gz';
+	open (OUT,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
     }
   }
   else{
-    open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+      open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
   }
   warn "Writing final adapter and quality trimmed output to $output_filename\n\n";
 
@@ -395,44 +401,44 @@ sub trim{
   my $rrbs_trimmed_start = 0;
   my $CAA = 0;
   my $CGA = 0;
-
+  
   my $pid;
-
+  
   if ($rrbs and $cutoff != 0){
-
-    ### optionally using 2 different adapters for read 1 and read 2
-    if ($validate and $a2){
-      ### Figure out whether current file counts as read 1 or read 2 of paired-end files
-      if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
-	warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-	sleep (3);
-	$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+      
+      ### optionally using 2 different adapters for read 1 and read 2
+      if ($validate and $a2){
+	  ### Figure out whether current file counts as read 1 or read 2 of paired-end files
+	  if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
+	      warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
+	      sleep (3);
+	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+	  }
+	  else{                            # this is read 2 of a pair
+	      warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$a2' from file $temp <<< \n";
+	      sleep (3);
+	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+	  }
       }
-      else{                            # this is read 2 of a pair
-	warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$a2' from file $temp <<< \n";
-	sleep (3);
-    	$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+      ### Using the same adapter for both read 1 and read 2
+      else{
+	  warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
+	  sleep (3);
+	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
       }
-    }
-    ### Using the same adapter for both read 1 and read 2
-    else{
-      warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-      sleep (3);
-      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
-    }
-
-    close WRITER or die $!; # not needed
-
-    open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
-
-    if ($filename =~ /\.gz$/){
-      open (IN,"gunzip -c $filename |") or die $!; # original, untrimmed file
-    }
-    else{
-      open (IN,$filename) or die $!; # original, untrimmed file
-    }
-
-    while (1){
+      
+      close WRITER or die $!; # not needed
+      
+      open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
+      
+      if ($filename =~ /\.gz$/){
+	  open (IN,"gunzip -c $filename |") or die $!; # original, untrimmed file
+      }
+      else{
+	  open (IN,$filename) or die $!; # original, untrimmed file
+      }
+      
+      while (1){
 
       # we can process the output from Cutadapt and the original input 1 by 1 to decide if the adapter has been removed or not
       my $l1 = <TRIM>;
@@ -563,25 +569,25 @@ sub trim{
       if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 	warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 	sleep (3);
-	$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+	$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
       }
       else{                            # this is read 2 of a pair
 	warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
 	sleep (3);
-	$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
+	$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
       }
     }
     ### Using the same adapter for both read 1 and read 2
     else{
       warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
       sleep (3);
-      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
     }
-
+    
     close WRITER or die $!; # not needed
-
+    
     while (1){
-
+	
       my $l1 = <TRIM>;
       my $seq = <TRIM>; # quality and/or adapter trimmed sequence
       my $l3 = <TRIM>;
@@ -694,7 +700,7 @@ sub trim{
   ###  only reporting this separately if quality and adapter trimming were performed separately
   if ($rrbs){
     my $percentage_shortened;
-    if ($count){
+   if ($count){
       $percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
       warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
       print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
@@ -1278,6 +1284,7 @@ sub process_commandline{
   my $path_to_cutadapt;
   my $max_length;
   my $maxn;
+  my $trimn;
 
   my $command_line = GetOptions ('help|man' => \$help,
 				 'q|quality=i' => \$quality,
@@ -1315,8 +1322,9 @@ sub process_commandline{
 				 'path_to_cutadapt=s' => \$path_to_cutadapt,
 				 'max_length=i' => \$max_length,
 				 'max_n=i'      => \$maxn,
-				);
-
+				 'trim-n'      => \$trimn,
+      );
+  
   ### EXIT ON ERROR if there were errors with any of the supplied options
   unless ($command_line){
     die "Please respecify command line options\n";
@@ -1493,52 +1501,60 @@ VERSION
 
   ### OUTPUT DIR PATH
   if ($output_dir){
-    unless ($output_dir =~ /\/$/){
-      $output_dir =~ s/$/\//;
-    }
+      unless ($output_dir =~ /\/$/){
+	  $output_dir =~ s/$/\//;
+      }
   }
   else{
-    $output_dir = '';
+      $output_dir = '';
   }
-
+  
   ### Trimming at the 5' end
   if (defined $clip_r2){ # trimming 5' bases of read 1
-    die "Clipping the 5' end of read 2 is only allowed for paired-end files (--paired)\n" unless ($validate);
+      die "Clipping the 5' end of read 2 is only allowed for paired-end files (--paired)\n" unless ($validate);
   }
-
+  
   if (defined $clip_r1){ # trimming 5' bases of read 1
-    unless ($clip_r1 > 0 and $clip_r1 < 100){
-      die "The 5' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
-    }
+      unless ($clip_r1 > 0 and $clip_r1 < 100){
+	  die "The 5' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
+      }
   }
-
+  
   if (defined $clip_r2){ # trimming 5' bases of read 2
-    unless ($clip_r2 > 0 and $clip_r2 < 100){
-      die "The 5' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
-    }
+      unless ($clip_r2 > 0 and $clip_r2 < 100){
+	  die "The 5' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
+      }
   }
-
+  
   ### Trimming at the 3' end
   if (defined $three_prime_clip_r1){ # trimming 3' bases of read 1
-    unless ($three_prime_clip_r1 > 0 and $three_prime_clip_r1 < 100){
-      die "The 3' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
-    }
+      unless ($three_prime_clip_r1 > 0 and $three_prime_clip_r1 < 100){
+	  die "The 3' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
+      }
   }
-
+  
   if (defined $three_prime_clip_r2){ # trimming 3' bases of read 2
-    unless ($three_prime_clip_r2 > 0 and $three_prime_clip_r2 < 100){
-      die "The 3' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
-    }
+      unless ($three_prime_clip_r2 > 0 and $three_prime_clip_r2 < 100){
+	  die "The 3' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
+      }
   }
-
+  
 
   if (defined $maxn){
-    unless ($maxn > 0 and $maxn <= 100){
-      die "--max_n needs to be an integer between 1 and 100\nPlease respecify...\n\n";
-    }
+      unless ($maxn > 0 and $maxn <= 100){
+	  die "--max_n needs to be an integer between 1 and 100\nPlease respecify...\n\n";
+      }
   }
-
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn);
+  
+  my $trim_n;
+  if ($trimn){
+      $trim_n = '--trim-n';   
+  }
+  else{
+      $trim_n = '';
+  }
+  
+  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n);
 }
 
 sub Ncounter{
@@ -1638,6 +1654,8 @@ trim_galore [options] <filename(s)>
 --max_n COUNT           The total number of Ns (as integer) a read may contain before it will be removed altogether.
                         In a paired-end setting, either read exceeding this limit will result in the entire
                         pair being removed from the trimmed output files.
+
+--trim-n                Removes Ns from either side of the read. This option does currently not work in RRBS mode.
 
 -o/--output_dir <DIR>   If specified all output will be written to this directory instead of the current
                         directory.
@@ -1750,7 +1768,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 08 April 2016.
+Last modified on 27 June 2016.
 
 HELP
   exit;

@@ -1,5 +1,5 @@
-RELEASE NOTES FOR Trim Galore v0.4.dev (08 April 2016)
-----------------------------------------------------
+RELEASE NOTES FOR Trim Galore v0.4.2_dev (27 June 2016)
+-------------------------------------------------------
 
 Replaced 'zcat' with 'gunzip -c' so that older versions of Mac OSX do not append a .Z to the
 end of the file and subsequently fail because the file is not present. Dah...
@@ -8,7 +8,12 @@ Added option '--max_n COUNT' to remove all reads (or read pairs) exceeding this 
 Ns. In a paired-end setting it is sufficient if one read exceeds this limit. Reads (or read pairs)
 are removed altogether and are not further trimmed or written to the unpaired output. 
 
+Enabled option '--trim-n' to remove Ns from both end of the reads. Does currently not work for
+RRBS-mode.
+
 Fixed a typo in adapter auto-detection warning message.
+
+
 
 
 RELEASE NOTES FOR Trim Galore v0.4.1 (12 Nov 2015)
