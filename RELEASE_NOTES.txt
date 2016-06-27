@@ -11,6 +11,9 @@ are removed altogether and are not further trimmed or written to the unpaired ou
 Enabled option '--trim-n' to remove Ns from both end of the reads. Does currently not work for
 RRBS-mode.
 
+Added new option '--max_length <INT>' which reads that are longer than <INT> bp after trimming.
+This is only advised for smallRNA sequencing to remove non-small RNA sequences.
+
 Fixed a typo in adapter auto-detection warning message.
 
 

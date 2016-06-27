@@ -1347,7 +1347,7 @@ sub process_commandline{
                                (powered by Cutadapt)
                                   version $trimmer_version
 
-                             Last update: 07 04 2016
+                             Last update: 27 06 2016
 
 VERSION
     exit;
