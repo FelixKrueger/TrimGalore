@@ -1,0 +1,59 @@
+RELEASE NOTES FOR Trim Galore v0.4.dev (08 April 2016)
+----------------------------------------------------
+
+Replaced 'zcat' with 'gunzip -c' so that older versions of Mac OSX do not append a .Z to the
+end of the file and subsequently fail because the file is not present. Dah...
+
+Added option '--max_n COUNT' to remove all reads (or read pairs) exceeding this limit of tolerated
+Ns. In a paired-end setting it is sufficient if one read exceeds this limit. Reads (or read pairs)
+are removed altogether and are not further trimmed or written to the unpaired output. 
+
+Fixed a typo in adapter auto-detection warning message.
+
+
+RELEASE NOTES FOR Trim Galore v0.4.1 (12 Nov 2015)
+--------------------------------------------------
+Changes for small RNA-libraries:
+
+Changed the Illumina small RNA sequence used for auto-detection to 'TGGAATTCTCGG' (from formerly
+'ATGGAATTCTCG'). The reason for this is that smallRNA libraries have ssRNA adapters ligated to their
+-OH end, a signature of dicer cleavage, so there is no A-tailing involved. Thanks to Q. Gouil for 
+bringing this to our attention.
+
+Changed the length cutoff for sequences to 16bp (down from 20bp) for smallRNA libraries before
+sequences get removed entirely. This is because some 20-23bp long smallRNAs species that had removed
+T, TG, or TGG etc. might just about pass the 20bp cutoff.
+
+Added a small description to the --help message for users of the NuGEN Ovation RRBS kit as to *NOT*
+use the --rrbs option (see --help).
+
+
+
+RELEASE NOTES FOR Trim Galore v0.4.0 (07 May 2015)
+--------------------------------------------------
+
+Unless instructed otherwise Trim Galore will now attempt to auto-detect the adapter which
+had been used for library construction (choosing from the Illumina universal, Nextera
+transposase and Illumina small RNA adapters). For this the first 1 million sequences of
+the first file specified are analysed. If no adapter can be detected within the first
+1 million sequences Trim Galore defaults to --illumina. The auto-detection behaviour can
+be overruled by specifying an adapter sequence or using --illumina, --nextera or --small_rna.
+
+Added the new options '--illumina', '--nextera' and '--small_rna' to use different default sequences
+for trimming (instead of -a):
+
+    Illumina:	AGATCGGAAGAGC
+    Small RNA:	ATGGAATTCTCG
+    Nextera:	CTGTCTCTTATA
+
+
+Added a sanity check to the start of a Trim Galore run to see if the (first) FastQ file in
+question does contain information at all or appears to be in SOLiD colorspace format, and bails
+if either is true. Trim Galore does not support colorspace trimming, but users wishing to do 
+this are kindly referred to using Cutadapt as a standalone program.
+
+Added a new option '--path_to_cutadapt /path/to/cudapt'. Unless this option is specified it is
+assumed that Cutadapt is in the PATH (equivalent to '--path_to_cutadapt cutadapt'). Also added
+a test to see if Cutadapt seems to be working before the actual trimming is launched.
+
+Fixed an open command for a certain type of RRBS processing (was open() instead of open3().
