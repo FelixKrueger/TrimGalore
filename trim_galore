@@ -1127,7 +1127,12 @@ sub validate_paired_end_files{
 sub file_sanity_check{
 
   my $file = shift;
-  open (SANITY,$file) or die "Failed to read from file '$file' to perform sanity check\n";
+  if ($file =~ /gz$/){
+      open (SANITY,"gunzip -c $file |") or die "Failed to read from file '$file' to perform sanity check: $!\n";
+  }
+  else{
+      open (SANITY,$file) or die "Failed to read from file '$file' to perform sanity check: $!\n";
+  }
 
   # just processing a single FastQ entry
   my $id    = <SANITY>;
@@ -1768,7 +1773,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 27 June 2016.
+Last modified on 03 August 2016.
 
 HELP
   exit;
