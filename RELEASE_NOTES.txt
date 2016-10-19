@@ -1,5 +1,12 @@
-RELEASE NOTES FOR Trim Galore v0.4.2_dev (27 June 2016)
--------------------------------------------------------
+RELEASE NOTES FOR Trim Galore v0.4.2_dev (19 Oct 2016)
+--------------------------------------------------
+
+Added a close statement for the REPORT filehandle since it occasionally swallowed the last line...
+
+
+
+RELEASE NOTES FOR Trim Galore v0.4.2 (07 Sep 2016)
+--------------------------------------------------
 
 Replaced 'zcat' with 'gunzip -c' so that older versions of Mac OSX do not append a .Z to the
 end of the file and subsequently fail because the file is not present. Dah...

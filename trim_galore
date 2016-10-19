@@ -30,7 +30,7 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.4.2';
+my $trimmer_version = '0.4.2_dev';
 
 
 my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n) = process_commandline();
@@ -699,139 +699,138 @@ sub trim{
 
   ###  only reporting this separately if quality and adapter trimming were performed separately
   if ($rrbs){
-    my $percentage_shortened;
-   if ($count){
-      $percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
-      warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
-      print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
-    }
-    else{
-      warn "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
-      print REPORT "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
-    }
+      my $percentage_shortened;
+      if ($count){
+	  $percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
+	  warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
+	  print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
+      }
+      else{
+	  warn "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
+	  print REPORT "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
+      }
   }
 
   my $percentage_too_short;
   my $percentage_too_long;
   my $percentage_too_many_n;
   if ($count){
-    $percentage_too_short  = sprintf ("%.1f",$too_short/$count*100);
-    $percentage_too_long   = sprintf ("%.1f",$too_long/$count*100);
-    $percentage_too_many_n = sprintf ("%.1f",$too_many_n/$count*100);
+      $percentage_too_short  = sprintf ("%.1f",$too_short/$count*100);
+      $percentage_too_long   = sprintf ("%.1f",$too_long/$count*100);
+      $percentage_too_many_n = sprintf ("%.1f",$too_many_n/$count*100);
   }
   else{
-    $percentage_too_short = 'N/A';
-    $percentage_too_long = 'N/A';
-    $percentage_too_many_n = 'N/A';
+      $percentage_too_short = 'N/A';
+      $percentage_too_long = 'N/A';
+      $percentage_too_many_n = 'N/A';
   }
-
-
+  
+  
 
   if ($validate){ ### only for paired-end files
-    warn "The length threshold of paired-end sequences gets evaluated later on (in the validation step)\n";
+      warn "The length threshold of paired-end sequences gets evaluated later on (in the validation step)\n";
   }
   else{           ### Single-end file
-    warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-    print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-    if ($maxn){
-      warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
-      print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
-    }
-
-    if ($max_length){
-      warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
-      print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
-    }
+      warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
+      print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
+      if ($maxn){
+	  warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
+	  print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
+      }
+      if ($max_length){
+	  warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+	  print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+      }
   }
-
+  
   if ($rrbs){
-    my $percentage_rrbs_trimmed = sprintf ("%.1f",$rrbs_trimmed/$count*100);
-    warn "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
-    print REPORT "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
+      my $percentage_rrbs_trimmed = sprintf ("%.1f",$rrbs_trimmed/$count*100);
+      warn "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
+      print REPORT "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
   }
 
   if ($non_directional){
-    my $percentage_rrbs_trimmed_at_start = sprintf ("%.1f",$rrbs_trimmed_start/$count*100);
-    warn "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
-    print REPORT "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
+      my $percentage_rrbs_trimmed_at_start = sprintf ("%.1f",$rrbs_trimmed_start/$count*100);
+      warn "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
+      print REPORT "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
   }
-
+  
   warn "\n";
   print REPORT "\n";
 
   ### RUNNING FASTQC unless we are dealing with paired-end files
   unless($validate){
-    if ($fastqc){
-      warn "\n  >>> Now running FastQC on the data <<<\n\n";
-      sleep (1);
-      if ($fastqc_args){
-	system ("$path_to_fastqc $fastqc_args $output_dir$output_filename");
+      if ($fastqc){
+	  warn "\n  >>> Now running FastQC on the data <<<\n\n";
+	  sleep (1);
+	  if ($fastqc_args){
+	      system ("$path_to_fastqc $fastqc_args $output_dir$output_filename");
+	  }
+	  else{
+	      system ("$path_to_fastqc $output_dir$output_filename");
+	  }
       }
-      else{
-	system ("$path_to_fastqc $output_dir$output_filename");
-      }
-    }
   }
 
   ### VALIDATE PAIRED-END FILES
   if ($validate){
 
-    ### Figure out whether current file counts as read 1 or read 2 of paired-end files
-
+      ### Figure out whether current file counts as read 1 or read 2 of paired-end files
+      
     if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
       $file_1 = $output_filename;
       shift @filenames;
       # warn "This is read 1: $file_1\n\n";
     }
     else{                            # this is read 2 of a pair
-      $file_2 = $output_filename;
+	$file_2 = $output_filename;
       shift @filenames;
-      # warn "This is read 2: $file_2\n\n";
+	# warn "This is read 2: $file_2\n\n";
     }
-
+    
     if ($file_1 and $file_2){
-      warn "Validate paired-end files $file_1 and $file_2\n";
-      sleep (1);
-
-      my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
-
-      ### RUNNING FASTQC
-      if ($fastqc){
-
-	warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
-	sleep (3);
-
-	if ($fastqc_args){
-	  system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
-	}
-	else{
-	  system ("$path_to_fastqc $output_dir$val_1");
-	}
-
-	warn "\n  >>> Now running FastQC on the validated data $val_2<<<\n\n";
-	sleep (3);
-
-	if ($fastqc_args){
-	  system ("$path_to_fastqc $fastqc_args $output_dir$val_2");
-	}
-	else{
-	  system ("$path_to_fastqc $output_dir$val_2");
+	warn "Validate paired-end files $file_1 and $file_2\n";
+	sleep (1);
+	
+	my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
+	
+	### RUNNING FASTQC
+	if ($fastqc){
+	    
+	    warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
+	    sleep (3);
+	    
+	    if ($fastqc_args){
+		system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
+	    }
+	    else{
+	    system ("$path_to_fastqc $output_dir$val_1");
+	    }
+	    
+	    warn "\n  >>> Now running FastQC on the validated data $val_2<<<\n\n";
+	    sleep (3);
+	    
+	    if ($fastqc_args){
+		system ("$path_to_fastqc $fastqc_args $output_dir$val_2");
+	    }
+	    else{
+		system ("$path_to_fastqc $output_dir$val_2");
+	    }
+	    
 	}
 	
-      }
-
-      warn "Deleting both intermediate output files $file_1 and $file_2\n";
-      unlink "$output_dir$file_1";
-      unlink "$output_dir$file_2";
-
-      warn "\n",'='x100,"\n\n";
-      sleep (3);
-
-      $file_1 = undef; # setting file_1 and file_2 to undef once validation is completed
-      $file_2 = undef;
+	warn "Deleting both intermediate output files $file_1 and $file_2\n";
+	unlink "$output_dir$file_1";
+	unlink "$output_dir$file_2";
+	
+	warn "\n",'='x100,"\n\n";
+	sleep (3);
+	
+	$file_1 = undef; # setting file_1 and file_2 to undef once validation is completed
+	$file_2 = undef;
     }
   }
-
+  close REPORT or warn "Failed to close filehandle REPORT: $!\n"; 
 }
 
 sub validate_paired_end_files{
@@ -1773,7 +1772,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 03 August 2016.
+Last modified on 19 October 2016.
 
 HELP
   exit;
