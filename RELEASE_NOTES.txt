@@ -1,7 +1,9 @@
-RELEASE NOTES FOR Trim Galore v0.4.2_dev (19 Oct 2016)
+RELEASE NOTES FOR Trim Galore v0.4.2_dev (1 Nov 2016)
 --------------------------------------------------
 
 Added a close statement for the REPORT filehandle since it occasionally swallowed the last line...
+
+Setting --length now has priority over the smallRNA adapter (which would set the length cutoff to 18bp).
 
 
 

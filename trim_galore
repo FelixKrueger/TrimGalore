@@ -25,7 +25,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 27 June 2016
+## last modified on 01 Nov 2016
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -101,18 +101,24 @@ unless (defined $adapter){
 ### For smallRNA adapters we are reducing the sequence length cutoff before a sequences gets thrown out entirely to 18bp. We are doing this because some 20-23bp long smallRNAs
 ### may be removed if T, TG, or TGG etc gets trimmed off the end (changed b ack up from 16 to 18bp to remove noise from alignment files, 18 11 2015)
 if ($adapter eq 'TGGAATTCTCGG'){
-  $length_cutoff = 18;
-  warn "Reducing length cutoff to 18bp for small RNA-Seq reads because a cutoff of 20bp may remove some short species of small RNAs if they had been trimmed by 1,2 or 3bp\n";
-
-  ### If the file is a smallRNA library and paired-end we set the Illumina 5' adapter as the $a2 sequence
-  if ($validate){
-    unless (defined $a2){
-      $a2 = 'GATCGTCGGACT';
-      warn "Setting the Illumina smallRNA 5' adapter as adapter 2: 'GATCGTCGGACT'\n";
+    unless (defined $length_cutoff){ # user defined length cutoff wins over auto-detection
+	$length_cutoff = 18;
+	warn "Reducing length cutoff to 18bp for small RNA-Seq reads because a cutoff of 20bp may remove some short species of small RNAs if they had been trimmed by 1,2 or 3bp\n";
     }
-  }
+    
+    ### If the file is a smallRNA library and paired-end we set the Illumina 5' adapter as the $a2 sequence
+    if ($validate){
+	unless (defined $a2){
+	    $a2 = 'GATCGTCGGACT';
+	    warn "Setting the Illumina smallRNA 5' adapter as adapter 2: 'GATCGTCGGACT'\n";
+	}
+    }
 }
 
+unless (defined $length_cutoff){
+    $length_cutoff = 20; # non small RNA length cutoff
+}
+	
 
 unless (defined $a2){ # optional adapter for the second read in a pair. Only works for --paired trimming
   $a2 = '';
@@ -1444,9 +1450,7 @@ VERSION
   }
 
   ### LENGTH CUTOFF
-  unless (defined $length_cutoff){
-    $length_cutoff = 20;
-  }
+  # this gets set right at the start after the adapter auto-detection has been concluded
 
   ### MAXIMUM LENGTH CUTOFF - this is intended for smallRNA-libraries to remove sequences that are longer than a certain cutoff and thus problably not small RNA species
   if (defined $max_length){
