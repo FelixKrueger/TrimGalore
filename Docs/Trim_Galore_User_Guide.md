@@ -109,7 +109,7 @@ Applying these steps to both self-generated and downloaded data can ensure that 
 
 `--illumina`
 
-- Adapter sequence to be trimmed is the first 13bp of the Illumina universal adapter `GATCGGAAGAGC` instead of the default auto-detection of adapter sequence.
+- Adapter sequence to be trimmed is the first 13bp of the Illumina universal adapter `AGATCGGAAGAGC` instead of the default auto-detection of adapter sequence.
 
 `--nextera`
  
