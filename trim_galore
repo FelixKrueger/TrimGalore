@@ -503,16 +503,25 @@ sub trim{
 	  
 	  ### directional read
 	  unless ($nd == 1){
-	      # only trimmin Read 1 of a pair for a further 2bp from their 3' end
-	      if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
-		  if (length $seq >= 2 and length$seq < $quality_trimmed_seq_length){
-		      $seq = substr ($seq,0,length($seq)-2);
-		      $qual = substr ($qual,0,length($qual)-2);
-		      ++$rrbs_trimmed;
+	      # only trimming Read 1 of a pair for a further 2bp from their 3' end
+	      if ($validate){ # paired end
+		  if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
+		      if (length $seq >= 2 and length$seq < $quality_trimmed_seq_length){
+			  $seq = substr ($seq,0,length($seq)-2);
+			  $qual = substr ($qual,0,length($qual)-2);
+			  ++$rrbs_trimmed;
+		      }
+		  }
+		  else{
+		      # this is read 2 of a pair. We do not trim further from the 3' end but rather trim R2 from the 5' end later
 		  }
 	      }
-	      else{
-		  # this is read 2 of a pair. We do not trim further from the 3' end but rather trim R2 from the 5' end later
+	      else{ # single-end reads will be trimmed from their 3' end
+		  if (length $seq >= 2 and length$seq < $quality_trimmed_seq_length){                                                                                                                   
+		      $seq = substr ($seq,0,length($seq)-2);                                                                                                                                            
+		      $qual = substr ($qual,0,length($qual)-2);                                                                                                                                         
+		      ++$rrbs_trimmed;                                                                                                                                                                  
+		  }                                  
 	      }
 	  }
 
@@ -783,7 +792,6 @@ sub trim{
   
   ### VALIDATE PAIRED-END FILES
   if ($validate){
-
       ### Figure out whether current file counts as read 1 or read 2 of paired-end files
       
       if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
