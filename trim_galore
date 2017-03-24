@@ -25,12 +25,12 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 07 December 2016
+## last modified on 24 March 2017
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.4.3';
+my $trimmer_version = '0.4.3_dev';
 
 
 my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n) = process_commandline();
@@ -1367,7 +1367,7 @@ sub process_commandline{
                                (powered by Cutadapt)
                                   version $trimmer_version
 
-                             Last update: 07 12 2016
+                             Last update: 24 03 2017
 
 VERSION
     exit;
@@ -1802,7 +1802,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 07 December 2016.
+Last modified on 24 March 2017.
 
 HELP
   exit;
