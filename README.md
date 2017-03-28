@@ -1,6 +1,11 @@
 # Trim Galore!
 _Trim Galore!_ is a wrapper around [Cutadapt](https://github.com/marcelm/cutadapt) and [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) to consistently apply adapter and quality trimming to FastQ files, with extra functionality for RRBS data.
 
+[![Build Status](https://travis-ci.org/FelixKrueger/TrimGalore.svg?branch=master)](https://travis-ci.org/FelixKrueger/TrimGalore)
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](http://bioconda.github.io/recipes/trim_galore/README.html)
+[![container ready](https://quay.io/repository/biocontainers/trim-galore/status)](https://quay.io/repository/biocontainers/trim-galore)
+
+
 ## Installation
 _Trim Galore!_ is a a Perl wrapper around two tools: [Cutadapt](https://github.com/marcelm/cutadapt) and [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/). To use, ensure that these two pieces of software are available and copy the `trim_galore` script to a location available on the `PATH`.
 
