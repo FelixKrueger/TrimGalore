@@ -1,0 +1,30 @@
+language: perl
+
+perl:
+  - "5.22"
+  - "5.18"
+  - "5.12"
+
+install:
+  # Install conda + bioconda
+  - wget https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - hash -r
+  - conda config --set always_yes yes --set changeps1 no
+  - conda config --add channels bioconda
+  - conda update -q conda
+  - conda info -a
+  # Create environment with FastQC and cutadapt
+  - conda create -q -n test-environment fastqc cutadapt
+  - source activate test-environment
+
+script:
+  - ./trim_galore test_files/illumina_100K.fastq.gz
+  - ./trim_galore test_files/nextera_100K.fastq.gz
+  - ./trim_galore test_files/smallRNA_100K.fastq.gz
+  - ./trim_galore test_files/4_seqs_with_Ns.fastq.gz
+  - ./trim_galore test_files/colorspace_file.fastq
+  # These commands are supposed to fail.
+  - ./trim_galore test_files/truncated.fq.gz && return 1 || return 0
+  - ./trim_galore test_files/empty_file.fastq && return 1 || return 0
