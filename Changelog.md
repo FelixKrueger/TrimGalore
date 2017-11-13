@@ -1,5 +1,10 @@
 # Trim Galore Changelog
 
+### 13-11-17: Version 0.4.5 released
+
+* Trim Galore now dies during the validation step when it encounters paired-end files that are not equal in length
+
+
 ### 28-03-17: Version 0.4.4 released
 
 * Reinstated functionality of option `--rrbs` for single-end RRBS reads which had gone amiss in the previous release. What happened in detail was that RRBS trimming was de facto skipped if there was only a single file specified.
