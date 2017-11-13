@@ -30,7 +30,7 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.4.4';
+my $trimmer_version = '0.4.4_dev';
 
 
 my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n) = process_commandline();
@@ -984,14 +984,25 @@ sub validate_paired_end_files{
       my $seq_1  = <IN1>;
       my $l3_1   = <IN1>;
       my $qual_1 = <IN1>;
-      last unless ($id_1 and $seq_1 and $l3_1 and $qual_1);
       
       my $id_2   = <IN2>;
       my $seq_2  = <IN2>;
       my $l3_2   = <IN2>;
       my $qual_2 = <IN2>;
-      last unless ($id_2 and $seq_2 and $l3_2 and $qual_2);
-      
+
+      if ($id_1 and $seq_1 and $l3_1 and $qual_1 and $id_2 and $seq_2 and $l3_2 and $qual_2){
+	  # all good, got a read from both files
+      }
+      elsif( !($id_1 and $seq_1 and $l3_1 and $qual_1) and ($id_2 and $seq_2 and $l3_2 and $qual_2)){
+	  die "Read 1 output is truncated at sequence count: $count, please check your paired-end input files! Terminating...\n\n";
+      }
+      elsif( !($id_2 and $seq_2 and $l3_2 and $qual_2) and ($id_1 and $seq_1 and $l3_1 and $qual_1)){
+	  die "Read 2 output is truncated at sequence count: $count, please check your paired-end input files! Terminating...\n\n";
+      }      
+      else{
+	  last unless ($id_1 and $seq_1 and $l3_1 and $qual_1);
+	  last unless ($id_2 and $seq_2 and $l3_2 and $qual_2);
+      }
       ++$count;
 
       ## small check if the sequence files appear to be FastQ files
@@ -1802,7 +1813,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 24 March 2017.
+Last modified on 13 November 2017.
 
 HELP
   exit;
