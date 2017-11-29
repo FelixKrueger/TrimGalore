@@ -1167,17 +1167,18 @@ sub file_sanity_check{
   my $qual  = <SANITY>;
 
   unless ($id and $seq and $three and $qual){
-    warn "Input file '$file' seems to be completely empty. Consider respecifying!\n\n";
+      die "Input file '$file' seems to be completely empty. Consider respecifying!\n\n";
   }
-  return;
+  
   chomp $seq;
-
+  
   # testing if the file is a colorspace file in which case we bail
   if ($seq =~ /\d+/){
-    die "File seems to be in SOLiD colorspace format which is not supported by Trim Galore (sequence is: '$seq')! Please use Cutadapt on colorspace files separately and check its documentation!\n\n";
+      die "File seems to be in SOLiD colorspace format which is not supported by Trim Galore (sequence is: '$seq')! Please use Cutadapt on colorspace files separately and check its documentation!\n\n";
   }
-
+  
   close SANITY;
+  
 }
 
 
@@ -1813,7 +1814,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 13 November 2017.
+Last modified on 29 November 2017.
 
 HELP
   exit;
