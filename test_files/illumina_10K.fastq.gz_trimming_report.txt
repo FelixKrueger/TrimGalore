@@ -1,0 +1,197 @@
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: illumina_10K.fastq.gz
+Trimming mode: single-end
+Trim Galore version: 0.4.4_dev
+Cutadapt version: 1.9.1
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'AGATCGGAAGAGC' (Illumina TruSeq, Sanger iPCR; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
+Output file will be GZIP compressed
+
+
+This is cutadapt 1.9.1 with Python 2.7.3
+Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC illumina_10K.fastq.gz
+Trimming 1 adapter with at most 10.0% errors in single-end mode ...
+Finished in 0.32 s (32 us/read; 1.88 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:                  10,000
+Reads with adapters:                     6,382 (63.8%)
+Reads written (passing filters):        10,000 (100.0%)
+
+Total basepairs processed:     1,500,000 bp
+Quality-trimmed:                  13,264 bp (0.9%)
+Total written (filtered):      1,302,140 bp (86.8%)
+
+=== Adapter 1 ===
+
+Sequence: AGATCGGAAGAGC; Type: regular 3'; Length: 13; Trimmed: 6382 times.
+
+No. of allowed errors:
+0-9 bp: 0; 10-13 bp: 1
+
+Bases preceding removed adapters:
+  A: 40.9%
+  C: 16.0%
+  G: 12.0%
+  T: 31.1%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	2549	2500.0	0	2549
+2	216	625.0	0	216
+3	85	156.2	0	85
+4	59	39.1	0	59
+5	43	9.8	0	43
+6	42	2.4	0	42
+7	44	0.6	0	44
+8	41	0.2	0	41
+9	57	0.0	0	54 3
+10	53	0.0	1	47 6
+11	41	0.0	1	37 4
+12	46	0.0	1	44 2
+13	26	0.0	1	23 3
+14	54	0.0	1	51 3
+15	44	0.0	1	40 4
+16	41	0.0	1	35 6
+17	46	0.0	1	39 7
+18	50	0.0	1	48 2
+19	54	0.0	1	52 2
+20	38	0.0	1	36 2
+21	45	0.0	1	37 8
+22	36	0.0	1	30 6
+23	44	0.0	1	41 3
+24	32	0.0	1	27 5
+25	29	0.0	1	26 3
+26	43	0.0	1	38 5
+27	40	0.0	1	36 4
+28	41	0.0	1	35 6
+29	29	0.0	1	29
+30	51	0.0	1	46 5
+31	39	0.0	1	37 2
+32	31	0.0	1	28 3
+33	32	0.0	1	30 2
+34	42	0.0	1	36 6
+35	41	0.0	1	34 7
+36	41	0.0	1	40 1
+37	43	0.0	1	41 2
+38	39	0.0	1	34 5
+39	38	0.0	1	36 2
+40	34	0.0	1	32 2
+41	29	0.0	1	27 2
+42	38	0.0	1	32 6
+43	41	0.0	1	40 1
+44	31	0.0	1	25 6
+45	43	0.0	1	41 2
+46	33	0.0	1	32 1
+47	18	0.0	1	15 3
+48	38	0.0	1	36 2
+49	30	0.0	1	29 1
+50	24	0.0	1	21 3
+51	40	0.0	1	39 1
+52	33	0.0	1	32 1
+53	33	0.0	1	29 4
+54	24	0.0	1	23 1
+55	36	0.0	1	32 4
+56	33	0.0	1	26 7
+57	31	0.0	1	30 1
+58	34	0.0	1	30 4
+59	31	0.0	1	29 2
+60	24	0.0	1	22 2
+61	28	0.0	1	27 1
+62	31	0.0	1	29 2
+63	28	0.0	1	26 2
+64	13	0.0	1	12 1
+65	19	0.0	1	18 1
+66	25	0.0	1	25
+67	28	0.0	1	25 3
+68	27	0.0	1	23 4
+69	31	0.0	1	31
+70	16	0.0	1	15 1
+71	29	0.0	1	28 1
+72	30	0.0	1	28 2
+73	31	0.0	1	29 2
+74	24	0.0	1	23 1
+75	24	0.0	1	22 2
+76	29	0.0	1	27 2
+77	19	0.0	1	16 3
+78	33	0.0	1	31 2
+79	29	0.0	1	24 5
+80	30	0.0	1	30
+81	33	0.0	1	32 1
+82	41	0.0	1	36 5
+83	69	0.0	1	64 5
+84	63	0.0	1	58 5
+85	67	0.0	1	60 7
+86	53	0.0	1	53
+87	24	0.0	1	23 1
+88	34	0.0	1	32 2
+89	16	0.0	1	16
+90	14	0.0	1	14
+91	13	0.0	1	13
+92	10	0.0	1	8 2
+93	19	0.0	1	17 2
+94	9	0.0	1	9
+95	9	0.0	1	8 1
+96	13	0.0	1	13
+97	12	0.0	1	11 1
+98	10	0.0	1	9 1
+99	13	0.0	1	13
+100	12	0.0	1	11 1
+101	12	0.0	1	11 1
+102	9	0.0	1	8 1
+103	12	0.0	1	11 1
+104	13	0.0	1	12 1
+105	8	0.0	1	6 2
+106	11	0.0	1	9 2
+107	12	0.0	1	11 1
+108	11	0.0	1	11
+109	7	0.0	1	5 2
+110	5	0.0	1	5
+111	10	0.0	1	9 1
+112	17	0.0	1	16 1
+113	4	0.0	1	3 1
+114	7	0.0	1	5 2
+115	9	0.0	1	8 1
+116	6	0.0	1	6
+117	6	0.0	1	3 3
+118	10	0.0	1	9 1
+119	9	0.0	1	8 1
+120	4	0.0	1	4
+121	5	0.0	1	5
+122	6	0.0	1	5 1
+123	5	0.0	1	5
+124	10	0.0	1	8 2
+125	9	0.0	1	8 1
+126	6	0.0	1	5 1
+127	4	0.0	1	4
+128	10	0.0	1	9 1
+129	6	0.0	1	6
+130	4	0.0	1	4
+131	7	0.0	1	6 1
+132	5	0.0	1	5
+133	2	0.0	1	2
+134	5	0.0	1	5
+135	2	0.0	1	2
+136	2	0.0	1	2
+137	1	0.0	1	1
+138	2	0.0	1	1 1
+139	2	0.0	1	1 1
+140	2	0.0	1	2
+141	1	0.0	1	1
+142	2	0.0	1	2
+149	1	0.0	1	0 1
+
+
+RUN STATISTICS FOR INPUT FILE: illumina_10K.fastq.gz
+=============================================
+10000 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:	73 (0.7%)
+

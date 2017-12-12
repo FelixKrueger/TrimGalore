@@ -1,0 +1,62 @@
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: smallRNA_100K_R2.fastq.gz
+Trimming mode: paired-end
+Trim Galore version: 0.4.4_dev
+Cutadapt version: 1.9.1
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'TGGAATTCTCGG' (Illumina small RNA adapter; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Optional adapter 2 sequence (only used for read 2 of paired-end files): 'GATCGTCGGACT'
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length for both reads before a sequence pair gets removed: 18 bp
+Output file will be GZIP compressed
+
+
+This is cutadapt 1.9.1 with Python 2.7.3
+Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a GATCGTCGGACT smallRNA_100K_R2.fastq.gz
+Trimming 1 adapter with at most 10.0% errors in single-end mode ...
+Finished in 2.41 s (24 us/read; 2.49 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:                 100,000
+Reads with adapters:                    33,193 (33.2%)
+Reads written (passing filters):       100,000 (100.0%)
+
+Total basepairs processed:     5,100,000 bp
+Quality-trimmed:                   9,993 bp (0.2%)
+Total written (filtered):      5,054,789 bp (99.1%)
+
+=== Adapter 1 ===
+
+Sequence: GATCGTCGGACT; Type: regular 3'; Length: 12; Trimmed: 33193 times.
+
+No. of allowed errors:
+0-9 bp: 0; 10-12 bp: 1
+
+Bases preceding removed adapters:
+  A: 75.1%
+  C: 7.0%
+  G: 12.1%
+  T: 5.8%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	31574	25000.0	0	31574
+2	1335	6250.0	0	1335
+3	164	1562.5	0	164
+4	119	390.6	0	119
+6	1	24.4	0	1
+
+
+RUN STATISTICS FOR INPUT FILE: smallRNA_100K_R2.fastq.gz
+=============================================
+100000 sequences processed in total
+
+Total number of sequences analysed for the sequence pair length validation: 100000
+
+Number of sequence pairs removed because at least one read was shorter than the length cutoff (18 bp): 17169 (17.17%)
