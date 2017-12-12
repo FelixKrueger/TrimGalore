@@ -1,0 +1,102 @@
+
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: nextera_100K.fastq.gz
+Trimming mode: single-end
+Trim Galore version: 0.4.4_dev
+Cutadapt version: 1.9.1
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Adapter sequence: 'CTGTCTCTTATA' (Nextera Transposase sequence; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
+Output file will be GZIP compressed
+
+
+This is cutadapt 1.9.1 with Python 2.7.3
+Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a CTGTCTCTTATA nextera_100K.fastq.gz
+Trimming 1 adapter with at most 10.0% errors in single-end mode ...
+Finished in 2.39 s (24 us/read; 2.51 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:                 100,000
+Reads with adapters:                    37,813 (37.8%)
+Reads written (passing filters):       100,000 (100.0%)
+
+Total basepairs processed:     5,100,000 bp
+Quality-trimmed:                   4,374 bp (0.1%)
+Total written (filtered):      4,965,294 bp (97.4%)
+
+=== Adapter 1 ===
+
+Sequence: CTGTCTCTTATA; Type: regular 3'; Length: 12; Trimmed: 37813 times.
+
+No. of allowed errors:
+0-9 bp: 0; 10-12 bp: 1
+
+Bases preceding removed adapters:
+  A: 20.3%
+  C: 30.5%
+  G: 22.2%
+  T: 26.9%
+  none/other: 0.0%
+
+Overview of removed sequences
+length	count	expect	max.err	error counts
+1	19383	25000.0	0	19383
+2	6510	6250.0	0	6510
+3	2169	1562.5	0	2169
+4	997	390.6	0	997
+5	871	97.7	0	871
+6	943	24.4	0	943
+7	1020	6.1	0	1020
+8	973	1.5	0	973
+9	1120	0.4	0	1118 2
+10	1010	0.1	1	994 16
+11	717	0.0	1	713 4
+12	473	0.0	1	467 6
+13	324	0.0	1	318 6
+14	276	0.0	1	274 2
+15	271	0.0	1	263 8
+16	164	0.0	1	162 2
+17	89	0.0	1	86 3
+18	75	0.0	1	71 4
+19	53	0.0	1	46 7
+20	63	0.0	1	58 5
+21	38	0.0	1	38
+22	49	0.0	1	44 5
+23	39	0.0	1	35 4
+24	38	0.0	1	28 10
+25	29	0.0	1	26 3
+26	12	0.0	1	12
+27	6	0.0	1	3 3
+28	4	0.0	1	3 1
+29	2	0.0	1	1 1
+30	9	0.0	1	8 1
+31	15	0.0	1	1 14
+32	5	0.0	1	0 5
+33	2	0.0	1	0 2
+34	4	0.0	1	0 4
+37	3	0.0	1	0 3
+38	1	0.0	1	0 1
+39	5	0.0	1	0 5
+40	4	0.0	1	0 4
+41	3	0.0	1	0 3
+42	2	0.0	1	0 2
+43	5	0.0	1	0 5
+44	2	0.0	1	0 2
+45	9	0.0	1	0 9
+46	1	0.0	1	0 1
+48	7	0.0	1	0 7
+49	5	0.0	1	0 5
+50	1	0.0	1	0 1
+51	12	0.0	1	10 2
+
+
+RUN STATISTICS FOR INPUT FILE: nextera_100K.fastq.gz
+=============================================
+100000 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:	77 (0.1%)
+
