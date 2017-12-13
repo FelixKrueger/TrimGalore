@@ -3,8 +3,8 @@ SUMMARISING RUN PARAMETERS
 ==========================
 Input filename: illumina_100K.fastq.gz
 Trimming mode: single-end
-Trim Galore version: 0.4.4_dev
-Cutadapt version: 1.9.1
+Trim Galore version: 0.4.5_dev
+Cutadapt version: 1.15
 Quality Phred score cutoff: 20
 Quality encoding type selected: ASCII+33
 Adapter sequence: 'AGATCGGAAGAGC' (Illumina TruSeq, Sanger iPCR; auto-detected)
@@ -14,10 +14,11 @@ Minimum required sequence length before a sequence gets removed: 20 bp
 Output file will be GZIP compressed
 
 
-This is cutadapt 1.9.1 with Python 2.7.3
+This is cutadapt 1.15 with Python 2.7.3
 Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC illumina_100K.fastq.gz
+Running on 1 core
 Trimming 1 adapter with at most 10.0% errors in single-end mode ...
-Finished in 3.14 s (31 us/read; 1.91 M reads/minute).
+Finished in 4.71 s (47 us/read; 1.27 M reads/minute).
 
 === Summary ===
 

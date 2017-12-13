@@ -3,103 +3,65 @@ SUMMARISING RUN PARAMETERS
 ==========================
 Input filename: smallRNA_100K.fastq.gz
 Trimming mode: single-end
-Trim Galore version: 0.4.4_dev
-Cutadapt version: 1.9.1
+Trim Galore version: 0.4.5_dev
+Cutadapt version: 1.15
 Quality Phred score cutoff: 20
 Quality encoding type selected: ASCII+33
-Adapter sequence: 'TGGAATTCTCGG' (Illumina small RNA adapter; auto-detected)
+Adapter sequence: 'AGATCGGAAGAGC' (Illumina TruSeq, Sanger iPCR; auto-detected)
 Maximum trimming error rate: 0.1 (default)
 Minimum required adapter overlap (stringency): 1 bp
-Minimum required sequence length before a sequence gets removed: 18 bp
+Minimum required sequence length before a sequence gets removed: 20 bp
 Output file will be GZIP compressed
 
 
-This is cutadapt 1.9.1 with Python 2.7.3
-Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a TGGAATTCTCGG smallRNA_100K.fastq.gz
+This is cutadapt 1.15 with Python 2.7.3
+Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC smallRNA_100K.fastq.gz
+Running on 1 core
 Trimming 1 adapter with at most 10.0% errors in single-end mode ...
-Finished in 3.00 s (30 us/read; 2.00 M reads/minute).
+Finished in 2.57 s (26 us/read; 2.34 M reads/minute).
 
 === Summary ===
 
 Total reads processed:                 100,000
-Reads with adapters:                    95,333 (95.3%)
+Reads with adapters:                    50,821 (50.8%)
 Reads written (passing filters):       100,000 (100.0%)
 
 Total basepairs processed:     5,100,000 bp
 Quality-trimmed:                   9,993 bp (0.2%)
-Total written (filtered):      2,414,616 bp (47.3%)
+Total written (filtered):      5,014,049 bp (98.3%)
 
 === Adapter 1 ===
 
-Sequence: TGGAATTCTCGG; Type: regular 3'; Length: 12; Trimmed: 95333 times.
+Sequence: AGATCGGAAGAGC; Type: regular 3'; Length: 13; Trimmed: 50821 times.
 
 No. of allowed errors:
-0-9 bp: 0; 10-12 bp: 1
+0-9 bp: 0; 10-13 bp: 1
 
 Bases preceding removed adapters:
-  A: 17.3%
-  C: 21.7%
-  G: 13.9%
-  T: 45.7%
-  none/other: 1.3%
+  A: 5.9%
+  C: 86.9%
+  G: 2.6%
+  T: 4.6%
+  none/other: 0.0%
+WARNING:
+    The adapter is preceded by "C" extremely often.
+    The provided adapter sequence may be incomplete.
+    To fix the problem, add "C" to the beginning of the adapter sequence.
 
 Overview of removed sequences
 length	count	expect	max.err	error counts
-1	1602	25000.0	0	1602
-2	1038	6250.0	0	1038
-3	1333	1562.5	0	1333
-4	357	390.6	0	357
-5	617	97.7	0	617
-6	651	24.4	0	651
-7	212	6.1	0	212
-8	295	1.5	0	295
-9	616	0.4	0	615 1
-10	275	0.1	1	268 7
-11	197	0.0	1	195 2
-12	255	0.0	1	254 1
-13	215	0.0	1	193 22
-14	255	0.0	1	246 9
-15	326	0.0	1	300 26
-16	326	0.0	1	311 15
-17	1737	0.0	1	1715 22
-18	804	0.0	1	792 12
-19	557	0.0	1	545 12
-20	302	0.0	1	294 8
-21	314	0.0	1	306 8
-22	313	0.0	1	293 20
-23	524	0.0	1	481 43
-24	469	0.0	1	429 40
-25	1736	0.0	1	1702 34
-26	3778	0.0	1	3695 83
-27	9628	0.0	1	9468 160
-28	16293	0.0	1	16101 192
-29	23970	0.0	1	23710 260
-30	5878	0.0	1	5793 85
-31	1846	0.0	1	1819 27
-32	849	0.0	1	831 18
-33	617	0.0	1	611 6
-34	1905	0.0	1	1878 27
-35	934	0.0	1	923 11
-36	2745	0.0	1	2721 24
-37	1253	0.0	1	1237 16
-38	853	0.0	1	843 10
-39	780	0.0	1	769 11
-40	1165	0.0	1	1152 13
-41	673	0.0	1	667 6
-42	736	0.0	1	729 7
-43	743	0.0	1	733 10
-44	1018	0.0	1	1009 9
-45	1144	0.0	1	1133 11
-46	894	0.0	1	889 5
-47	622	0.0	1	615 7
-48	141	0.0	1	141
-49	235	0.0	1	232 3
-50	65	0.0	1	63 2
-51	1242	0.0	1	1164 78
+1	25898	25000.0	0	25898
+2	24768	6250.0	0	24768
+3	114	1562.5	0	114
+4	23	390.6	0	23
+5	18	97.7	0	18
 
+WARNING:
+    One or more of your adapter sequences may be incomplete.
+    Please see the detailed output above.
 
 RUN STATISTICS FOR INPUT FILE: smallRNA_100K.fastq.gz
 =============================================
 100000 sequences processed in total
-Sequences removed because they became shorter than the length cutoff of 18 bp:	17169 (17.2%)
+Sequences removed because they became shorter than the length cutoff of 20 bp:	0 (0.0%)
 

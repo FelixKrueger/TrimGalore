@@ -3,8 +3,8 @@ SUMMARISING RUN PARAMETERS
 ==========================
 Input filename: smallRNA_100K_R2.fastq.gz
 Trimming mode: paired-end
-Trim Galore version: 0.4.4_dev
-Cutadapt version: 1.9.1
+Trim Galore version: 0.4.5_dev
+Cutadapt version: 1.15
 Quality Phred score cutoff: 20
 Quality encoding type selected: ASCII+33
 Adapter sequence: 'TGGAATTCTCGG' (Illumina small RNA adapter; auto-detected)
@@ -15,10 +15,11 @@ Minimum required sequence length for both reads before a sequence pair gets remo
 Output file will be GZIP compressed
 
 
-This is cutadapt 1.9.1 with Python 2.7.3
+This is cutadapt 1.15 with Python 2.7.3
 Command line parameters: -f fastq -e 0.1 -q 20 -O 1 -a GATCGTCGGACT smallRNA_100K_R2.fastq.gz
+Running on 1 core
 Trimming 1 adapter with at most 10.0% errors in single-end mode ...
-Finished in 2.41 s (24 us/read; 2.49 M reads/minute).
+Finished in 2.49 s (25 us/read; 2.41 M reads/minute).
 
 === Summary ===
 
