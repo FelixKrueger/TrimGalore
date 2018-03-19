@@ -1,5 +1,9 @@
 # Trim Galore Changelog
 
+### 19-03-18: Version 0.4.5_dev 
+
+* Adapters can now be specified as single bases with a multiplier in squiggly brackets, e.g. -a "A{10}" to trim poly-A tails
+
 ### 13-11-17: Version 0.4.5 released
 
 * Trim Galore now dies during the validation step when it encounters paired-end files that are not equal in length
