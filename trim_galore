@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-17, Felix Krueger (felix.krueger@babraham.ac.uk)
+## This program is Copyright (C) 2012-18, Felix Krueger (felix.krueger@babraham.ac.uk)
 
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 13 December 2017
+## last modified on 19 March 2018
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -1379,7 +1379,7 @@ sub process_commandline{
                                (powered by Cutadapt)
                                   version $trimmer_version
 
-                             Last update: 24 03 2017
+                             Last update: 19 03 2018
 
 VERSION
     exit;
@@ -1441,32 +1441,56 @@ VERSION
   }
 
   if (defined $adapter){
-    unless ($adapter =~ /^[ACTGNXactgnx]+$/){
-      die "Adapter sequence must contain DNA characters only (A,C,T,G or N)!\n";
-    }
-    $adapter = uc$adapter;
 
-    if ($illumina){
-      die "You can't supply an adapter sequence AND use the Illumina universal adapter sequence. Make your choice.\n\n";
-    }
-     if ($nextera){
-      die "You can't supply an adapter sequence AND use the Nextera transposase adapter sequence. Make your choice.\n\n";
-    }
-    if ($small_rna){
-      die "You can't supply an adapter sequence AND use the Illumina small RNA adapter sequence. Make your choice.\n\n";
-    }
+      # The adapter may be given as a single base that occurs a number of times
+      # in the form BASE{number of times}, e.g. "-a A{10}"
+      if ($adapter =~ /^([ACTGN]){(\d+)}$/){
+	  # warn "Base: $1\n# repeats: $2\n";
+	  my $tmp_adapter = uc$1x$2;
+	  
+	  warn "Adapter sequence given as >$adapter< expanded to: >$tmp_adapter<\n";
+	  $adapter = $tmp_adapter;
+      }
+      else{
+	  unless ($adapter =~ /^[ACTGNXactgnx]+$/){
+	      die "Adapter sequence must contain DNA characters only (A,C,T,G or N)!\n";
+	  }
+      }
+      $adapter = uc$adapter;
+      
+      if ($illumina){
+	  die "You can't supply an adapter sequence AND use the Illumina universal adapter sequence. Make your choice.\n\n";
+      }
+      if ($nextera){
+	  die "You can't supply an adapter sequence AND use the Nextera transposase adapter sequence. Make your choice.\n\n";
+      }
+      if ($small_rna){
+	  die "You can't supply an adapter sequence AND use the Illumina small RNA adapter sequence. Make your choice.\n\n";
+      }
   }
 
   if (defined $adapter2){
-    unless ($validate){
-      die "An optional adapter for read 2 of paired-end files requires '--paired' to be specified as well! Please re-specify\n";
-    }
-    unless ($adapter2 =~ /^[ACTGNactgn]+$/){
-      die "Optional adapter 2 sequence must contain DNA characters only (A,C,T,G or N)!\n";
-    }
-    $adapter2 = uc$adapter2;
+      unless ($validate){
+	  die "An optional adapter for read 2 of paired-end files requires '--paired' to be specified as well! Please re-specify\n";
+      }
+      
+      # The adapter may be given as a single base that occurs a number of times
+      # in the form BASE{number of times}, e.g. "-a2 A{10}"
+      if ($adapter2 =~ /^([ACTGN]){(\d+)}$/){
+	  # warn "Base: $1\n# repeats: $2\n";
+	  my $tmp_adapter2 = uc$1x$2;
+	  
+	  warn "Adapter2 sequence given as >$adapter2< expanded to: >$tmp_adapter2<\n";
+	  $adapter2 = $tmp_adapter2;
+      }
+      else{
+	  unless ($adapter2 =~ /^[ACTGNactgn]+$/){
+	      die "Optional adapter 2 sequence must contain DNA characters only (A,C,T,G or N)!\n";
+	  }
+      }
+      $adapter2 = uc$adapter2;
   }
-
+  
   ### LENGTH CUTOFF
   # this gets set right at the start after the adapter auto-detection has been concluded
 
@@ -1648,12 +1672,14 @@ trim_galore [options] <filename(s)>
                         try to auto-detect whether the Illumina universal, Nextera transposase or Illumina
                         small RNA adapter sequence was used. Also see '--illumina', '--nextera' and
                         '--small_rna'. If no adapter can be detected within the first 1 million sequences
-                        of the first file specified Trim Galore defaults to '--illumina'.
+                        of the first file specified Trim Galore defaults to '--illumina'. A single base
+                        may also be given as e.g. -a A{10}, to be expanded to -a AAAAAAAAAA.
 
 -a2/--adapter2 <STRING> Optional adapter sequence to be trimmed off read 2 of paired-end files. This
                         option requires '--paired' to be specified as well. If the libraries to be trimmed
                         are smallRNA then a2 will be set to the Illumina small RNA 5' adapter automatically
-                        (GATCGTCGGACT).
+                        (GATCGTCGGACT). A single base may also be given as e.g. -a2 A{10}, to be expanded
+                        to -a2 AAAAAAAAAA.
 
 --illumina              Adapter sequence to be trimmed is the first 13bp of the Illumina universal adapter
                         'AGATCGGAAGAGC' instead of the default auto-detection of adapter sequence.
@@ -1814,7 +1840,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 29 November 2017.
+Last modified on 19 March 2018.
 
 HELP
   exit;
