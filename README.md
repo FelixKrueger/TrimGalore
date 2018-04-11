@@ -16,9 +16,9 @@ cutadapt --version
 # Check that FastQC is installed
 fastqc -v
 # Install Trim Galore!
-curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.4.3.tar.gz -o trim_galore.tar.gz
+curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.4.5.tar.gz -o trim_galore.tar.gz
 tar xvzf trim_galore.tar.gz
-mv TrimGalore-0.4.3/trim_galore /usr/bin
+mv TrimGalore-0.4.5/trim_galore /usr/bin
 ```
 
 ## Documentation
