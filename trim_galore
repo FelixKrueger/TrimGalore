@@ -316,7 +316,7 @@ sub trim{
 
   warn "\n";
   print REPORT "\n";
-  sleep (3);
+  # sleep (3);
 
   my $temp;
 
@@ -326,7 +326,7 @@ sub trim{
       ### Skipping quality filtering for RRBS libraries if a quality cutoff of 0 was specified
       if ($cutoff == 0){
 	  warn "Quality cutoff selected was 0    -    Skipping quality trimming altogether\n\n";
-	  sleep (3);
+	  # sleep (3);
       }
       else{
 	  
@@ -336,7 +336,7 @@ sub trim{
 	  open (TEMP,'>',$output_dir.$temp) or die "Can't write to '$temp': $!";
 	  
 	  warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
-	  sleep (1);
+	  # sleep (1);
 	  
 	  open (QUAL,"$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
 
@@ -416,19 +416,19 @@ sub trim{
 	  ### Figure out whether current file counts as read 1 or read 2 of paired-end files
 	  if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 	      warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-	      sleep (1);
+	      #sleep (1);
 	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 	  }
 	  else{                            # this is read 2 of a pair
 	      warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$a2' from file $temp <<< \n";
-	      sleep (1);
+	      #sleep (1);
 	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 	  }
       }
       ### Using the same adapter for both read 1 and read 2
       else{
 	  warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-	  sleep (3);
+	  # sleep (3);
 	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
       }
       
@@ -586,19 +586,19 @@ sub trim{
 	  ### Figure out whether current file counts as read 1 or read 2 of paired-end files
 	  if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 	      warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
-	      sleep (1);
+	      #sleep (1);
 	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 	  }
 	  else{                            # this is read 2 of a pair
 	      warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
-	      sleep (1);
+	      #sleep (1);
 	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
 	  }
       }
       ### Using the same adapter for both read 1 and read 2
       else{
 	  warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
-	  sleep (1);
+	  #sleep (1);
 	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
       }
       
@@ -780,7 +780,7 @@ sub trim{
   unless($validate){
       if ($fastqc){
 	  warn "\n  >>> Now running FastQC on the data <<<\n\n";
-	  sleep (1);
+	  # sleep (1);
 	  if ($fastqc_args){
 	      system ("$path_to_fastqc $fastqc_args $output_dir$output_filename");
 	  }
@@ -807,7 +807,7 @@ sub trim{
       
       if ($file_1 and $file_2){
 	  warn "Validate paired-end files $file_1 and $file_2\n";
-	  sleep (1);
+	  # sleep (1);
 	  
 	  my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
 	  
@@ -815,7 +815,7 @@ sub trim{
 	  if ($fastqc){
 	      
 	    warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
-	    sleep (3);
+	    #sleep (3);
 	    
 	    if ($fastqc_args){
 		system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
@@ -825,7 +825,7 @@ sub trim{
 	    }
 	    
 	    warn "\n  >>> Now running FastQC on the validated data $val_2<<<\n\n";
-	    sleep (3);
+	    #sleep (3);
 	    
 	    if ($fastqc_args){
 		system ("$path_to_fastqc $fastqc_args $output_dir$val_2");
@@ -841,7 +841,7 @@ sub trim{
 	  unlink "$output_dir$file_2";
 	  
 	  warn "\n",'='x100,"\n\n";
-	  sleep (1);
+	  # sleep (1);
 	  
 	  $file_1 = undef; # setting file_1 and file_2 to undef once validation is completed
 	  $file_2 = undef;
@@ -872,7 +872,7 @@ sub validate_paired_end_files{
   }
   
   warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
-  sleep (1);
+  # sleep (1);
   
   my $out_1 = $file_1;
   my $out_2 = $file_2;
@@ -1405,7 +1405,7 @@ VERSION
   unless ($phred33 or $phred64){
     warn "No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)\n\n";
     $phred_encoding = 33;
-    sleep (1);
+    # sleep (1);
   }
 
   ### NON-DIRECTIONAL RRBS
@@ -1610,7 +1610,7 @@ VERSION
       unless ($non_directional){ # only setting this for directional mode
 	  if ($validate){
 	      unless (defined $clip_r2){ # user specified R2 clipping overrides the default setting of --clip_r2 2  # added 07 Dec 2016
-		  warn "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)\n"; sleep(1);
+		  warn "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)\n"; # sleep(1);
 		  $clip_r2 = 2;
 	      }
 	  }
