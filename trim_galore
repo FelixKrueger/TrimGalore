@@ -192,7 +192,7 @@ sub trim{
     warn "Maximum trimming error rate: $error_rate\n";
   }
 
-  if ($maxn){
+  if (defined $maxn){
     warn "Maximum number of tolerated Ns: $maxn\n";
   }
 
@@ -648,7 +648,7 @@ sub trim{
 		  }
 	      }
 
-	      if ($maxn){
+	      if (defined $maxn){
 		  my $n_count = Ncounter($seq);
 		  # warn "Checking for Ns: Found $n_count\n";
 		  if ($n_count > $maxn){
@@ -750,7 +750,7 @@ sub trim{
   else{           ### Single-end file
       warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
       print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-      if ($maxn){
+      if (defined $maxn){
 	  warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
 	  print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
       }
@@ -1045,7 +1045,7 @@ sub validate_paired_end_files{
 	  }
       }	
       
-      if ($maxn){
+      if (defined $maxn){
 	  
 	  # Read 1
 	  my $n_count = Ncounter($seq_1);
@@ -1118,7 +1118,7 @@ sub validate_paired_end_files{
   
   warn "Total number of sequences analysed: $count\n\n";
   warn "Number of sequence pairs removed because at least one read was shorter than the length cutoff ($length_cutoff bp): $sequence_pairs_removed ($percentage%)\n";
-  if ($maxn){
+  if (defined $maxn){
       warn "Number of sequence pairs removed because at least one read contained more N(s) than the specified limit of $maxn: $too_many_N_pairs ($percentage_Ns%)\n";
       print REPORT "Number of sequence pairs removed because at least one read contained more N(s) than the specified limit of $maxn: $too_many_N_pairs ($percentage_Ns%)\n";
   }
