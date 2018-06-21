@@ -4,6 +4,8 @@
 
 * Adapters can now be specified as single bases with a multiplier in squiggly brackets, e.g. -a "A{10}" to trim poly-A tails
 
+* Added option `--hardtrim5 INT` to enable hard-clipping from the 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produce hard-trimmed FastQ files ending in `.{INT}bp.fq(.gz)`. 
+
 ### 13-11-17: Version 0.4.5 released
 
 * Trim Galore now dies during the validation step when it encounters paired-end files that are not equal in length
