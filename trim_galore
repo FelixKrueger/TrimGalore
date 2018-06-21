@@ -25,21 +25,103 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 22 May 2018
+## last modified on 21 June 2018
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.4.5_dev';
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
 USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    for more options\n\n" unless (@filenames);
 file_sanity_check($filenames[0]);
 
+if (defined $hardtrim5){
+    warn "Hard-trimming from 5' end selected. File(s) will be trimmed to $hardtrim5 bp from the 5' end, and Trim Galore will then exit.\n\n";
+    foreach my $file(@filenames){
+	hardtrim_from_5prime_end($file);
+    }
+    exit;
+}
 
+sub hardtrim_from_5prime_end{
+  
+    my $filename = shift;
+    warn "Input file name:  $filename\n";
+    
+    my $in; # filehandle
+    my $hardtrim_5; # filehandle
+
+    if ($filename =~ /gz$/){
+	open ($in,"gunzip -c $filename |") or die "Couldn't read from file $!";
+    }
+    else{
+	open ($in,$filename) or die "Couldn't read from file $!";
+    }
+    
+    ### OUTPUT FILE
+    my $output_filename = (split (/\//,$filename))[-1];
+    # warn "Output file name: $output_filename\n";
+    
+    if ($output_filename =~ /\.fastq$/){
+	$output_filename =~ s/\.fastq$/.${hardtrim5}bp.fq/;
+    }
+    elsif ($output_filename =~ /\.fastq\.gz$/){
+	$output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp.fq/;
+    }
+    elsif ($output_filename =~ /\.fq$/){
+	$output_filename =~ s/\.fq$/.${hardtrim5}bp.fq/;
+    }
+    elsif ($output_filename =~ /\.fq\.gz$/){
+	$output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp.fq/;
+    }
+    else{
+	$output_filename =~ s/$/.${hardtrim5}bp.fq/;
+    }
+    
+    if ($gzip or $filename =~ /\.gz$/){
+	if ($dont_gzip){
+	    open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+	}
+	else{
+	    $output_filename .= '.gz';
+	    open ($hardtrim_5,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+	}
+    }
+    else{
+	open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+    }
+    warn "Writing trimmed version (using the first $hardtrim5 high quality bp only) of the input file '$filename' to '$output_filename'\n";
+  
+    my $count = 0;
+    
+    while (1){
+	my $identifier = <$in>;
+	my $sequence = <$in>;
+	my $identifier2 = <$in>;
+	my $quality_score = <$in>;
+	
+	last unless ($identifier and $sequence and $identifier2 and $quality_score);
+	++$count;
+	
+	chomp $sequence;
+	chomp $quality_score;
+	
+	my $trimmed_sequence = substr($sequence,0,$hardtrim5)."\n";           # from the start to the $hardtrim
+	my $trimmed_quality_score = substr($quality_score,0,$hardtrim5)."\n"; # from the start to the $hardtrim
+	
+	print {$hardtrim_5} join ('',$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score);
+	
+    }
+    close $in or warn "Failed to close filehandle for $filename";
+    close $hardtrim_5 or die "Failed to close out-filehandle hardtrim_5: $!";
+    
+    warn "\nFinished writing out converted version of the FastQ file $filename ($count sequences in total)\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+    
+}
 
 ########################################################################
 
@@ -294,8 +376,8 @@ sub trim{
     print REPORT "Running FastQC on the data once trimming has completed\n";
 
     if ($fastqc_args){
-      warn "Running FastQC with the following extra arguments: '$fastqc_args'\n";
-      print REPORT  "Running FastQC with the following extra arguments: $fastqc_args\n";
+	warn "Running FastQC with the following extra arguments: '$fastqc_args'\n";
+	print REPORT  "Running FastQC with the following extra arguments: $fastqc_args\n";
     }
   }
 
@@ -1316,6 +1398,7 @@ sub process_commandline{
   my $max_length;
   my $maxn;
   my $trimn;
+  my $hardtrim5;
 
   my $command_line = GetOptions ('help|man' => \$help,
 				 'q|quality=i' => \$quality,
@@ -1354,6 +1437,7 @@ sub process_commandline{
 				 'max_length=i' => \$max_length,
 				 'max_n=i'      => \$maxn,
 				 'trim-n'      => \$trimn,
+				 'hardtrim5=i'      => \$hardtrim5,
       );
   
   ### EXIT ON ERROR if there were errors with any of the supplied options
@@ -1374,11 +1458,11 @@ sub process_commandline{
   if ($version){
     print << "VERSION";
 
-                          Quality-/Adapter-/RRBS-Trimming
-                               (powered by Cutadapt)
+                        Quality-/Adapter-/RRBS-/Hard-Trimming
+                                (powered by Cutadapt)
                                   version $trimmer_version
 
-                             Last update: 19 03 2018
+                               Last update: 21 06 2018
 
 VERSION
     exit;
@@ -1402,9 +1486,10 @@ VERSION
     $phred_encoding = 64;
   }
   unless ($phred33 or $phred64){
-    warn "No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)\n\n";
-    $phred_encoding = 33;
-    # sleep (1);
+      unless (defined $hardtrim5){   # we don't need warnings if we simply hard-trim a file
+	  warn "No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)\n\n";
+      }
+      $phred_encoding = 33;
   }
 
   ### NON-DIRECTIONAL RRBS
@@ -1618,8 +1703,16 @@ VERSION
   else{
       $rrbs = 0;
   }
+
+  if (defined $hardtrim5){
+      unless ($hardtrim5 > 0 and $hardtrim5 < 1000){
+	  die "Hard-trim from 5'-end selected: >$hardtrim5< bp. Please ensure a hard-trimming range between 1 and 999 bp. Please try again...\n\n~~~~~~~~~~~~~~~~~~~~~~\n"
+      }
+      
+  }
   
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n);
+
+  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5);
 }
 
 sub Ncounter{
@@ -1752,6 +1845,11 @@ trim_galore [options] <filename(s)>
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
 
+--hardtrim5 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
+                        to <int> bp from the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit.
+                        Hard-trimmed output files will end in .<int>.fq(.gz).
+                       
+
 --path_to_cutadapt </path/to/cutadapt>     You may use this option to specify a path to the Cutadapt executable,
                         e.g. /my/home/cutadapt-1.7.1/bin/cutadapt. Else it is assumed that Cutadapt is in
                         the PATH.
@@ -1839,7 +1937,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 22 May 2018.
+Last modified on 21 June 2018.
 
 HELP
   exit;
