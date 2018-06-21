@@ -227,25 +227,15 @@ sub clockwork{
 	print ${read2_fh} "$two3";
 	print ${read2_fh} "$qual2\n"; 
 
-       # sleep(1);
-
+	# sleep(1);
+	
 	$r1{$r1_barcode}++;
 	$r2{$r2_barcode}++;
 
 	$fix1{$r1_fix}++;
 	$fix2{$r2_fix}++;
-
-	### Now looking for the R2 barcode and fixed sequence in R1
-	my $compound = $r2_barcode.$r2_fix; # start of R2, should also be found as reverse complement in R1
-	my $rc = rc($compound); # string to look for in R1
-	#  warn "$two2\n          $seq2\n$compound\n$rc\n"; sleep(1);
-
-	next unless ($seq1 =~ /$rc/);
-	$r1_contains_rc++;
-
     }
-
-
+    warn "Sequences processed in total: $count\nthereof had fixed sequence CAGT in both R1 and R2:\t $filtered_count ($perc%)\n"; 
 }
 
 sub rc{
