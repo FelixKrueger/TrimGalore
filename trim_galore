@@ -32,7 +32,7 @@ BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.4.5_dev';
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -47,81 +47,214 @@ if (defined $hardtrim5){
     exit;
 }
 
-sub hardtrim_from_5prime_end{
-  
-    my $filename = shift;
-    warn "Input file name:  $filename\n";
+if ($clock){
+    warn "IT'S TIME FOR THE CLOCK!!!\t\t\t\t\t\t\t\t\t[pun intended]\n\n"; 
     
-    my $in; # filehandle
-    my $hardtrim_5; # filehandle
+    while (@ARGV){   
+	my $in1 = shift @ARGV;
+	my $in2 = shift @ARGV;
+	clockwork($in1,$in2);
+    }
+    warn "Pre-processing of all clock samples finished\n";
+    exit;
+}
 
-    if ($filename =~ /gz$/){
-	open ($in,"gunzip -c $filename |") or die "Couldn't read from file $!";
+sub clockwork{
+
+    ### FILEHANDLES
+    my ($in1_fh,$in2_fh); # input filehandles
+    my ($read1_fh,$read2_fh); # output filehandles
+    
+    ### INPUT FILES
+    my ($in1,$in2) = @_;
+    if ($in1 =~ /\.gz$/){
+	open ($in1_fh,"gunzip -c $in1 |") or die "Failed to read from file $in1: $!";
     }
     else{
-	open ($in,$filename) or die "Couldn't read from file $!";
+	open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
     }
-    
-    ### OUTPUT FILE
-    my $output_filename = (split (/\//,$filename))[-1];
-    # warn "Output file name: $output_filename\n";
-    
-    if ($output_filename =~ /\.fastq$/){
-	$output_filename =~ s/\.fastq$/.${hardtrim5}bp.fq/;
-    }
-    elsif ($output_filename =~ /\.fastq\.gz$/){
-	$output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp.fq/;
-    }
-    elsif ($output_filename =~ /\.fq$/){
-	$output_filename =~ s/\.fq$/.${hardtrim5}bp.fq/;
-    }
-    elsif ($output_filename =~ /\.fq\.gz$/){
-	$output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp.fq/;
+    if ($in2 =~ /\.gz$/){
+	open ($in2_fh,"gunzip -c $in2 |") or die "Failed to read from file $in2: $!";
     }
     else{
-	$output_filename =~ s/$/.${hardtrim5}bp.fq/;
+	open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
     }
+    # warn " Input file name 1: $in1\n";
+    # warn " Input file name 2: $in2\n"; 
     
-    if ($gzip or $filename =~ /\.gz$/){
+    ### OUTPUT FILES
+    my $out1 = (split (/\//,$in1))[-1];
+    my $out2 = (split (/\//,$in2))[-1];
+    
+    $out1 =~ s/(\.fastq$|\.fastq\.gz$)//; 
+    $out1 =~ s/(\.fq$|\.fq\.gz$)//; 
+    $out1 .= '.clock_UMI.R1.fq'; # appending to the end
+
+    $out2 =~ s/(\.fastq$|\.fastq\.gz$)//; 
+    $out2 =~ s/(\.fq$|\.fq\.gz$)//; 
+    $out2 .= '.clock_UMI.R2.fq'; # appending to the end
+
+
+    ### READ 1
+    if ($gzip or $in1 =~ /\.gz$/){
 	if ($dont_gzip){
-	    open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+	    open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
 	}
 	else{
-	    $output_filename .= '.gz';
-	    open ($hardtrim_5,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+	    $out1 .= '.gz';
+	    open ($read1_fh,"| gzip -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
 	}
     }
     else{
-	open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+	open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
     }
-    warn "Writing trimmed version (using the first $hardtrim5 high quality bp only) of the input file '$filename' to '$output_filename'\n";
-  
+    warn "Writing dual trimmed version of the input file '$in1' to '$out1'\n";
+
+    ### READ 2
+    if ($gzip or $in2 =~ /\.gz$/){
+	if ($dont_gzip){
+	    open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n"; 
+	}
+	else{
+	    $out2 .= '.gz';
+	    open ($read2_fh,"| gzip -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
+	}
+    }
+    else{
+	open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
+    }
+    warn "Writing dual trimmed version of the input file '$in2' to '$out2'\n~~~~~~~~~~~~~~~~~~~~\n\n";
+    # warn "Output file name 1: $out1\n";
+    # warn "Output file name 2: $out2\n";
+   
+
+    my %freqs; 
+    my $umi_1;
+    my $umi_2;
+
+    # open ($out2,"| gzip -c - > $out1") or die $!;
+    # open (OUT2,"| gzip -c - > $out2") or die $!;
+    
+    # print "Processing files $in1 and $in2\n";
+    my %r1; # storing the barcodes for R1
+    my %r2; # storing the barcodes for R2
+    
+    my %fix1; # storing the fixed sequence (CAGT + A from A-tailing) of R1
+    my %fix2; # storing the fixed sequence (CAGT + A from A-tailing) of R2
+    
     my $count = 0;
+    my $filtered_count = 0;
+    my $r1_contains_rc = 0;
     
     while (1){
-	my $identifier = <$in>;
-	my $sequence = <$in>;
-	my $identifier2 = <$in>;
-	my $quality_score = <$in>;
 	
-	last unless ($identifier and $sequence and $identifier2 and $quality_score);
-	++$count;
+	my $one1 = <$in1_fh>;
+	my $one2 = <$in1_fh>;
+	my $one3 = <$in1_fh>;
+	my $one4 = <$in1_fh>;
 	
-	chomp $sequence;
-	chomp $quality_score;
+	my $two1 = <$in2_fh>;
+	my $two2 = <$in2_fh>;
+	my $two3 = <$in2_fh>;
+	my $two4 = <$in2_fh>;
+      
+	last unless  ($one4 and $two4);
+	chomp $one2; # sequence
+	chomp $two2; # sequence
 	
-	my $trimmed_sequence = substr($sequence,0,$hardtrim5)."\n";           # from the start to the $hardtrim
-	my $trimmed_quality_score = substr($quality_score,0,$hardtrim5)."\n"; # from the start to the $hardtrim
+	chomp $one1; # read ID, need to append UMIs to the read ID
+	chomp $two1; # read ID, need to append UMIs to the read ID
 	
-	print {$hardtrim_5} join ('',$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score);
+	chomp $one4; # quality
+	chomp $two4; # quality
 	
+	++$count; # sequence count
+	
+	my $r1_barcode;
+	my $r2_barcode;
+	my $r1_fix;
+	my $r2_fix;
+	
+	
+	$r1_barcode = substr($one2,0,8);
+	$r2_barcode = substr($two2,0,8);
+	$r1_fix = substr($one2,8,4);
+	$r2_fix = substr($two2,8,4);
+	# warn "$one2\n$two2\n$r1_barcode\t$r1_fix\n$r2_barcode\t$r2_fix\n\n";sleep(1);
+	
+	# this part of code simply counts the different types of sequence that occurred at the constant region where we expected
+	# to read CAGT in both reads. Both R1 and R2 are taken into account at the same time
+	unless ($r1_fix eq 'CAGT' and $r2_fix eq 'CAGT'){
+	    $freqs{$r1_fix}++;
+	    $freqs{$r2_fix}++;
+	    # next;
+	}
+	$filtered_count++;
+
+	### READs should look like this:
+	# 0        8    12 13 INDEX position
+	# UUUUUUUU CAGT A  FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+	# where:
+	#    U = UMI base
+	# CAGT = fixed sequence
+	#    A = A-tail
+	# FFFF = RRBS-fragment to be aligned
+
+	### Capturing the sequence after the A from A-tailing (FFFFFFFFFFFFFF...)
+
+	my $seq1 = substr($one2,13); # truncated sequence without UMIs or fixed sequence 
+	my $seq2 = substr($two2,13);
+	
+	my $qual1 = substr($one4,13); # truncated quality string without barcode or fixed sequence
+	my $qual2 = substr($two4,13);
+
+	# warn "$one1\n";
+	$one1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
+	#warn "$one1\n";
+
+	#warn "$two1\n";
+	$two1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
+	#warn "$two1\n";
+	#   warn "$one2\n          $seq1\n$one4\n          $qual1\n~~\n$two2\n          $seq2\n$two4\n          $qual2\n\n";sleep(1);
+
+	print ${read1_fh} "$one1\n";
+	print ${read1_fh} "$seq1\n";
+	print ${read1_fh} "$one3";
+	print ${read1_fh} "$qual1\n"; 
+	
+	print ${read2_fh} "$two1\n";
+	print ${read2_fh} "$seq2\n";
+	print ${read2_fh} "$two3";
+	print ${read2_fh} "$qual2\n"; 
+
+       # sleep(1);
+
+	$r1{$r1_barcode}++;
+	$r2{$r2_barcode}++;
+
+	$fix1{$r1_fix}++;
+	$fix2{$r2_fix}++;
+
+	### Now looking for the R2 barcode and fixed sequence in R1
+	my $compound = $r2_barcode.$r2_fix; # start of R2, should also be found as reverse complement in R1
+	my $rc = rc($compound); # string to look for in R1
+	#  warn "$two2\n          $seq2\n$compound\n$rc\n"; sleep(1);
+
+	next unless ($seq1 =~ /$rc/);
+	$r1_contains_rc++;
+
     }
-    close $in or warn "Failed to close filehandle for $filename";
-    close $hardtrim_5 or die "Failed to close out-filehandle hardtrim_5: $!";
-    
-    warn "\nFinished writing out converted version of the FastQ file $filename ($count sequences in total)\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
-    
+
+
 }
+
+sub rc{
+    my $string = shift;
+    $string = reverse($string);
+    $string =~ tr/GATC/CTAG/;
+    return $string;
+}
+
 
 ########################################################################
 
@@ -931,6 +1064,82 @@ sub trim{
   close REPORT or warn "Failed to close filehandle REPORT: $!\n"; 
 }
 
+sub hardtrim_from_5prime_end{
+  
+    my $filename = shift;
+    warn "Input file name:  $filename\n";
+    
+    my $in; # filehandle
+    my $hardtrim_5; # filehandle
+
+    if ($filename =~ /gz$/){
+	open ($in,"gunzip -c $filename |") or die "Couldn't read from file $!";
+    }
+    else{
+	open ($in,$filename) or die "Couldn't read from file $!";
+    }
+    
+    ### OUTPUT FILE
+    my $output_filename = (split (/\//,$filename))[-1];
+    # warn "Output file name: $output_filename\n";
+    
+    if ($output_filename =~ /\.fastq$/){
+	$output_filename =~ s/\.fastq$/.${hardtrim5}bp.fq/;
+    }
+    elsif ($output_filename =~ /\.fastq\.gz$/){
+	$output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp.fq/;
+    }
+    elsif ($output_filename =~ /\.fq$/){
+	$output_filename =~ s/\.fq$/.${hardtrim5}bp.fq/;
+    }
+    elsif ($output_filename =~ /\.fq\.gz$/){
+	$output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp.fq/;
+    }
+    else{
+	$output_filename =~ s/$/.${hardtrim5}bp.fq/;
+    }
+    
+    if ($gzip or $filename =~ /\.gz$/){
+	if ($dont_gzip){
+	    open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+	}
+	else{
+	    $output_filename .= '.gz';
+	    open ($hardtrim_5,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+	}
+    }
+    else{
+	open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+    }
+    warn "Writing trimmed version (using the first $hardtrim5 high quality bp only) of the input file '$filename' to '$output_filename'\n";
+  
+    my $count = 0;
+    
+    while (1){
+	my $identifier = <$in>;
+	my $sequence = <$in>;
+	my $identifier2 = <$in>;
+	my $quality_score = <$in>;
+	
+	last unless ($identifier and $sequence and $identifier2 and $quality_score);
+	++$count;
+	
+	chomp $sequence;
+	chomp $quality_score;
+	
+	my $trimmed_sequence = substr($sequence,0,$hardtrim5)."\n";           # from the start to the $hardtrim
+	my $trimmed_quality_score = substr($quality_score,0,$hardtrim5)."\n"; # from the start to the $hardtrim
+	
+	print {$hardtrim_5} join ('',$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score);
+	
+    }
+    close $in or warn "Failed to close filehandle for $filename";
+    close $hardtrim_5 or die "Failed to close out-filehandle hardtrim_5: $!";
+    
+    warn "\nFinished writing out converted version of the FastQ file $filename ($count sequences in total)\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+    
+}
+
 sub validate_paired_end_files{
 
   my $file_1 = shift;
@@ -1398,7 +1607,9 @@ sub process_commandline{
   my $max_length;
   my $maxn;
   my $trimn;
-  my $hardtrim5;
+  my $hardtrim5; 
+  my $hardtrim3;
+  my $clock;
 
   my $command_line = GetOptions ('help|man' => \$help,
 				 'q|quality=i' => \$quality,
@@ -1438,6 +1649,9 @@ sub process_commandline{
 				 'max_n=i'      => \$maxn,
 				 'trim-n'      => \$trimn,
 				 'hardtrim5=i'      => \$hardtrim5,
+				 # 'hardtrim=i'      => \$hardtrim3,
+				 'clock|casio|breitling' => \$clock,
+				 
       );
   
   ### EXIT ON ERROR if there were errors with any of the supplied options
@@ -1712,7 +1926,7 @@ VERSION
   }
   
 
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5);
+  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock);
 }
 
 sub Ncounter{
