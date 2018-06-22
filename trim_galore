@@ -55,7 +55,7 @@ if ($clock){
 	my $in2 = shift @ARGV;
 	clockwork($in1,$in2);
     }
-    warn "Pre-processing of all clock samples finished\n";
+    warn "\nPre-processing of all clock samples finished. Exiting Trim Galore run...\n\n";
     exit;
 }
 
@@ -123,7 +123,7 @@ sub clockwork{
     else{
 	open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
     }
-    warn "Writing dual trimmed version of the input file '$in2' to '$out2'\n~~~~~~~~~~~~~~~~~~~~\n\n";
+    warn "Writing dual trimmed version of the input file '$in2' to '$out2'\n                 ---\n";
     # warn "Output file name 1: $out1\n";
     # warn "Output file name 2: $out2\n";
    
@@ -170,6 +170,9 @@ sub clockwork{
 	
 	++$count; # sequence count
 	
+	if ($count % 1000000 ==0){
+	    warn "Processed $count sequences so far...\n";
+	}
 	my $r1_barcode;
 	my $r2_barcode;
 	my $r1_fix;
@@ -187,13 +190,14 @@ sub clockwork{
 	unless ($r1_fix eq 'CAGT' and $r2_fix eq 'CAGT'){
 	    $freqs{$r1_fix}++;
 	    $freqs{$r2_fix}++;
-	    # next;
+	    $filtered_count++;
 	}
-	$filtered_count++;
 
-	### READs should look like this:
-	# 0        8    12 13 INDEX position
-	# UUUUUUUU CAGT A  FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+	### BOTH READ1 AND READ2 should look like this:
+
+	# 0        8    12 13                                    INDEX position
+	# UUUUUUUU CAGT A  FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF   SEQUENCE
+
 	# where:
 	#    U = UMI base
 	# CAGT = fixed sequence
@@ -235,7 +239,16 @@ sub clockwork{
 	$fix1{$r1_fix}++;
 	$fix2{$r2_fix}++;
     }
-    warn "Sequences processed in total: $count\nthereof had fixed sequence CAGT in both R1 and R2:\t $filtered_count ($perc%)\n"; 
+
+    my $perc;
+    if ($count){   
+	$perc = sprintf("%.2f",$filtered_count/$count * 100);
+    }
+    else{
+	$perc = 'N/A';
+    }
+    
+    warn "Sequences processed in total: $count\nthereof had fixed sequence CAGT in both R1 and R2:\t $filtered_count ($perc%)\n     ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n"; 
 }
 
 sub rc{
@@ -1666,7 +1679,7 @@ sub process_commandline{
                                 (powered by Cutadapt)
                                   version $trimmer_version
 
-                               Last update: 21 06 2018
+                               Last update: 22 06 2018
 
 VERSION
     exit;
@@ -1690,7 +1703,7 @@ VERSION
     $phred_encoding = 64;
   }
   unless ($phred33 or $phred64){
-      unless (defined $hardtrim5){   # we don't need warnings if we simply hard-trim a file
+      unless (defined $hardtrim5 or $clock){   # we don't need warnings if we simply hard-trim or Clock-trim a file
 	  warn "No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)\n\n";
       }
       $phred_encoding = 33;
@@ -1914,7 +1927,17 @@ VERSION
       }
       
   }
-  
+ 
+  ### The  
+  if ($clock){
+      if ($validate){ # already selected as paired-end mode
+	  # Fine. Currently, the Clock protocol requires paired-end reads with dual UMIs
+      }
+      else{
+	  die "\nOption --clock selected, but the processing is still set to single-end mode. The current clock protocol requires paired-end sequencing with dual unique molecular identifiers (UMIs) though. Please respecify...\n\n";
+      }
+  }
+
 
   return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock);
 }
@@ -2049,15 +2072,41 @@ trim_galore [options] <filename(s)>
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
 
---hardtrim5 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
-                        to <int> bp from the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit.
-                        Hard-trimmed output files will end in .<int>.fq(.gz).
-                       
+                     
 
 --path_to_cutadapt </path/to/cutadapt>     You may use this option to specify a path to the Cutadapt executable,
                         e.g. /my/home/cutadapt-1.7.1/bin/cutadapt. Else it is assumed that Cutadapt is in
                         the PATH.
 
+SPECIFIC TRIMMING - without adapter/quality trimming
+
+--hardtrim5 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
+                        to <int> bp from the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit.
+                        Hard-trimmed output files will end in .<int>.fq(.gz).
+  
+--clock                 In it's current implementation, the dual-UMI RRBS reads come in the following format:
+
+                        Read 1  5' UUUUUUUU CAGTA FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF TACTG UUUUUUUU 3'
+			Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ATGAC UUUUUUUU 5'
+
+                        Where UUUUUUUU is a random 8-mer unique molecular identifier (UMI), CAGTA is a constant region,
+                        and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The UMIs for Read 1 (R1) and
+                        Read 2 (R2), as well as the fixed sequences (F1 or F2), are written into the read ID and 
+                        removed from the actual sequence. Here is an example:
+                   
+                        R1: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT
+                            ATCTAGTTCAGTACGGTGTTTTCGAATTAGAAAAATATGTATAGAGGAAATAGATATAAAGGCGTATTCGTTATTG
+                        R2: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT
+                            CAATTTTGCAGTACAAAAATAATACCTCCTCTATTTATCCAAAATCACAAAAAACCACCCACTTAACTTTCCCTAA
+
+                        R1: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT:R1:ATCTAGTT:R2:CAATTTTG:F1:CAGT:F2:CAGT
+                                         CGGTGTTTTCGAATTAGAAAAATATGTATAGAGGAAATAGATATAAAGGCGTATTCGTTATTG
+                        R2: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT:R1:ATCTAGTT:R2:CAATTTTG:F1:CAGT:F2:CAGT
+                                         CAAAAATAATACCTCCTCTATTTATCCAAAATCACAAAAAACCACCCACTTAACTTTCCCTAA
+
+                        Following clock trimming, the resulting files (.clock_UMI.R1.fq(.gz) and clock_UMI.R2.fq(.gz))
+                        should be adapter- and quality trimmed with Trim Galore as usual. This is followed by Bismark
+                        mapping and deduplication with UmiBam in --dual_index mode (see here: https://github.com/FelixKrueger/Umi-Grinder).
 
 RRBS-specific options (MspI digested material):
 
@@ -2141,7 +2190,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 21 June 2018.
+Last modified on 22 June 2018.
 
 HELP
   exit;
