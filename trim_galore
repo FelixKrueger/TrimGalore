@@ -30,7 +30,7 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.4.5_dev';
+my $trimmer_version = '0.5.0';
 
 my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock) = process_commandline();
 
@@ -48,14 +48,14 @@ if (defined $hardtrim5){
 }
 
 if ($clock){
-    warn "IT'S TIME FOR THE CLOCK!!!\t\t\t\t\t\t\t\t\t[pun intended]\n\n"; 
+    warn "\nIT'S TIME FOR CLOCK PROCESSING!!!\t\t\t\t\t\t\t\t\t[pun intended]\n\n"; 
     
     while (@ARGV){   
 	my $in1 = shift @ARGV;
 	my $in2 = shift @ARGV;
 	clockwork($in1,$in2);
     }
-    warn "\nPre-processing of all clock samples finished. Exiting Trim Galore run...\n\n";
+    warn "\nPre-processing finished...\n\nPlease run Trim Galore again to remove adapters, poor quality bases as well as UMI/fixed sequences from the 3'-end of the reads.\nA sample command for this is:\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntrim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 *.clock_UMI.R1.fq.gz *.clock_UMI.R2.fq.gz\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\nTrim Galore Epigenetic Clock processing complete.\n\n";
     exit;
 }
 
@@ -1679,7 +1679,7 @@ sub process_commandline{
                                 (powered by Cutadapt)
                                   version $trimmer_version
 
-                               Last update: 22 06 2018
+                               Last update: 28 06 2018
 
 VERSION
     exit;
@@ -2084,7 +2084,12 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         to <int> bp from the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit.
                         Hard-trimmed output files will end in .<int>.fq(.gz).
   
---clock                 In it's current implementation, the dual-UMI RRBS reads come in the following format:
+--clock                 In this mode, reads are trimmed in a specific way that is currently used for the Mouse
+                        Epigenetic Clock (see here: Multi-tissue DNA methylation age predictor in mouse, Stubbs et al.,
+                        Genome Biology, 2017 18:68 https://doi.org/10.1186/s13059-017-1203-5). Following this, Trim Galore
+                        will exit.
+
+                        In it's current implementation, the dual-UMI RRBS reads come in the following format:
 
                         Read 1  5' UUUUUUUU CAGTA FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF TACTG UUUUUUUU 3'
 			Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ATGAC UUUUUUUU 5'
@@ -2104,9 +2109,15 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         R2: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT:R1:ATCTAGTT:R2:CAATTTTG:F1:CAGT:F2:CAGT
                                          CAAAAATAATACCTCCTCTATTTATCCAAAATCACAAAAAACCACCCACTTAACTTTCCCTAA
 
-                        Following clock trimming, the resulting files (.clock_UMI.R1.fq(.gz) and clock_UMI.R2.fq(.gz))
-                        should be adapter- and quality trimmed with Trim Galore as usual. This is followed by Bismark
-                        mapping and deduplication with UmiBam in --dual_index mode (see here: https://github.com/FelixKrueger/Umi-Grinder).
+                        Following clock trimming, the resulting files (.clock_UMI.R1.fq(.gz) and .clock_UMI.R2.fq(.gz))
+                        should be adapter- and quality trimmed with Trim Galore as usual. In addition, reads need to be trimmed
+                        by 15bp from their 3' end to get rid of potential UMI and fixed sequences. The command is:
+
+                        trim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 *.clock_UMI.R1.fq.gz *.clock_UMI.R2.fq.gz
+
+                        Following this, reads should be aligned with Bismark and deduplicated with UmiBam 
+                        in '--dual_index' mode (see here: https://github.com/FelixKrueger/Umi-Grinder). UmiBam recognises
+                        the UMIs within this pattern: R1:(ATCTAGTT):R2:(CAATTTTG): as (UMI R1) and (UMI R2).
 
 RRBS-specific options (MspI digested material):
 
@@ -2190,7 +2201,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 22 June 2018.
+Last modified on 28 June 2018.
 
 HELP
   exit;
