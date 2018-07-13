@@ -30,9 +30,9 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.5.0';
+my $trimmer_version = '0.5.0_dev';
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -146,7 +146,7 @@ sub clockwork{
     my $filtered_count = 0;
     my $r1_contains_rc = 0;
     
-    while (1){
+   ORANGE: while (1){
 	
 	my $one1 = <$in1_fh>;
 	my $one2 = <$in1_fh>;
@@ -293,26 +293,64 @@ else{
 
 ### SETTING DEFAULTS UNLESS THEY WERE SPECIFIED
 unless (defined $cutoff){
-  $cutoff = 20;
+    $cutoff = 20;
 }
 my $phred_score_cutoff = $cutoff; # only relevant for report
 my $adapter_name = '';
 unless (defined $adapter){
-  if ($nextera){
-    $adapter = 'CTGTCTCTTATA';
-    $adapter_name = 'Nextera Transposase sequence; user defined';
-  }
-  elsif($small_rna){
-    $adapter = 'TGGAATTCTCGG';
-    $adapter_name = 'Illumina small RNA adapter; user defined';
-  }
-  elsif($illumina){
-    $adapter = 'AGATCGGAAGAGC';
-    $adapter_name = 'Illumina TruSeq, Sanger iPCR; user defined';
-  }
-  else{ # default
-    ($adapter,$adapter_name) = autodetect_adapter_type();
-  }
+    if ($nextera){
+	$adapter = 'CTGTCTCTTATA';
+	$adapter_name = 'Nextera Transposase sequence; user defined';
+    }
+    elsif($small_rna){
+	$adapter = 'TGGAATTCTCGG';
+	$adapter_name = 'Illumina small RNA adapter; user defined';
+    }
+    elsif($illumina){
+	$adapter = 'AGATCGGAAGAGC';
+	$adapter_name = 'Illumina TruSeq, Sanger iPCR; user defined';
+    }
+    else{ # default
+	
+	### If other -a and/or -a2 were given 
+	if ($polyA){ # specialised PolyA trimming
+	    ($adapter,$adapter_name) = autodetect_polyA_type();
+	    
+	    if ($validate){ # we need to select -a2 as the reverse complement to -a
+		if ($adapter =~ /A+/){
+		    $adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
+		    $a2 = extend_adapter_sequence("T",150); # defaulting to 150 bp
+		}
+		elsif($adapter =~ /T+/){
+		    $adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
+		    $a2 = extend_adapter_sequence("A",150);
+		}
+		else{
+		    die "Something unexpected happened with the Poly-A autodetection, please check\n";
+		}
+		# warn "Paired-end Poly-A detection, set the following parameters:\n";
+		# warn " -a: $adapter\n-a2: $a2\n   ~~~~~~~~~~ \n\n";sleep(1);
+	    }
+	    else{
+		# Single end
+		if ($adapter =~ /A+/){
+		    $adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
+		}
+		elsif($adapter =~ /T+/){
+		    $adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
+		}
+		else{
+		    die "Something unexpected happened with the Poly-A autodetection, please check\n";
+		}
+	    }
+	}
+	else{ # ADAPTER TRIMMING; DEFAULT
+	    ($adapter,$adapter_name) = autodetect_adapter_type();
+	}
+    }
+}
+else{
+    $adapter_name = 'user defined';
 }
 
 ### For smallRNA adapters we are reducing the sequence length cutoff before a sequences gets thrown out entirely to 18bp. We are doing this because some 20-23bp long smallRNAs
@@ -346,199 +384,199 @@ unless (defined $stringency){
 }
 
 if ($phred_encoding == 64){
-  $cutoff += 31;
+    $cutoff += 31;
 }
 
 my $file_1;
 my $file_2;
 
 foreach my $filename (@ARGV){
-  trim ($filename);
+    trim ($filename);
 }
 
 
 sub trim{
-  my $filename = shift;
+    my $filename = shift;
 
-  my $output_filename = (split (/\//,$filename))[-1];
-
-  my $report = $output_filename;
-  $report =~ s/$/_trimming_report.txt/;
-
+    my $output_filename = (split (/\//,$filename))[-1];
+    
+    my $report = $output_filename;
+    $report =~ s/$/_trimming_report.txt/;
+    
   if ($no_report_file) {
       $report = File::Spec->devnull;
       open (REPORT,'>',$report) or die "Failed to write to file '$report': $!\n";
       # warn "Redirecting report output to /dev/null\n";
   }
-  else{
-      open (REPORT,'>',$output_dir.$report) or die "Failed to write to file '$report': $!\n";
-      warn "Writing report to '$output_dir$report'\n";
-  }
+    else{
+	open (REPORT,'>',$output_dir.$report) or die "Failed to write to file '$report': $!\n";
+	warn "Writing report to '$output_dir$report'\n";
+    }
+    
+    warn "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
+    print REPORT "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
 
-  warn "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
-  print REPORT "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
+    if ($validate){ # paired-end mode
+	warn "Trimming mode: paired-end\n";
+	print REPORT "Trimming mode: paired-end\n";
+    }
+    else{
+	warn "Trimming mode: single-end\n";
+	print REPORT "Trimming mode: single-end\n";
+    }
+    
+    
+    warn "Trim Galore version: $trimmer_version\n";
+    print REPORT "Trim Galore version: $trimmer_version\n";
+    
+    warn "Cutadapt version: $cutadapt_version\n";
+    print REPORT "Cutadapt version: $cutadapt_version\n";
+    
+    warn "Quality Phred score cutoff: $phred_score_cutoff\n";
+    print REPORT "Quality Phred score cutoff: $phred_score_cutoff\n";
+    
+    warn "Quality encoding type selected: ASCII+$phred_encoding\n";
+    print REPORT "Quality encoding type selected: ASCII+$phred_encoding\n";
+    
+    warn "Adapter sequence: '$adapter' ($adapter_name)\n";
+    print REPORT "Adapter sequence: '$adapter' ($adapter_name)\n";
+    
+    if ($error_rate == 0.1){
+	warn "Maximum trimming error rate: $error_rate (default)\n";
+    }
+    else{
+	warn "Maximum trimming error rate: $error_rate\n";
+    }
+    
+    if (defined $maxn){
+	warn "Maximum number of tolerated Ns: $maxn\n";
+    }
 
-  if ($validate){ # paired-end mode
-    warn "Trimming mode: paired-end\n";
-    print REPORT "Trimming mode: paired-end\n";
-  }
-  else{
-    warn "Trimming mode: single-end\n";
-    print REPORT "Trimming mode: single-end\n";
-  }
+    print REPORT "Maximum trimming error rate: $error_rate";
+    if ($error_rate == 0.1){
+	print REPORT " (default)\n";
+    }
+    else{
+	print REPORT "\n";
+    }
+    
+    if ($a2){
+	warn "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
+	print REPORT "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
+    }
+    
+    warn "Minimum required adapter overlap (stringency): $stringency bp\n";
+    print REPORT "Minimum required adapter overlap (stringency): $stringency bp\n";
+    
+    if ($validate){
+	warn "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
+	print REPORT "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
+    }
+    else{
+	warn "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
+	print REPORT "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
+    }
+    
+    if ($max_length){
+	warn "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
+	print REPORT "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
+    }
 
+    if ($trim_n){
+	warn "Removing Ns from the start and end of reads\n";
+	print REPORT "Removing Ns from the start and end of reads\n";
+    }
+    
+    
+    if ($validate){ # only for paired-end files
+	
+	if ($retain){ # keeping single-end reads if only one end is long enough
+	    
+	    if ($length_read_1 == 35){
+		warn "Length cut-off for read 1: $length_read_1 bp (default)\n";
+		print REPORT "Length cut-off for read 1: $length_read_1 bp (default)\n";
+	    }
+	    else{
+		warn "Length cut-off for read 1: $length_read_1 bp\n";
+		print REPORT "Length cut-off for read 1: $length_read_1 bp\n";
+	    }
+	    
+	    if ($length_read_2 == 35){
+		warn "Length cut-off for read 2: $length_read_2 bb (default)\n";
+		print REPORT "Length cut-off for read 2: $length_read_2 bp (default)\n";
+	    }
+	    else{
+		warn "Length cut-off for read 2: $length_read_2 bp\n";
+		print REPORT "Length cut-off for read 2: $length_read_2 bp\n";
+	    }
+	}
+    }
+    
+    if ($rrbs){
+	warn "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
+	print REPORT "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
+    }
+    
+    if ($non_directional){
+	warn "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
+	print REPORT "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
+    }
+    
+    if ($trim){
+	warn "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
+	print REPORT "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
+    }
+    
+    if ($clip_r1){
+	warn "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
+	print REPORT "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
+    }
+    if ($clip_r2){
+	warn "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
+	print REPORT "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
+    }
+    
+    if ($three_prime_clip_r1){
+	warn "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
+	print REPORT "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
+    }
+    if ($three_prime_clip_r2){
+	warn "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
+	print REPORT "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
+    }
+    
+    if ($fastqc){
+	warn "Running FastQC on the data once trimming has completed\n";
+	print REPORT "Running FastQC on the data once trimming has completed\n";
+	
+	if ($fastqc_args){
+	    warn "Running FastQC with the following extra arguments: '$fastqc_args'\n";
+	    print REPORT  "Running FastQC with the following extra arguments: $fastqc_args\n";
+	}
+    }
+    
+    if ($keep and $rrbs){
+	warn "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
+	print REPORT "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
+    }
+    
 
-  warn "Trim Galore version: $trimmer_version\n";
-  print REPORT "Trim Galore version: $trimmer_version\n";
-
-  warn "Cutadapt version: $cutadapt_version\n";
-  print REPORT "Cutadapt version: $cutadapt_version\n";
-
-  warn "Quality Phred score cutoff: $phred_score_cutoff\n";
-  print REPORT "Quality Phred score cutoff: $phred_score_cutoff\n";
-
-  warn "Quality encoding type selected: ASCII+$phred_encoding\n";
-  print REPORT "Quality encoding type selected: ASCII+$phred_encoding\n";
-
-  warn "Adapter sequence: '$adapter' ($adapter_name)\n";
-  print REPORT "Adapter sequence: '$adapter' ($adapter_name)\n";
-
-  if ($error_rate == 0.1){
-    warn "Maximum trimming error rate: $error_rate (default)\n";
-  }
-  else{
-    warn "Maximum trimming error rate: $error_rate\n";
-  }
-
-  if (defined $maxn){
-    warn "Maximum number of tolerated Ns: $maxn\n";
-  }
-
-  print REPORT "Maximum trimming error rate: $error_rate";
-  if ($error_rate == 0.1){
-    print REPORT " (default)\n";
-  }
-  else{
+    if ($gzip or $filename =~ /\.gz$/){
+	$gzip = 1;
+	unless ($dont_gzip){
+	    warn "Output file(s) will be GZIP compressed\n";
+	    print REPORT "Output file will be GZIP compressed\n";
+	}
+    }
+    
+    warn "\n";
     print REPORT "\n";
-  }
-
-  if ($a2){
-    warn "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
-    print REPORT "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
-  }
-
-  warn "Minimum required adapter overlap (stringency): $stringency bp\n";
-  print REPORT "Minimum required adapter overlap (stringency): $stringency bp\n";
-
-  if ($validate){
-    warn "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
-    print REPORT "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
-  }
-  else{
-    warn "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
-    print REPORT "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
-  }
-
-  if ($max_length){
-    warn "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
-    print REPORT "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
-  }
-
-  if ($trim_n){
-      warn "Removing Ns from the start and end of reads\n";
-      print REPORT "Removing Ns from the start and end of reads\n";
-  }
-
-
-  if ($validate){ # only for paired-end files
-
-    if ($retain){ # keeping single-end reads if only one end is long enough
-
-      if ($length_read_1 == 35){
-	warn "Length cut-off for read 1: $length_read_1 bp (default)\n";
-	print REPORT "Length cut-off for read 1: $length_read_1 bp (default)\n";
-      }
-      else{
-	warn "Length cut-off for read 1: $length_read_1 bp\n";
-	print REPORT "Length cut-off for read 1: $length_read_1 bp\n";
-      }
-
-      if ($length_read_2 == 35){
-	warn "Length cut-off for read 2: $length_read_2 bb (default)\n";
-	print REPORT "Length cut-off for read 2: $length_read_2 bp (default)\n";
-      }
-      else{
-	warn "Length cut-off for read 2: $length_read_2 bp\n";
-	print REPORT "Length cut-off for read 2: $length_read_2 bp\n";
-      }
-    }
-  }
-
-  if ($rrbs){
-    warn "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
-    print REPORT "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
-  }
-
-  if ($non_directional){
-    warn "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
-    print REPORT "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
-  }
-
-  if ($trim){
-    warn "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
-    print REPORT "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
-  }
-
-  if ($clip_r1){
-    warn "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
-    print REPORT "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
-  }
-  if ($clip_r2){
-    warn "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
-    print REPORT "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
-  }
-
-  if ($three_prime_clip_r1){
-    warn "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
-    print REPORT "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
-  }
-  if ($three_prime_clip_r2){
-    warn "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
-    print REPORT "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
-  }
-
-  if ($fastqc){
-    warn "Running FastQC on the data once trimming has completed\n";
-    print REPORT "Running FastQC on the data once trimming has completed\n";
-
-    if ($fastqc_args){
-	warn "Running FastQC with the following extra arguments: '$fastqc_args'\n";
-	print REPORT  "Running FastQC with the following extra arguments: $fastqc_args\n";
-    }
-  }
-
-  if ($keep and $rrbs){
-    warn "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
-    print REPORT "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
-  }
-
-
-  if ($gzip or $filename =~ /\.gz$/){
-    $gzip = 1;
-    unless ($dont_gzip){
-      warn "Output file(s) will be GZIP compressed\n";
-      print REPORT "Output file will be GZIP compressed\n";
-    }
-  }
-
-  warn "\n";
-  print REPORT "\n";
-  # sleep (3);
-
-  my $temp;
-
-  ### Proceeding differently for RRBS and other type of libraries
-  if ($rrbs){
+    # sleep (3);
+    
+    my $temp;
+    
+    ### Proceeding differently for RRBS and other type of libraries
+    if ($rrbs){
       
       ### Skipping quality filtering for RRBS libraries if a quality cutoff of 0 was specified
       if ($cutoff == 0){
@@ -627,7 +665,7 @@ sub trim{
   my $pid;
   
   if ($rrbs and $cutoff != 0){
-      
+     
       ### optionally using 2 different adapters for read 1 and read 2
       if ($validate and $a2){
 	  ### Figure out whether current file counts as read 1 or read 2 of paired-end files
@@ -796,7 +834,158 @@ sub trim{
       close OUT or die  "Unable to close OUT filehandle: $!";
       
   }
-  else{ # non-RRBS mode. default
+    ############################################################################################################
+    
+    elsif($polyA){ # PolyA trimming
+	
+	warn "POLY-A TRIMMING MODE; EXPERIMENTAL!!\n";
+	my $isR2 = 0;
+	
+	# For the moment we set the temp file name back to $filename
+	$temp = $filename;
+
+	### optionally using 2 different adapters for read 1 and read 2
+	if ($validate and $a2){
+	    ### Figure out whether current file counts as read 1 or read 2 of paired-end files
+	    if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
+		warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
+		$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+	    }
+	    else{                            # this is read 2 of a pair
+		$isR2 = 1;
+		warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$a2' from file $temp <<< \n";
+		# For Read 2 we need to trim the PolyT (or PolyA) from the 5' end instead! Hence -g $a2 and not -a! 
+		$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+	    }
+	}
+	### Using the same adapter for both read 1 and read 2 - Single end will use the same adapters are Read 1s for paired-end files
+	else{
+	    warn "\n  >>> Now performing single-end Poly-A trimming for with the sequence: '$adapter' from file $temp <<< \n";
+	    # sleep (3);
+	    $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+	}
+	
+	close WRITER or die $!; # not needed
+
+	# This is the Illumina adapter trimmed file
+      	if ($temp =~ /\.gz$/){
+	    open (QUAL,"gunzip -c $output_dir$temp |") or die $!; # quality trimmed file
+	}
+	else{
+	    open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
+	}
+      
+	#if ($filename =~ /\.gz$/){
+	#    open (IN,"gunzip -c $filename |") or die $!; # original, untrimmed file
+	#}
+	#else{
+	#    open (IN,$filename) or die $!; # original, untrimmed file
+	#}
+	
+	while (1){
+	    
+	    # we can process the output from Cutadapt and the original input 1 by 1 to decide if the adapter has been removed or not
+	    my $l1 = <TRIM>;
+	    my $seq = <TRIM>; # adapter trimmed sequence
+	    my $l3 = <TRIM>;
+	    my $qual = <TRIM>;
+	  
+	    #   $_ = <IN>;   # irrelevant
+	    #   my $original_seq = <IN>;
+	    #   $_ = <IN>;   # irrelevant
+	    #   $_ = <IN>;   # irrelevant
+	    
+	    $_ = <QUAL>; # irrelevant
+	    my $qual_trimmed_seq = <QUAL>;
+	    $_ = <QUAL>; # irrelevant
+	    my $qual_trimmed_qual = <QUAL>;
+	    
+	    last unless (defined $qual and defined $qual_trimmed_qual); # could be empty strings
+	    
+	    $count++;
+	    if ($count%10000000 == 0){
+		warn "$count sequences processed\n";
+	    }
+	    chomp $l1;
+	    chomp $seq;
+	    chomp $qual;
+	    chomp $qual_trimmed_seq;
+	    # chomp $original_seq;
+	    
+	    my $quality_trimmed_seq_length = length $qual_trimmed_seq;
+	    
+	    #    if (length $original_seq > length $qual_trimmed_seq){
+	    #		++$quality_trimmed;
+	    #	     }
+	    
+	    my $diff = length($qual_trimmed_seq) - length($seq);
+
+	    ### CHANGING THE readID to remove white spaces and adding PolyA trimming information
+	    $l1 =~ s/\s+/_/g; # removing white spaces from readID
+	    if ($diff > 0){ # only adding the PolyA removal tag if some A's were really removed, so we can filter these out later if desired
+		$l1 .= "_PolyA:$diff";
+	    }
+	    
+	    ### Shortening all sequences by 1 bp on the 3' end - This is probably no longer needed since we have stopped using Bowtie (1)
+	    if ($trim){
+		$seq = substr($seq,0,length($seq)-1);
+		$qual = substr($qual,0,length($qual)-1);
+	    }
+	    
+	    ### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
+	    if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
+		if ($isR2){
+		    #print "$l1\n$qual_trimmed_seq\n$seq\n$l3$qual_trimmed_qual\n$qual\n~~~~~\n";
+		   # print "length original: ",length($qual_trimmed_seq) , "\nlength trimmed:  ", length($seq) , "\nDifference: $diff bp\n   ~~~\n\n"; sleep(1);
+		}
+		print OUT "$l1\n$seq\n$l3$qual\n";
+	    }
+	    else{ # single end
+		
+		if ($clip_r1){
+		    if (length $seq > $clip_r1){  # sequences that are already too short won't be clipped again
+			$seq = substr($seq,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
+			$qual = substr($qual,$clip_r1);
+		    }
+		}
+		
+		if ($three_prime_clip_r1){
+		    if (length $seq > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
+			# warn "seq/qual before/after trimming:\n$seq\n$qual\n";
+			$seq = substr($seq,0,(length($seq) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
+			$qual = substr($qual,0,(length($qual) - $three_prime_clip_r1 ));
+			# warn "$seq\n$qual\n";
+		    }
+		}
+		
+		if (length $seq < $length_cutoff){
+		    ++$too_short;
+		    next;
+		}
+		elsif($max_length and length$seq > $max_length){
+		    ++$too_long;
+		    next; # sequence is too long
+		}
+		else{
+		    print OUT "$l1\n$seq\n$l3$qual\n";
+		}
+	    }
+	}
+	
+	print REPORT "\n";
+	while (<ERROR>){
+	    warn $_;
+	    print REPORT $_;
+	}
+	
+	close QUAL or die "Unable to close QUAL filehandle: $!";
+	close TRIM or die "Unable to close TRIM filehandle: $!";
+	close OUT or die  "Unable to close OUT filehandle: $!";
+    }
+    
+    ############################################################################################################  
+
+    else{ # non-RRBS mode. default
 
       ### optionally using 2 different adapters for read 1 and read 2
       if ($validate and $a2){
@@ -1165,7 +1354,6 @@ sub validate_paired_end_files{
   }
   
   warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
-  # sleep (1);
   
   my $out_1 = $file_1;
   my $out_2 = $file_2;
@@ -1570,6 +1758,95 @@ sub autodetect_adapter_type{
 
 }
 
+sub autodetect_polyA_type{
+
+    warn "\n\nAUTO-DETECTING POLY-A TYPE\n===========================\n";
+    warn "Attempting to auto-detect PolyA type from the first 1 million sequences of the first file (>> $ARGV[0] <<)\n\n";
+    
+    if ($ARGV[0] =~ /gz$/){
+	open (AUTODETECT,"gunzip -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
+    }
+    else{
+	open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
+    }
+    
+  my %adapters;
+    
+    $adapters{'PolyA'} -> {seq}  = 'AAAAAAAAAA';
+    $adapters{'PolyA'} -> {count}= 0;
+    $adapters{'PolyA'} -> {name}= 'Poly-A Read 1; auto-detected';
+    
+    $adapters{'PolyT'}  -> {seq}  = 'TTTTTTTTTT';
+    $adapters{'PolyT'}  -> {count}= 0;
+    $adapters{'PolyT'}  -> {name}= 'Poly-T Read 1; auto-detected';
+    
+    
+    # we will read the first 1 million sequences, or until the end of the file whatever comes first, and then use the adapter that for trimming which was found to occcur most often
+    my $count = 0;
+    while (1){
+	
+	my $line1 = <AUTODETECT>;
+	my $line2 = <AUTODETECT>;
+	my $line3 = <AUTODETECT>;
+	my $line4 = <AUTODETECT>;
+	last unless ($line4);
+	$count++;
+	last if ($count == 1000000);
+	
+	chomp $line2;
+	$adapters{'PolyA'}->{count}++ unless (index($line2,'AAAAAAAAAA')== -1);
+	$adapters{'PolyT'} ->{count}++ unless (index($line2,'TTTTTTTTTT') == -1);
+	
+    }
+    
+    my $highest;
+    my $second;
+    my $seq;
+    my $adapter_name;
+    
+    warn "Found perfect matches for the following mono-polymer sequences:\nPoly-nucleotide type\tCount\tSequence\tSequences analysed\tPercentage\n";
+    foreach my $adapter (sort {$adapters{$b}->{count}<=>$adapters{$a}->{count}} keys %adapters){
+	
+	my $percentage = sprintf("%.2f",$adapters{$adapter}->{count}/$count*100);
+	
+	warn "$adapter\t$adapters{$adapter}->{count}\t$adapters{$adapter}->{seq}\t$count\t$percentage\n";
+
+	unless (defined $highest){
+	    $highest = $adapter;
+	    $seq = $adapters{$adapter}->{seq};
+	    $adapter_name = $adapters{$adapter}->{name};
+	    next;
+	}
+	unless (defined $second){
+	    $second = $adapter;
+	}
+    }
+
+    
+    # using the highest occurrence as adapter to look out for
+    if ($adapters{$highest}->{count} == $adapters{$second}->{count}){
+	warn "Unable to auto-detect most prominent mono-polymer from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count})\n";
+	
+	if ($adapters{$highest}->{count} == 0){
+	    warn "Defaulting to Poly-A. Specify -a SEQUENCE to avoid this behavior).\n\n";
+	    $adapter_name = 'Poly-A (inconclusive auto-detection)';
+	    $seq = extend_adapter_sequence ('A',20);
+	}
+	else{
+	    warn "Using $highest poly-monomer for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
+	}
+    }
+    else{
+	warn "Using $highest Polymer for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
+    }
+    
+    close AUTODETECT;
+    
+    return ($seq,$adapter_name);
+    
+}
+
+
 ###########################################################################
 
 sub process_commandline{
@@ -1613,6 +1890,7 @@ sub process_commandline{
   my $hardtrim5; 
   my $hardtrim3;
   my $clock;
+  my $polyA;
 
   my $command_line = GetOptions ('help|man' => \$help,
 				 'q|quality=i' => \$quality,
@@ -1652,9 +1930,9 @@ sub process_commandline{
 				 'max_n=i'      => \$maxn,
 				 'trim-n'      => \$trimn,
 				 'hardtrim5=i'      => \$hardtrim5,
-				 # 'hardtrim=i'      => \$hardtrim3,
+				 # 'hardtrim3=i'      => \$hardtrim3,
 				 'clock|casio|breitling' => \$clock,
-				 
+				 'polyA' => \$polyA,
       );
   
   ### EXIT ON ERROR if there were errors with any of the supplied options
@@ -1679,7 +1957,7 @@ sub process_commandline{
                                 (powered by Cutadapt)
                                   version $trimmer_version
 
-                               Last update: 28 06 2018
+                               Last update: 13 07 2018
 
 VERSION
     exit;
@@ -1740,6 +2018,25 @@ VERSION
   if ($nextera and $small_rna or $nextera and $illumina or $illumina and $small_rna ){
     die "You can't use several different adapter types at the same time. Make your choice or consider using -a and -a2\n\n";
   }
+  
+  ### ENSURE USERS ARE USING THE POLY-A AUTODETECTION, OR SPECIFY SEQUENCES FOR BOTH -a AND -a2
+  if ($polyA){
+      if (defined $adapter){
+	  if ($validate){# paired-end
+	      unless (defined $adapter2){
+		  die "Please use either the PolyA auto-detection (defaults to -a \"A{20}\" -a2 \"T{150}\" (or the other way round)), or specify both -a and -a2. Now try again...\n\n";
+	      }
+	  }
+      }
+      if (defined $adapter2){
+	  if ($validate){# paired-end
+	      unless (defined $adapter){
+		  die "Please use either the PolyA auto-detection (defaults to -a \"A{20}\" -a2 \"T{150}\" (or the other way round)), or specify both -a and -a2. Now try again...\n\n";
+	      }
+	  }
+      }
+  }
+
 
   if (defined $adapter){
 
@@ -1747,8 +2044,9 @@ VERSION
       # in the form BASE{number of times}, e.g. "-a A{10}"
       if ($adapter =~ /^([ACTGN]){(\d+)}$/){
 	  # warn "Base: $1\n# repeats: $2\n";
-	  my $tmp_adapter = uc$1x$2;
 	  
+	  
+	  my $tmp_adapter = extend_adapter_sequence(uc$1,$2);
 	  warn "Adapter sequence given as >$adapter< expanded to: >$tmp_adapter<\n";
 	  $adapter = $tmp_adapter;
       }
@@ -1779,7 +2077,7 @@ VERSION
       # in the form BASE{number of times}, e.g. "-a2 A{10}"
       if ($adapter2 =~ /^([ACTGN]){(\d+)}$/){
 	  # warn "Base: $1\n# repeats: $2\n";
-	  my $tmp_adapter2 = uc$1x$2;
+	  my $tmp_adapter2 = extend_adapter_sequence(uc$1,$2);
 	  
 	  warn "Adapter2 sequence given as >$adapter2< expanded to: >$tmp_adapter2<\n";
 	  $adapter2 = $tmp_adapter2;
@@ -1939,7 +2237,7 @@ VERSION
   }
 
 
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock);
+  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA);
 }
 
 sub Ncounter{
@@ -1949,6 +2247,11 @@ sub Ncounter{
     ++$ncount;
   }
   return $ncount;
+}
+
+sub extend_adapter_sequence{
+    my ($letter,$number) = @_;
+    return (${letter}x$number);
 }
 
 
@@ -2119,6 +2422,36 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         in '--dual_index' mode (see here: https://github.com/FelixKrueger/Umi-Grinder). UmiBam recognises
                         the UMIs within this pattern: R1:(ATCTAGTT):R2:(CAATTTTG): as (UMI R1) and (UMI R2).
 
+--polyA                 This is a new, still experimental, trimming mode to identify and remove poly-A tails from sequences.
+                        When --polyA is selected, Trim Galore attempts to identify from the first supplied sample whether
+                        sequences contain more often a stretch of either 'AAAAAAAAAA' or 'TTTTTTTTTT'. This determines
+			if Read 1 of a paired-end end file, or single-end files, are trimmed for PolyA or PolyT. In case of
+                        paired-end sequencing, Read2 is trimmed for the complementary base from the start of the reads. The
+                        auto-detection uses a default of A{20} for Read1 (3'-end trimming) and T{150} for Read2 (5'-end trimming).
+			These values may be changed manually using the options -a and -a2.
+
+			In addition to trimming the sequences, white spaces are replaced with _ and it records in the read ID
+			how many bases were trimmed so it can later be used to identify PolyA trimmed sequences, e.g. _PolyA:32
+			in the following example:
+        
+                        \@READ-ID:1:1102:22039:36996 1:N:0:CCTAATCC
+			GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+			
+			\@READ-ID:1:1102:22039:36996_1:N:0:CCTAATCC_PolyA:32
+			GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACC
+
+			PLEASE NOTE: The poly-A trimming mode expects that sequences were both adapter and quality trimmed
+			before looking for Poly-A tails, and it is the user's responsibility to carry out an initial round of 
+			trimming. The following sequence:
+
+			1) trim_galore file.fastq.gz
+			2) trim_galore --polyA file_trimmed.fq.gz
+			3) zcat file_trimmed_trimmed.fq.gz | grep -A 3 PolyA | grep -v ^-- > PolyA_trimmed.fastq
+
+                        Will 1) trim qualities and Illumina adapter contamination, 2) find and remove PolyA contamination.
+                        Finally, if desired, 3) will specifically find PolyA trimmed sequences to a specific FastQ file of your choice.
+
+			
 RRBS-specific options (MspI digested material):
 
 --rrbs                  Specifies that the input file was an MspI digested RRBS sample (recognition
