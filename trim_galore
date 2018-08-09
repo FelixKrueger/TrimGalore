@@ -32,7 +32,7 @@ BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.5.0_dev';
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -40,9 +40,17 @@ USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    f
 file_sanity_check($filenames[0]);
 
 if (defined $hardtrim5){
-    warn "Hard-trimming from 5' end selected. File(s) will be trimmed to $hardtrim5 bp from the 3' end, and Trim Galore will then exit.\n\n";
+    warn "Hard-trimming from the 3'-end selected. File(s) will be trimmed to leave the leftmost $hardtrim5 bp on the 5'-end, and Trim Galore will then exit.\n\n";
     foreach my $file(@filenames){
-	hardtrim_from_5prime_end($file);
+	hardtrim_to_5prime_end($file);
+    }
+    exit;
+}
+
+if (defined $hardtrim3){
+    warn "Hard-trimming from 5'-end selected. File(s) will be trimmed to leave the rightmost $hardtrim3 bp on the 3'-end, and Trim Galore will then exit.\n\n";
+    foreach my $file(@filenames){
+	hardtrim_to_3prime_end($file);
     }
     exit;
 }
@@ -1256,7 +1264,7 @@ sub trim{
   close REPORT or warn "Failed to close filehandle REPORT: $!\n"; 
 }
 
-sub hardtrim_from_5prime_end{
+sub hardtrim_to_5prime_end{
   
     my $filename = shift;
     warn "Input file name:  $filename\n";
@@ -1276,19 +1284,19 @@ sub hardtrim_from_5prime_end{
     # warn "Output file name: $output_filename\n";
     
     if ($output_filename =~ /\.fastq$/){
-	$output_filename =~ s/\.fastq$/.${hardtrim5}bp.fq/;
+	$output_filename =~ s/\.fastq$/.${hardtrim5}bp_5prime.fq/;
     }
     elsif ($output_filename =~ /\.fastq\.gz$/){
-	$output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp.fq/;
+	$output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp_5prime.fq/;
     }
     elsif ($output_filename =~ /\.fq$/){
-	$output_filename =~ s/\.fq$/.${hardtrim5}bp.fq/;
+	$output_filename =~ s/\.fq$/.${hardtrim5}bp_5prime.fq/;
     }
     elsif ($output_filename =~ /\.fq\.gz$/){
-	$output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp.fq/;
+	$output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp_5prime.fq/;
     }
     else{
-	$output_filename =~ s/$/.${hardtrim5}bp.fq/;
+	$output_filename =~ s/$/.${hardtrim5}bp_5prime.fq/;
     }
     
     if ($gzip or $filename =~ /\.gz$/){
@@ -1303,7 +1311,7 @@ sub hardtrim_from_5prime_end{
     else{
 	open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
     }
-    warn "Writing trimmed version (using the first $hardtrim5 high quality bp only) of the input file '$filename' to '$output_filename'\n";
+    warn "Writing trimmed version (using the first $hardtrim5 bp only) of the input file '$filename' to '$output_filename'\n";
   
     my $count = 0;
     
@@ -1315,14 +1323,16 @@ sub hardtrim_from_5prime_end{
 	
 	last unless ($identifier and $sequence and $identifier2 and $quality_score);
 	++$count;
+
+	$sequence      =~ s/\r|\n//g; # cross-platform line ending trimming
+	$quality_score =~ s/\r|\n//g;
+       	$identifier    =~ s/\r|\n//g;
+	$identifier2   =~ s/\r|\n//g;
+
+	my $trimmed_sequence = substr($sequence,0,$hardtrim5);           # from the start to the $hardtrim5
+	my $trimmed_quality_score = substr($quality_score,0,$hardtrim5); # from the start to the $hardtrim5
 	
-	chomp $sequence;
-	chomp $quality_score;
-	
-	my $trimmed_sequence = substr($sequence,0,$hardtrim5)."\n";           # from the start to the $hardtrim
-	my $trimmed_quality_score = substr($quality_score,0,$hardtrim5)."\n"; # from the start to the $hardtrim
-	
-	print {$hardtrim_5} join ('',$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score);
+	print {$hardtrim_5} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
 	
     }
     close $in or warn "Failed to close filehandle for $filename";
@@ -1331,6 +1341,85 @@ sub hardtrim_from_5prime_end{
     warn "\nFinished writing out converted version of the FastQ file $filename ($count sequences in total)\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
     
 }
+
+sub hardtrim_to_3prime_end{
+  
+    my $filename = shift;
+    warn "Input file name:  $filename\n";
+
+    my $in;         # filehandle
+    my $hardtrim_3; # filehandle
+
+    if ($filename =~ /gz$/){
+	open ($in,"gunzip -c $filename |") or die "Couldn't read from file $!";
+    }
+    else{
+	open ($in,$filename) or die "Couldn't read from file $!";
+    }
+    
+    ### OUTPUT FILE
+    my $output_filename = (split (/\//,$filename))[-1];
+    # warn "Output file name: $output_filename\n";
+    
+    if ($output_filename =~ /\.fastq$/){
+	$output_filename =~ s/\.fastq$/.${hardtrim3}bp_3prime.fq/;
+    }
+    elsif ($output_filename =~ /\.fastq\.gz$/){
+	$output_filename =~ s/\.fastq\.gz$/.${hardtrim3}bp_3prime.fq/;
+    }
+    elsif ($output_filename =~ /\.fq$/){
+	$output_filename =~ s/\.fq$/.${hardtrim3}bp_3prime.fq/;
+    }
+    elsif ($output_filename =~ /\.fq\.gz$/){
+	$output_filename =~ s/\.fq\.gz$/.${hardtrim3}bp_3prime.fq/;
+    }
+    else{
+	$output_filename =~ s/$/.${hardtrim3}bp_3prime.fq/;
+    }
+    
+    if ($gzip or $filename =~ /\.gz$/){
+	if ($dont_gzip){
+	    open ($hardtrim_3,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+	}
+	else{
+	    $output_filename .= '.gz';
+	    open ($hardtrim_3,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+	}
+    }
+    else{
+	open ($hardtrim_3,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+    }
+    warn "Writing trimmed version (using the last $hardtrim3 bp only) of the input file '$filename' to '$output_filename'\n";
+    
+    my $count = 0;
+    
+    while (1){
+	my $identifier = <$in>;
+	my $sequence = <$in>;
+	my $identifier2 = <$in>;
+	my $quality_score = <$in>;
+	
+	last unless ($identifier and $sequence and $identifier2 and $quality_score);
+	++$count;
+	
+	$sequence      =~ s/\r|\n//g; # cross-platform line ending trimming
+	$quality_score =~ s/\r|\n//g;
+	$identifier    =~ s/\r|\n//g;
+	$identifier2   =~ s/\r|\n//g;
+
+	my $trimmed_sequence = substr($sequence,-$hardtrim3,$hardtrim3);           # $hardtrim3 bp from the end
+	my $trimmed_quality_score = substr($quality_score,-$hardtrim3,$hardtrim3); # $hardtrim3 bp from the end
+	
+	print {$hardtrim_3} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
+       
+    }
+    close $in or warn "Failed to close filehandle for $filename";
+    close $hardtrim_3 or die "Failed to close out-filehandle hardtrim_3: $!";
+    
+    warn "\nFinished writing out converted version of the FastQ file $filename ($count sequences in total)\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+    
+}
+
 
 sub validate_paired_end_files{
 
@@ -1930,7 +2019,7 @@ sub process_commandline{
 				 'max_n=i'      => \$maxn,
 				 'trim-n'      => \$trimn,
 				 'hardtrim5=i'      => \$hardtrim5,
-				 # 'hardtrim3=i'      => \$hardtrim3,
+				 'hardtrim3=i'      => \$hardtrim3,
 				 'clock|casio|breitling' => \$clock,
 				 'polyA' => \$polyA,
       );
@@ -1957,7 +2046,7 @@ sub process_commandline{
                                 (powered by Cutadapt)
                                   version $trimmer_version
 
-                               Last update: 13 07 2018
+                               Last update: 09 08 2018
 
 VERSION
     exit;
@@ -1981,7 +2070,7 @@ VERSION
     $phred_encoding = 64;
   }
   unless ($phred33 or $phred64){
-      unless (defined $hardtrim5 or $clock){   # we don't need warnings if we simply hard-trim or Clock-trim a file
+      unless (defined $hardtrim5 or $hardtrim3 or $clock){   # we don't need warnings if we simply hard-trim or Clock-trim a file
 	  warn "No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)\n\n";
       }
       $phred_encoding = 33;
@@ -2223,7 +2312,11 @@ VERSION
       unless ($hardtrim5 > 0 and $hardtrim5 < 1000){
 	  die "Hard-trim from 3'-end selected: >$hardtrim5< bp. Please ensure a hard-trimming range between 1 and 999 bp. Please try again...\n\n~~~~~~~~~~~~~~~~~~~~~~\n"
       }
-      
+  }
+  if (defined $hardtrim3){
+      unless ($hardtrim3 > 0 and $hardtrim3 < 1000){
+	  die "Hard-trim from 5'-end selected: >$hardtrim3< bp. Please ensure a hard-trimming range between 1 and 999 bp. Please try again...\n\n~~~~~~~~~~~~~~~~~~~~~~\n"
+      }
   }
  
   ### The  
@@ -2237,7 +2330,7 @@ VERSION
   }
 
 
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA);
+  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3);
 }
 
 sub Ncounter{
@@ -2385,11 +2478,18 @@ SPECIFIC TRIMMING - without adapter/quality trimming
 
 --hardtrim5 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
                         to <int> bp at the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit.
-                        Hard-trimmed output files will end in .<int>.fq(.gz). Here is an example:
+                        Hard-trimmed output files will end in .<int>_5prime.fq(.gz). Here is an example:
 
 			before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
 			--hardtrim5 20: CCTAAGGAAACAAGTACACT
-  
+
+--hardtrim3 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
+                        to <int> bp at the 3'-end. Once hard-trimming of files is complete, Trim Galore will exit.
+                        Hard-trimmed output files will end in .<int>_3prime.fq(.gz). Here is an example:
+
+			before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
+			--hardtrim3 20:                                                   TTTTTAAGAAAATGGAAAAT
+
 --clock                 In this mode, reads are trimmed in a specific way that is currently used for the Mouse
                         Epigenetic Clock (see here: Multi-tissue DNA methylation age predictor in mouse, Stubbs et al.,
                         Genome Biology, 2017 18:68 https://doi.org/10.1186/s13059-017-1203-5). Following this, Trim Galore
