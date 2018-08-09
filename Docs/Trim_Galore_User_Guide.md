@@ -88,7 +88,12 @@ Applying these steps to both self-generated and downloaded data can ensure that 
 ### Step 4: Specialised Trimming
 
 #### Hard-trimming 
-The option `--hardtrim5 INT` allows you to simply hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in `.{INT}bp.fq(.gz)`. We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences.
+The option `--hardtrim5 INT` allows you to simply hard-clip sequences from their 3' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in `.{INT}bp.fq(.gz)`. We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences. Here is an example for:
+
+```
+before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
+--hardtrim5 20: CCTAAGGAAACAAGTACACT
+```
 
 #### Mouse Epigenetic Clock trimming
 The option `--clock` trims reads in a specific way that is currently used for the Mouse Epigenetic Clock (see here: [Multi-tissue DNA methylation age predictor in mouse, Stubbs et al., Genome Biology, 2017 18:68](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-017-1203-5)). Following the trimming, Trim Galore exits.
