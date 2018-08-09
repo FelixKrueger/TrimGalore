@@ -1,5 +1,21 @@
 # Trim Galore Changelog
 
+### Version 0.5.0_dev 
+
+* Added option `--hardtrim5 INT`, which allows you to hard-clip sequences from their 3' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_5prime.fq(.gz). This is useful when you want to shorten reads to a certain read length. Here is an example:
+
+```
+before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
+--hardtrim5 20: CCTAAGGAAACAAGTACACT
+```
+
+* Added option `--hardtrim3 INT,` which allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_3prime.fq(.gz). We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences. Here is an example :
+
+```
+before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
+--hardtrim3 20:                                                   TTTTTAAGAAAATGGAAAAT
+```
+
 ### 28-06-18: Version 0.5.0 
 
 * Adapters can now be specified as single bases with a multiplier in squiggly brackets, e.g. -a "A{10}" to trim poly-A tails
