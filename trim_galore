@@ -231,12 +231,12 @@ sub clockwork{
 
 	print ${read1_fh} "$one1\n";
 	print ${read1_fh} "$seq1\n";
-	print ${read1_fh} "$one3";
+	print ${read1_fh} "+\n";      # replacing this with a + for space and format reasons
 	print ${read1_fh} "$qual1\n"; 
 	
 	print ${read2_fh} "$two1\n";
 	print ${read2_fh} "$seq2\n";
-	print ${read2_fh} "$two3";
+	print ${read2_fh} "+\n";      # replacing this with a + for space and format reasons
 	print ${read2_fh} "$qual2\n"; 
 
 	# sleep(1);
