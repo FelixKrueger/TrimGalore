@@ -32,7 +32,7 @@ BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.5.0_dev';
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -395,6 +395,7 @@ if ($phred_encoding == 64){
     $cutoff += 31;
 }
 
+
 my $file_1;
 my $file_2;
 
@@ -450,14 +451,19 @@ sub trim{
     print REPORT "Adapter sequence: '$adapter' ($adapter_name)\n";
     
     if ($error_rate == 0.1){
-	warn "Maximum trimming error rate: $error_rate (default)\n";
+		warn "Maximum trimming error rate: $error_rate (default)\n";
     }
     else{
-	warn "Maximum trimming error rate: $error_rate\n";
+		warn "Maximum trimming error rate: $error_rate\n";
     }
     
     if (defined $maxn){
-	warn "Maximum number of tolerated Ns: $maxn\n";
+		warn "Maximum number of tolerated Ns: $maxn\n";
+    }
+
+    if ($nextseq){
+		warn "2-colour high quality G-trimming enabled: $nextseq\n";	
+		print REPORT "2-colour high quality G-trimming enabled: $nextseq\n";	
     }
 
     print REPORT "Maximum trimming error rate: $error_rate";
@@ -1001,19 +1007,19 @@ sub trim{
 	  if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 	      warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 	      #sleep (1);
-	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt $nextseq -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 	  }
 	  else{                            # this is read 2 of a pair
 	      warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
 	      #sleep (1);
-	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
+	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt $nextseq -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
 	  }
       }
       ### Using the same adapter for both read 1 and read 2
       else{
 	  warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 	  #sleep (1);
-	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt $nextseq -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
       }
       
       close WRITER or die $!; # not needed
@@ -1980,6 +1986,7 @@ sub process_commandline{
   my $hardtrim3;
   my $clock;
   my $polyA;
+  my $nextseq;
 
   my $command_line = GetOptions ('help|man' => \$help,
 				 'q|quality=i' => \$quality,
@@ -2022,6 +2029,7 @@ sub process_commandline{
 				 'hardtrim3=i'      => \$hardtrim3,
 				 'clock|casio|breitling' => \$clock,
 				 'polyA' => \$polyA,
+				 '2colour|nextseq=i' => \$nextseq,
       );
   
   ### EXIT ON ERROR if there were errors with any of the supplied options
@@ -2046,7 +2054,7 @@ sub process_commandline{
                                 (powered by Cutadapt)
                                   version $trimmer_version
 
-                               Last update: 09 08 2018
+                               Last update: 12 12 2018
 
 VERSION
     exit;
@@ -2075,6 +2083,18 @@ VERSION
       }
       $phred_encoding = 33;
   }
+
+  	### ILLUMINA 2-COLOUR CHEMISTRY SPEICIFC HIGH QUALITY G-TRIMMING
+  	if (defined $nextseq){	
+		warn "OK, let's deal with 2-colour issues\n\n";
+		unless ( ($nextseq > 0) and $nextseq < 200){
+			die "Please select a sensible value for 2-colour specific trimming (currently allowed range is between 1 and 200 Gs). Please respecify!\n";
+		}
+		$nextseq = "--nextseq-trim=$nextseq";
+  	}
+  	else{
+  		$nextseq = '';
+  	}
 
   ### NON-DIRECTIONAL RRBS
   if ($non_directional){
@@ -2330,7 +2350,7 @@ VERSION
   }
 
 
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3);
+  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq);
 }
 
 sub Ncounter{
@@ -2468,6 +2488,10 @@ trim_galore [options] <filename(s)>
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
 
+--2colour/--nextseq     This enables the option '--nextseq-trim=3'CUTOFF' within Cutadapt, which will set a quality
+                        cutoff (that is normally given with -q instead), but qualities of G bases are ignored. 
+                        This trimming is in common for the NextSeq- and NovaSeq-platforms, where basecalls without
+                        any signal are called as high-quality G bases.
                      
 
 --path_to_cutadapt </path/to/cutadapt>     You may use this option to specify a path to the Cutadapt executable,
