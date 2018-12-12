@@ -2086,7 +2086,7 @@ VERSION
 
   	### ILLUMINA 2-COLOUR CHEMISTRY SPEICIFC HIGH QUALITY G-TRIMMING
   	if (defined $nextseq){	
-		warn "OK, let's deal with 2-colour issues\n\n";
+		#	warn "OK, let's deal with 2-colour issues\n\n";
 		unless ( ($nextseq > 0) and $nextseq < 200){
 			die "Please select a sensible value for 2-colour specific trimming (currently allowed range is between 1 and 200 Gs). Please respecify!\n";
 		}
