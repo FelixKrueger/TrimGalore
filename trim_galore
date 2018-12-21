@@ -25,7 +25,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 09 August 2018
+## last modified on 21 December 2018
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -2219,6 +2219,17 @@ VERSION
     # making sure that an even number of reads has been supplied
     unless ((scalar@ARGV)%2 == 0){
       die "Please provide an even number of input files for paired-end FastQ trimming! Aborting ...\n";
+    }
+
+    ### Ensuring pairs of R1 and R2 are not the very same file  
+    my $index = 0;
+    while ($index <= $#ARGV){
+    	# warn "File 1: $ARGV[$index]\n";
+		# warn "File 2: $ARGV[$index+1]\n~~~~~~~~~~\n\n"; sleep(1);
+		if ($ARGV[$index] eq $ARGV[$index+1]){
+			die "[FATAL:] Read 1 ($ARGV[$index]) and Read 2 ($ARGV[$index+1]) files appear to be the very same file. This probably happened inadvertently, so please re-specify!\nExiting...\n\n";
+		}
+		$index += 2;	
     }
 
     ## CUTOFF FOR VALIDATED READ-PAIRS
