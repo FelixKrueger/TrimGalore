@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-18, Felix Krueger (felix.krueger@babraham.ac.uk)
+## This program is Copyright (C) 2012-19, Felix Krueger (felix.krueger@babraham.ac.uk)
 
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 21 December 2018
+## last modified on 02 Jan 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -301,7 +301,9 @@ else{
 
 ### SETTING DEFAULTS UNLESS THEY WERE SPECIFIED
 unless (defined $cutoff){
-    $cutoff = 20;
+   unless ($nextseq){
+   		$cutoff = 20;
+   	}
 }
 my $phred_score_cutoff = $cutoff; # only relevant for report
 my $adapter_name = '';
@@ -441,9 +443,11 @@ sub trim{
     warn "Cutadapt version: $cutadapt_version\n";
     print REPORT "Cutadapt version: $cutadapt_version\n";
     
-    warn "Quality Phred score cutoff: $phred_score_cutoff\n";
-    print REPORT "Quality Phred score cutoff: $phred_score_cutoff\n";
-    
+    if (defined $phred_score_cutoff){
+  		warn "Quality Phred score cutoff: $phred_score_cutoff\n";
+    	print REPORT "Quality Phred score cutoff: $phred_score_cutoff\n";
+    }
+
     warn "Quality encoding type selected: ASCII+$phred_encoding\n";
     print REPORT "Quality encoding type selected: ASCII+$phred_encoding\n";
     
@@ -462,8 +466,8 @@ sub trim{
     }
 
     if ($nextseq){
-		warn "2-colour high quality G-trimming enabled: $nextseq\n";	
-		print REPORT "2-colour high quality G-trimming enabled: $nextseq\n";	
+		warn "2-colour high quality G-trimming enabled, with quality cutoff: $nextseq\n";	
+		print REPORT "2-colour high quality G-trimming enabled, with quality cutoff: $nextseq\n";	
     }
 
     print REPORT "Maximum trimming error rate: $error_rate";
@@ -1001,25 +1005,36 @@ sub trim{
 
     else{ # non-RRBS mode. default
 
+    	 my $quality_cutoff;
+
+      	if ($nextseq){
+      		$quality_cutoff = $nextseq;
+      	}
+      	else{
+      		$quality_cutoff = "-q $cutoff";
+      	}
+
       ### optionally using 2 different adapters for read 1 and read 2
       if ($validate and $a2){
+     
+
 	  ### Figure out whether current file counts as read 1 or read 2 of paired-end files
 	  if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
-	      warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
+	      warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 	      #sleep (1);
-	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt $nextseq -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 	  }
 	  else{                            # this is read 2 of a pair
-	      warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
+	      warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
 	      #sleep (1);
-	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt $nextseq -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
+	      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
 	  }
       }
       ### Using the same adapter for both read 1 and read 2
       else{
-	  warn "\n  >>> Now performing quality (cutoff $cutoff) and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
+	  warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 	  #sleep (1);
-	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt $nextseq -f fastq -e $error_rate -q $cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+	  $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
       }
       
       close WRITER or die $!; # not needed
@@ -2054,7 +2069,7 @@ sub process_commandline{
                                 (powered by Cutadapt)
                                   version $trimmer_version
 
-                               Last update: 12 12 2018
+                               Last update: 02 01 2019
 
 VERSION
     exit;
@@ -2086,7 +2101,10 @@ VERSION
 
   	### ILLUMINA 2-COLOUR CHEMISTRY SPEICIFC HIGH QUALITY G-TRIMMING
   	if (defined $nextseq){	
-		#	warn "OK, let's deal with 2-colour issues\n\n";
+  		if (defined $quality){
+  			die "The options '-quality INT' and '--nextseq INT' are mutually exclusive. Please decide which trimming mode you would like to apply!\n\n";
+  		}
+  		#	warn "OK, let's deal with 2-colour issues\n\n";
 		unless ( ($nextseq > 0) and $nextseq < 200){
 			die "Please select a sensible value for 2-colour specific trimming (currently allowed range is between 1 and 200 Gs). Please respecify!\n";
 		}
@@ -2499,10 +2517,10 @@ trim_galore [options] <filename(s)>
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
 
---2colour/--nextseq     This enables the option '--nextseq-trim=3'CUTOFF' within Cutadapt, which will set a quality
+--2colour/--nextseq INT This enables the option '--nextseq-trim=3'CUTOFF' within Cutadapt, which will set a quality
                         cutoff (that is normally given with -q instead), but qualities of G bases are ignored. 
                         This trimming is in common for the NextSeq- and NovaSeq-platforms, where basecalls without
-                        any signal are called as high-quality G bases.
+                        any signal are called as high-quality G bases. This is mutually exlusive with '-q INT'.
                      
 
 --path_to_cutadapt </path/to/cutadapt>     You may use this option to specify a path to the Cutadapt executable,
