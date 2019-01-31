@@ -25,14 +25,14 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 02 Jan 2019
+## last modified on 31 Jan 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.5.0_dev';
 
-my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq) = process_commandline();
+my ($cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -269,6 +269,7 @@ sub rc{
 
 ########################################################################
 
+
 my $path_to_fastqc = 'fastqc';
 
 # Before we start let's have quick look if Cutadapt seems to be working with the path information provided
@@ -479,70 +480,70 @@ sub trim{
     }
     
     if ($a2){
-	warn "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
-	print REPORT "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
+		warn "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
+		print REPORT "Optional adapter 2 sequence (only used for read 2 of paired-end files): '$a2'\n";
     }
     
     warn "Minimum required adapter overlap (stringency): $stringency bp\n";
     print REPORT "Minimum required adapter overlap (stringency): $stringency bp\n";
     
     if ($validate){
-	warn "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
-	print REPORT "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
+		warn "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
+		print REPORT "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
     }
     else{
-	warn "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
-	print REPORT "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
+		warn "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
+		print REPORT "Minimum required sequence length before a sequence gets removed: $length_cutoff bp\n";
     }
     
     if ($max_length){
-	warn "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
-	print REPORT "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
+		warn "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
+		print REPORT "Maxiumum tolerated read length after trimming (for smallRNA trimming): $max_length bp\n";
     }
 
     if ($trim_n){
-	warn "Removing Ns from the start and end of reads\n";
-	print REPORT "Removing Ns from the start and end of reads\n";
+		warn "Removing Ns from the start and end of reads\n";
+		print REPORT "Removing Ns from the start and end of reads\n";
     }
     
     
     if ($validate){ # only for paired-end files
 	
-	if ($retain){ # keeping single-end reads if only one end is long enough
-	    
-	    if ($length_read_1 == 35){
-		warn "Length cut-off for read 1: $length_read_1 bp (default)\n";
-		print REPORT "Length cut-off for read 1: $length_read_1 bp (default)\n";
-	    }
-	    else{
-		warn "Length cut-off for read 1: $length_read_1 bp\n";
-		print REPORT "Length cut-off for read 1: $length_read_1 bp\n";
-	    }
-	    
-	    if ($length_read_2 == 35){
-		warn "Length cut-off for read 2: $length_read_2 bb (default)\n";
-		print REPORT "Length cut-off for read 2: $length_read_2 bp (default)\n";
-	    }
-	    else{
-		warn "Length cut-off for read 2: $length_read_2 bp\n";
-		print REPORT "Length cut-off for read 2: $length_read_2 bp\n";
-	    }
-	}
+		if ($retain){ # keeping single-end reads if only one end is long enough
+			
+			if ($length_read_1 == 35){
+				warn "Length cut-off for read 1: $length_read_1 bp (default)\n";
+				print REPORT "Length cut-off for read 1: $length_read_1 bp (default)\n";
+			}
+			else{
+				warn "Length cut-off for read 1: $length_read_1 bp\n";
+				print REPORT "Length cut-off for read 1: $length_read_1 bp\n";
+			}
+			
+			if ($length_read_2 == 35){
+				warn "Length cut-off for read 2: $length_read_2 bb (default)\n";
+				print REPORT "Length cut-off for read 2: $length_read_2 bp (default)\n";
+			}
+			else{
+				warn "Length cut-off for read 2: $length_read_2 bp\n";
+				print REPORT "Length cut-off for read 2: $length_read_2 bp\n";
+			}
+		}
     }
     
     if ($rrbs){
-	warn "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
-	print REPORT "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
+		warn "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
+		print REPORT "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction\n";
     }
     
     if ($non_directional){
-	warn "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
-	print REPORT "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
+		warn "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
+		print REPORT "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
     }
     
     if ($trim){
-	warn "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
-	print REPORT "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
+		warn "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
+		print REPORT "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
     }
     
     if ($clip_r1){
@@ -564,27 +565,27 @@ sub trim{
     }
     
     if ($fastqc){
-	warn "Running FastQC on the data once trimming has completed\n";
-	print REPORT "Running FastQC on the data once trimming has completed\n";
-	
-	if ($fastqc_args){
-	    warn "Running FastQC with the following extra arguments: '$fastqc_args'\n";
-	    print REPORT  "Running FastQC with the following extra arguments: $fastqc_args\n";
-	}
+		warn "Running FastQC on the data once trimming has completed\n";
+		print REPORT "Running FastQC on the data once trimming has completed\n";
+		
+		if ($fastqc_args){
+			warn "Running FastQC with the following extra arguments: '$fastqc_args'\n";
+			print REPORT  "Running FastQC with the following extra arguments: $fastqc_args\n";
+		}
     }
     
     if ($keep and $rrbs){
-	warn "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
-	print REPORT "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
+		warn "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
+		print REPORT "Keeping quality trimmed (but not yet adapter trimmed) intermediate FastQ file\n";
     }
     
 
     if ($gzip or $filename =~ /\.gz$/){
-	$gzip = 1;
-	unless ($dont_gzip){
-	    warn "Output file(s) will be GZIP compressed\n";
-	    print REPORT "Output file will be GZIP compressed\n";
-	}
+		$gzip = 1;
+		unless ($dont_gzip){
+			warn "Output file(s) will be GZIP compressed\n";
+			print REPORT "Output file will be GZIP compressed\n";
+		}
     }
     
     warn "\n";
@@ -1151,32 +1152,32 @@ sub trim{
   print REPORT "$count sequences processed in total\n";
   
   ###  only reporting this separately if quality and adapter trimming were performed separately
-  if ($rrbs){
-      my $percentage_shortened;
-      if ($count){
-	  $percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
-	  warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
-	  print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
-      }
-      else{
-	  warn "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
-	  print REPORT "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
-      }
-  }
+	if ($rrbs){
+		my $percentage_shortened;
+		if ($count){
+		$percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
+			warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
+			print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
+			}
+		else{
+			warn "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
+			print REPORT "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
+		}
+	}
   
-  my $percentage_too_short;
-  my $percentage_too_long;
-  my $percentage_too_many_n;
-  if ($count){
-      $percentage_too_short  = sprintf ("%.1f",$too_short/$count*100);
-      $percentage_too_long   = sprintf ("%.1f",$too_long/$count*100);
-      $percentage_too_many_n = sprintf ("%.1f",$too_many_n/$count*100);
-  }
-  else{
-      $percentage_too_short = 'N/A';
-      $percentage_too_long = 'N/A';
-      $percentage_too_many_n = 'N/A';
-  }
+	my $percentage_too_short;
+	my $percentage_too_long;
+	my $percentage_too_many_n;
+	if ($count){
+		$percentage_too_short  = sprintf ("%.1f",$too_short/$count*100);
+		$percentage_too_long   = sprintf ("%.1f",$too_long/$count*100);
+		$percentage_too_many_n = sprintf ("%.1f",$too_many_n/$count*100);
+	}
+	else{
+		$percentage_too_short = 'N/A';
+		$percentage_too_long = 'N/A';
+		$percentage_too_many_n = 'N/A';
+	}
   
   
   
@@ -1191,7 +1192,7 @@ sub trim{
 	  print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
       }
       if ($max_length){
-	  warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+		warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
 	  print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
       }
   }
@@ -1211,52 +1212,78 @@ sub trim{
   warn "\n";
   print REPORT "\n";
   
-  ### RUNNING FASTQC unless we are dealing with paired-end files
-  unless($validate){
-      if ($fastqc){
-	  warn "\n  >>> Now running FastQC on the data <<<\n\n";
-	  # sleep (1);
-	  if ($fastqc_args){
-	      system ("$path_to_fastqc $fastqc_args $output_dir$output_filename");
-	  }
-	  else{
-	      system ("$path_to_fastqc $output_dir$output_filename");
-	  }
-      }
-  }
+	### RUNNING FASTQC unless we are dealing with paired-end files
+	unless($validate){
   
-  ### VALIDATE PAIRED-END FILES
-  if ($validate){
-      ### Figure out whether current file counts as read 1 or read 2 of paired-end files
+		# File renaming requested in Issue #17 (https://github.com/FelixKrueger/TrimGalore/issues/17)
+		### FILE RENAMING
+		if ($basename){
+			warn "Now renaming the output file $output_filename\n\n";
+			my $tempname = "${basename}$1" if ($output_filename =~ /(_trimmed.*)$/);
+			warn "ORIGINAL FILE 1: >>$output_filename<<\tRENAMING TO:>>$tempname<<\n";
+						
+			rename $output_filename, $tempname;
+			$output_filename = $tempname;
+		}
+		
+		if ($fastqc){
+			warn "\n  >>> Now running FastQC on the data <<<\n\n";
+			# sleep (1);
+			if ($fastqc_args){
+				system ("$path_to_fastqc $fastqc_args $output_dir$output_filename");
+			}
+			else{
+				system ("$path_to_fastqc $output_dir$output_filename");
+			}
+		}
+	}
+  
+	### VALIDATE PAIRED-END FILES
+	if ($validate){
+		### Figure out whether current file counts as read 1 or read 2 of paired-end files
       
-      if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
-	  $file_1 = $output_filename;
-	  shift @filenames;
-	  # warn "This is read 1: $file_1\n\n";
-      }
-      else{                            # this is read 2 of a pair
-	  $file_2 = $output_filename;
-	  shift @filenames;
-	  # warn "This is read 2: $file_2\n\n";
-      }
+		if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
+			$file_1 = $output_filename;
+			shift @filenames;
+			# warn "This is read 1: $file_1\n\n";
+		}
+		else{                            # this is read 2 of a pair
+			$file_2 = $output_filename;
+			shift @filenames;
+			# warn "This is read 2: $file_2\n\n";
+		}
       
-      if ($file_1 and $file_2){
-	  warn "Validate paired-end files $file_1 and $file_2\n";
-	  # sleep (1);
+		if ($file_1 and $file_2){
+			warn "Validate paired-end files $file_1 and $file_2\n";
+		
+			# File renaming requested in Issue #17 (https://github.com/FelixKrueger/TrimGalore/issues/17)
+			### FILE RENAMING
+			if ($basename){
+				warn "Now renaming the output files\n\n";
+				my $tempname_1 = "${basename}$1" if ($file_1 =~ /(_trimmed.*)$/);
+				my $tempname_2 = "${basename}$1" if ($file_2 =~ /(_trimmed.*)$/);
+				warn "ORIGINAL FILE 1: >>$file_1<<\tRENAMING TO:>>$tempname_1<<\n";
+				warn "ORIGINAL FILE 2: >>$file_2<<\tRENAMING TO:>>$tempname_2<<\n";
+				
+				rename $file_1, $tempname_1;
+				rename $file_2, $tempname_2;
+				$file_1 = $tempname_1;
+				$file_2 = $tempname_2;
+			}
+			# sleep (1);
+		  
+		my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
 	  
-	  my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
-	  
-	  ### RUNNING FASTQC
-	  if ($fastqc){
+		### RUNNING FASTQC
+		if ($fastqc){
 	      
-	    warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
-	    #sleep (3);
-	    
+			warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
+			
 	    if ($fastqc_args){
-		system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
+			system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
 	    }
 	    else{
-		system ("$path_to_fastqc $output_dir$val_1");
+			system ("$path_to_fastqc $output_dir$val_1");
 	    }
 	    
 	    warn "\n  >>> Now running FastQC on the validated data $val_2<<<\n\n";
@@ -1996,14 +2023,15 @@ sub process_commandline{
   my $path_to_cutadapt;
   my $max_length;
   my $maxn;
-  my $trimn;
-  my $hardtrim5; 
-  my $hardtrim3;
-  my $clock;
-  my $polyA;
-  my $nextseq;
+	my $trimn;
+	my $hardtrim5; 
+	my $hardtrim3;
+	my $clock;
+	my $polyA;
+	my $nextseq;
+	my $basename;
 
-  my $command_line = GetOptions ('help|man' => \$help,
+	my $command_line = GetOptions ('help|man' => \$help,
 				 'q|quality=i' => \$quality,
 				 'a|adapter=s' => \$adapter,
 				 'a2|adapter2=s' => \$adapter2,
@@ -2045,6 +2073,7 @@ sub process_commandline{
 				 'clock|casio|breitling' => \$clock,
 				 'polyA' => \$polyA,
 				 '2colour|nextseq=i' => \$nextseq,
+				 'basename=s' => \$basename,
       );
   
   ### EXIT ON ERROR if there were errors with any of the supplied options
@@ -2065,11 +2094,11 @@ sub process_commandline{
   if ($version){
     print << "VERSION";
 
-                        Quality-/Adapter-/RRBS-/Hard-Trimming
-                                (powered by Cutadapt)
+                        Quality-/Adapter-/RRBS-/Speciality-Trimming
+                                [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 02 01 2019
+                               Last update: 31 01 2019
 
 VERSION
     exit;
@@ -2378,8 +2407,30 @@ VERSION
       }
   }
 
+	if (defined $basename){
+		warn "Using user-specified basename (>>$basename<<) instead of deriving the filename from the input file(s)\n";
+		
+		if ($basename =~ /\//){
+			die "Please make sure the name specified with --basename does not contain file path information! ($basename)";
+		}
+		$basename =~ s/[ !%\$\*&£]/_/g; # replacing weird symbols or spaces
+		
+		if (scalar @ARGV > 2){
+			die "[FATAL ERROR]: Number of files supplied can be 1 (single-end mode), or 2 (paired-end mode), but was: ",scalar @ARGV,". Please respecify!\n\n";
+		}	
+		else{
+			if (scalar @ARGV == 2){
+				if ($validate){
+					# fine, this is paired-end
+				}	
+				else{
+					die "[FATAL ERROR]: Number of files supplied was 2, but single-end mode was selected as well. Please respecify!\n\n";
+				}
+			}
+		}
+	}
 
-  return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq);
+	return ($quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename);
 }
 
 sub Ncounter{
@@ -2526,7 +2577,13 @@ trim_galore [options] <filename(s)>
 --path_to_cutadapt </path/to/cutadapt>     You may use this option to specify a path to the Cutadapt executable,
                         e.g. /my/home/cutadapt-1.7.1/bin/cutadapt. Else it is assumed that Cutadapt is in
                         the PATH.
+						
+--basename <PREFERRED_NAME>	Use PREFERRED_NAME as the basename for output files, instead of deriving the filenames from
+                        the input files. Single-end data would be called PREFERRED_NAME_trimmed.fq(.gz), or 
+                        PREFERRED_NAME_val_1.fq(.gz) and PREFERRED_NAME_val_2.fq(.gz) for paired-end data. --basename
+                        only works when 1 file (single-end) or 2 files (paired-end) are specified, but not for longer lists.
 
+						
 SPECIFIC TRIMMING - without adapter/quality trimming
 
 --hardtrim5 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
@@ -2690,7 +2747,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 09 August 2018.
+Last modified on 31 January 2019.
 
 HELP
   exit;
