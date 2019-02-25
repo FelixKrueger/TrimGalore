@@ -436,8 +436,7 @@ sub trim{
 	warn "Trimming mode: single-end\n";
 	print REPORT "Trimming mode: single-end\n";
     }
-    
-    
+        
     warn "Trim Galore version: $trimmer_version\n";
     print REPORT "Trim Galore version: $trimmer_version\n";
     
@@ -2312,20 +2311,48 @@ VERSION
   }
 
 
-  unless ($no_report_file){
-    $no_report_file = 0;
-  }
+	unless ($no_report_file){
+		$no_report_file = 0;
+	}
 
-  ### OUTPUT DIR PATH
-  if ($output_dir){
-      unless ($output_dir =~ /\/$/){
-	  $output_dir =~ s/$/\//;
-      }
-  }
-  else{
-      $output_dir = '';
-  }
-  
+	### PARENT DIRECTORY
+    my $parent_dir = getcwd();
+    unless ($parent_dir =~ /\/$/){
+		$parent_dir =~ s/$/\//;
+    }
+
+	### OUTPUT DIR PATH
+    if (defined $output_dir){
+        unless ($output_dir eq ''){
+			unless ($output_dir =~ /\/$/){
+                $output_dir =~ s/$/\//;
+            }
+
+			if (chdir $output_dir){
+				$output_dir = getcwd(); #  making the path absolute
+				unless ($output_dir =~ /\/$/){
+					$output_dir =~ s/$/\//;
+				}
+			}
+			else{
+				mkdir $output_dir or die "Unable to create directory $output_dir $!\n";
+				warn "Output directory $output_dir doesn't exist, creating it for you...\n\n"; sleep(1);
+				chdir $output_dir or die "Failed to move to $output_dir\n";
+				$output_dir = getcwd(); #  making the path absolute
+				unless ($output_dir =~ /\/$/){
+						$output_dir =~ s/$/\//;
+				}
+			}
+			warn "Output will be written into the directory: $output_dir\n";
+		}
+    }
+    else{
+        $output_dir = '';
+    }
+	# Changing back to parent directory
+    chdir $parent_dir or die "Failed to move to $parent_dir\n";
+
+	  
   ### Trimming at the 5' end
   if (defined $clip_r2){ # trimming 5' bases of read 2
       die "Clipping the 5' end of read 2 is only allowed for paired-end files (--paired)\n" unless ($validate);
@@ -2541,7 +2568,7 @@ trim_galore [options] <filename(s)>
 --trim-n                Removes Ns from either side of the read. This option does currently not work in RRBS mode.
 
 -o/--output_dir <DIR>   If specified all output will be written to this directory instead of the current
-                        directory.
+                        directory. If the directory doesn't exist it will be created for you.
 
 --no_report_file        If specified no report file will be generated.
 
@@ -2747,7 +2774,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 31 January 2019.
+Last modified on 25 February 2019.
 
 HELP
   exit;
