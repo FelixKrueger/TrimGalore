@@ -612,7 +612,7 @@ sub trim{
       warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
       # sleep (1);
 
-      open (QUAL,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
+      open (QUAL,"$path_to_cutadapt -j $cores -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
 
       my $qual_count = 0;
 
@@ -691,19 +691,19 @@ sub trim{
       if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
           warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
           #sleep (1);
-          $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+          $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
       }
       else{                            # this is read 2 of a pair
           warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$a2' from file $temp <<< \n";
           #sleep (1);
-          $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+          $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
       }
       }
       ### Using the same adapter for both read 1 and read 2
       else{
       warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
       # sleep (3);
-      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+      $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
       }
 
       close WRITER or die $!; # not needed
@@ -868,20 +868,20 @@ sub trim{
         ### Figure out whether current file counts as read 1 or read 2 of paired-end files
         if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
         warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-        $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+        $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
         }
         else{                            # this is read 2 of a pair
         $isR2 = 1;
         warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$a2' from file $temp <<< \n";
         # For Read 2 we need to trim the PolyT (or PolyA) from the 5' end instead! Hence -g $a2 and not -a!
-        $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+        $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
         }
     }
     ### Using the same adapter for both read 1 and read 2 - Single end will use the same adapters are Read 1s for paired-end files
     else{
         warn "\n  >>> Now performing single-end Poly-A trimming for with the sequence: '$adapter' from file $temp <<< \n";
         # sleep (3);
-        $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+        $pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
     }
 
     close WRITER or die $!; # not needed
@@ -1023,19 +1023,19 @@ sub trim{
       if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
           warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
           #sleep (1);
-          $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -j $cores -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+          $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
       }
       else{                            # this is read 2 of a pair
           warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
           #sleep (1);
-          $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -j $cores -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
+          $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
       }
       }
       ### Using the same adapter for both read 1 and read 2
       else{
       warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
       #sleep (1);
-      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -j $cores -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+      $pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
       }
 
       close WRITER or die $!; # not needed
