@@ -41,15 +41,11 @@ USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    f
 file_sanity_check($filenames[0]);
 
 my $compression_path;
-my $python_version;
-my $python_version_number;
 my $python_2_or_3;
 my $pigz_installation;
 
 if (defined $cores){
-    $python_version = `python --version`;
-    $python_version_number = (split (/ /, $python_version))[-1];
-    $python_2_or_3 = (split (/\./, $python_version_number))[0];
+    $python_2_or_3 = `python -c "import sys; print(sys.version[0])"`
     if ($python_2_or_3 == 3){
         warn "Python 3 found, proceeding with multicore cutadapt using $cores cores.\n";
     } elsif ($python_2_or_3 == 2) {
