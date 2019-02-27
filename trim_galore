@@ -8,6 +8,7 @@ use File::Basename;
 use Cwd;
 
 ## This program is Copyright (C) 2012-18, Felix Krueger (felix.krueger@babraham.ac.uk)
+## Edited by Frankie James (github.com/fjames003)
 
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -25,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 09 August 2018
+## last modified on 27 February 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -110,7 +111,7 @@ sub clockwork{
         }
         else{
             $out1 .= '.gz';
-            open ($read1_fh,"| gzip -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
+            open ($read1_fh,"| pigz -p $cores -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
         }
     }
     else{
@@ -125,7 +126,7 @@ sub clockwork{
         }
         else{
             $out2 .= '.gz';
-            open ($read2_fh,"| gzip -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
+            open ($read2_fh,"| pigz -p $cores -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
         }
     }
     else{
@@ -140,8 +141,8 @@ sub clockwork{
     my $umi_1;
     my $umi_2;
 
-    # open ($out2,"| gzip -c - > $out1") or die $!;
-    # open (OUT2,"| gzip -c - > $out2") or die $!;
+    # open ($out2,"| pigz -p $cores -c - > $out1") or die $!;
+    # open (OUT2,"| pigz -p $cores -c - > $out2") or die $!;
 
     # print "Processing files $in1 and $in2\n";
     my %r1; # storing the barcodes for R1
@@ -658,7 +659,7 @@ if ($gzip or $filename =~ /\.gz$/){
         # open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
         # }
         $output_filename .= '.gz';
-        open (OUT,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+        open (OUT,"| pigz -p $cores -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
     }
 }
 else{
@@ -1311,7 +1312,7 @@ sub hardtrim_to_5prime_end{
         }
         else{
             $output_filename .= '.gz';
-            open ($hardtrim_5,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+            open ($hardtrim_5,"| pigz -p $cores -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
         }
     }
     else{
@@ -1389,7 +1390,7 @@ sub hardtrim_to_3prime_end{
         }
         else{
             $output_filename .= '.gz';
-            open ($hardtrim_3,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+            open ($hardtrim_3,"| pigz -p $cores -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
         }
     }
     else{
@@ -1473,7 +1474,7 @@ sub validate_paired_end_files{
         }
         else{
             $out_1 .= '.gz';
-            open (R1,"| gzip -c - > ${output_dir}${out_1}") or die "Can't write to $out_1: $!\n";
+            open (R1,"| pigz -p $cores -c - > ${output_dir}${out_1}") or die "Can't write to $out_1: $!\n";
         }
     }
     else{
@@ -1486,7 +1487,7 @@ sub validate_paired_end_files{
         }
         else{
             $out_2 .= '.gz';
-            open (R2,"| gzip -c - > ${output_dir}${out_2}") or die "Can't write to $out_2: $!\n";
+            open (R2,"| pigz -p $cores -c - > ${output_dir}${out_2}") or die "Can't write to $out_2: $!\n";
         }
     }
     else{
@@ -1524,7 +1525,7 @@ sub validate_paired_end_files{
             }
             else{
                 $unpaired_1 .= '.gz';
-                open (UNPAIRED1,"| gzip -c - > ${output_dir}${unpaired_1}") or die "Can't write to $unpaired_1: $!\n";
+                open (UNPAIRED1,"| pigz -p $cores -c - > ${output_dir}${unpaired_1}") or die "Can't write to $unpaired_1: $!\n";
             }
         }
         else{
@@ -1537,7 +1538,7 @@ sub validate_paired_end_files{
             }
             else{
                 $unpaired_2 .= '.gz';
-                open (UNPAIRED2,"| gzip -c - > ${output_dir}${unpaired_2}") or die "Can't write to $unpaired_2: $!\n";
+                open (UNPAIRED2,"| pigz -p $cores -c - > ${output_dir}${unpaired_2}") or die "Can't write to $unpaired_2: $!\n";
             }
         }
         else{
@@ -2446,7 +2447,6 @@ trim_galore [options] <filename(s)>
                         adapter/quality trimming has been performed. This may remove some unwanted bias from
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
-
 --path_to_cutadapt </path/to/cutadapt>     You may use this option to specify a path to the Cutadapt executable,
                         e.g. /my/home/cutadapt-1.7.1/bin/cutadapt. Else it is assumed that Cutadapt is in
                         the PATH.
@@ -2472,7 +2472,6 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The UMIs for Read 1 (R1) and
                         Read 2 (R2), as well as the fixed sequences (F1 or F2), are written into the read ID and
                         removed from the actual sequence. Here is an example:
-
                         R1: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT
                             ATCTAGTTCAGTACGGTGTTTTCGAATTAGAAAAATATGTATAGAGGAAATAGATATAAAGGCGTATTCGTTATTG
                         R2: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT
@@ -2498,10 +2497,8 @@ SPECIFIC TRIMMING - without adapter/quality trimming
             In addition to trimming the sequences, white spaces are replaced with _ and it records in the read ID
             how many bases were trimmed so it can later be used to identify PolyA trimmed sequences, e.g. _PolyA:32
             in the following example:
-
                         \@READ-ID:1:1102:22039:36996 1:N:0:CCTAATCC
             GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-
             \@READ-ID:1:1102:22039:36996_1:N:0:CCTAATCC_PolyA:32
             GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACC
             PLEASE NOTE: The poly-A trimming mode expects that sequences were both adapter and quality trimmed
@@ -2512,7 +2509,6 @@ SPECIFIC TRIMMING - without adapter/quality trimming
             3) zcat file_trimmed_trimmed.fq.gz | grep -A 3 PolyA | grep -v ^-- > PolyA_trimmed.fastq
                         Will 1) trim qualities and Illumina adapter contamination, 2) find and remove PolyA contamination.
                         Finally, if desired, 3) will specifically find PolyA trimmed sequences to a specific FastQ file of your choice.
-
 RRBS-specific options (MspI digested material):
 --rrbs                  Specifies that the input file was an MspI digested RRBS sample (recognition
                         site: CCGG). Single-end or Read 1 sequences (paired-end) which were adapter-trimmed
