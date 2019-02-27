@@ -40,6 +40,38 @@ die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Tri
 USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    for more options\n\n" unless (@filenames);
 file_sanity_check($filenames[0]);
 
+my $compression_path;
+my $python_version;
+my $python_version_number;
+my $python_2_or_3;
+my $pigz_installation;
+
+if (defined $cores){
+    $python_version = `python --version`;
+    $python_version_number = (split (/ /, $python_version))[-1];
+    $python_2_or_3 = (split (/\./, $python_version_number))[0];
+    if ($python_2_or_3 == 3){
+        warn "Python 3 found, proceeding with multicore cutadapt using $cores cores.\n";
+    } elsif ($python_2_or_3 == 2) {
+        warn "Python 2 found, multicore not supported proceeding with single core cutadapt.\n";
+        $cores = 1;
+    } else {
+        die "\nPython not detected. Python needed run cutadapt.\n\n";
+    }
+    $pigz_return = system "pigz --version";
+    if ($pigz_return == -1) {
+        warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again."
+        $compression_path = "gzip";
+    } else {
+        warn "pigz detected. Proceeding with multicore (de)compression.";
+        $compression_path = "pigz -p $cores";
+    }
+} else {
+    warn "Multicore support not enabled. Proceeding with single core trimming.\n";
+    $compression_path = "gzip";
+    $cores = 1;
+}
+
 if (defined $hardtrim5){
     warn "Hard-trimming from the 3'-end selected. File(s) will be trimmed to leave the leftmost $hardtrim5 bp on the 5'-end, and Trim Galore will then exit.\n\n";
     foreach my $file(@filenames){
@@ -77,13 +109,13 @@ sub clockwork{
     ### INPUT FILES
     my ($in1,$in2) = @_;
     if ($in1 =~ /\.gz$/){
-    open ($in1_fh,"pigz -d -p $cores -c $in1 |") or die "Failed to read from file $in1: $!";
+    open ($in1_fh,"$compression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
     }
     else{
     open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
     }
     if ($in2 =~ /\.gz$/){
-    open ($in2_fh,"pigz -d -p $cores -c $in2 |") or die "Failed to read from file $in2: $!";
+    open ($in2_fh,"$compression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
     }
     else{
     open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
@@ -111,7 +143,7 @@ sub clockwork{
     }
     else{
         $out1 .= '.gz';
-        open ($read1_fh,"| pigz -p $cores -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
+        open ($read1_fh,"| $compression_path -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
     }
     }
     else{
@@ -126,7 +158,7 @@ sub clockwork{
     }
     else{
         $out2 .= '.gz';
-        open ($read2_fh,"| pigz -p $cores -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
+        open ($read2_fh,"| $compression_path -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
     }
     }
     else{
@@ -141,8 +173,8 @@ sub clockwork{
     my $umi_1;
     my $umi_2;
 
-    # open ($out2,"| pigz -p $cores -c - > $out1") or die $!;
-    # open (OUT2,"| pigz -p $cores -c - > $out2") or die $!;
+    # open ($out2,"| $compression_path -c - > $out1") or die $!;
+    # open (OUT2,"| $compression_path -c - > $out2") or die $!;
 
     # print "Processing files $in1 and $in2\n";
     my %r1; # storing the barcodes for R1
@@ -471,12 +503,6 @@ sub trim{
         print REPORT "2-colour high quality G-trimming enabled, with quality cutoff: $nextseq\n";
     }
 
-    if ($cores == 1) {
-        warn "Using 1 core (default)\n";
-    } else {
-        warn "Using $cores cores\n";
-    }
-
     print REPORT "Maximum trimming error rate: $error_rate";
     if ($error_rate == 0.1){
     print REPORT " (default)\n";
@@ -669,7 +695,7 @@ sub trim{
       # open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
       # }
       $output_filename .= '.gz';
-      open (OUT,"| pigz -p $cores -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+      open (OUT,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
       }
   }
   else{
@@ -717,7 +743,7 @@ sub trim{
       open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
 
       if ($filename =~ /\.gz$/){
-      open (IN,"pigz -d -p $cores -c $filename |") or die $!; # original, untrimmed file
+      open (IN,"$compression_path -d -c $filename |") or die $!; # original, untrimmed file
       }
       else{
       open (IN,$filename) or die $!; # original, untrimmed file
@@ -894,14 +920,14 @@ sub trim{
 
     # This is the Illumina adapter trimmed file
           if ($temp =~ /\.gz$/){
-        open (QUAL,"pigz -d -p $cores -c $output_dir$temp |") or die $!; # quality trimmed file
+        open (QUAL,"$compression_path -d -c $output_dir$temp |") or die $!; # quality trimmed file
     }
     else{
         open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
     }
 
     #if ($filename =~ /\.gz$/){
-    #    open (IN,"pigz -d -p $cores -c $filename |") or die $!; # original, untrimmed file
+    #    open (IN,"$compression_path -d -c $filename |") or die $!; # original, untrimmed file
     #}
     #else{
     #    open (IN,$filename) or die $!; # original, untrimmed file
@@ -1327,7 +1353,7 @@ sub hardtrim_to_5prime_end{
     my $hardtrim_5; # filehandle
 
     if ($filename =~ /gz$/){
-    open ($in,"pigz -d -p $cores -c $filename |") or die "Couldn't read from file $!";
+    open ($in,"$compression_path -d -c $filename |") or die "Couldn't read from file $!";
     }
     else{
     open ($in,$filename) or die "Couldn't read from file $!";
@@ -1359,7 +1385,7 @@ sub hardtrim_to_5prime_end{
     }
     else{
         $output_filename .= '.gz';
-        open ($hardtrim_5,"| pigz -p $cores -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+        open ($hardtrim_5,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
     }
     }
     else{
@@ -1405,7 +1431,7 @@ sub hardtrim_to_3prime_end{
     my $hardtrim_3; # filehandle
 
     if ($filename =~ /gz$/){
-    open ($in,"pigz -d -p $cores -c $filename |") or die "Couldn't read from file $!";
+    open ($in,"$compression_path -d -c $filename |") or die "Couldn't read from file $!";
     }
     else{
     open ($in,$filename) or die "Couldn't read from file $!";
@@ -1437,7 +1463,7 @@ sub hardtrim_to_3prime_end{
     }
     else{
         $output_filename .= '.gz';
-        open ($hardtrim_3,"| pigz -p $cores -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+        open ($hardtrim_3,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
     }
     }
     else{
@@ -1483,14 +1509,14 @@ sub validate_paired_end_files{
   warn "file_1: $file_1, file_2: $file_2\n\n";
 
   if ($file_1 =~ /\.gz$/){
-      open (IN1,"pigz -d -p $cores -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
+      open (IN1,"$compression_path -d -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
   }
   else{
       open (IN1, "$output_dir$file_1") or die "Couldn't read from file $file_1: $!\n";
   }
 
   if ($file_2 =~ /\.gz$/){
-      open (IN2,"pigz -d -p $cores -c $output_dir$file_2 |") or die "Couldn't read from file $file_2: $!\n";
+      open (IN2,"$compression_path -d -c $output_dir$file_2 |") or die "Couldn't read from file $file_2: $!\n";
   }
   else{
       open (IN2, "$output_dir$file_2") or die "Couldn't read from file $file_2: $!\n";
@@ -1521,7 +1547,7 @@ sub validate_paired_end_files{
       }
       else{
       $out_1 .= '.gz';
-      open (R1,"| pigz -p $cores -c - > ${output_dir}${out_1}") or die "Can't write to $out_1: $!\n";
+      open (R1,"| $compression_path -c - > ${output_dir}${out_1}") or die "Can't write to $out_1: $!\n";
       }
   }
   else{
@@ -1534,7 +1560,7 @@ sub validate_paired_end_files{
     }
       else{
       $out_2 .= '.gz';
-      open (R2,"| pigz -p $cores -c - > ${output_dir}${out_2}") or die "Can't write to $out_2: $!\n";
+      open (R2,"| $compression_path -c - > ${output_dir}${out_2}") or die "Can't write to $out_2: $!\n";
       }
   }
   else{
@@ -1572,7 +1598,7 @@ sub validate_paired_end_files{
       }
       else{
           $unpaired_1 .= '.gz';
-          open (UNPAIRED1,"| pigz -p $cores -c - > ${output_dir}${unpaired_1}") or die "Can't write to $unpaired_1: $!\n";
+          open (UNPAIRED1,"| $compression_path -c - > ${output_dir}${unpaired_1}") or die "Can't write to $unpaired_1: $!\n";
       }
       }
       else{
@@ -1585,7 +1611,7 @@ sub validate_paired_end_files{
       }
       else{
           $unpaired_2 .= '.gz';
-          open (UNPAIRED2,"| pigz -p $cores -c - > ${output_dir}${unpaired_2}") or die "Can't write to $unpaired_2: $!\n";
+          open (UNPAIRED2,"| $compression_path -c - > ${output_dir}${unpaired_2}") or die "Can't write to $unpaired_2: $!\n";
       }
       }
       else{
@@ -1778,7 +1804,7 @@ sub file_sanity_check{
 
   my $file = shift;
   if ($file =~ /gz$/){
-      open (SANITY,"pigz -d -p $cores -c $file |") or die "Failed to read from file '$file' to perform sanity check: $!\n";
+      open (SANITY,"$compression_path -d -c $file |") or die "Failed to read from file '$file' to perform sanity check: $!\n";
   }
   else{
       open (SANITY,$file) or die "Failed to read from file '$file' to perform sanity check: $!\n";
@@ -1814,7 +1840,7 @@ sub autodetect_adapter_type{
   warn "Attempting to auto-detect adapter type from the first 1 million sequences of the first file (>> $ARGV[0] <<)\n\n";
 
   if ($ARGV[0] =~ /gz$/){
-    open (AUTODETECT,"pigz -d -p $cores -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
+    open (AUTODETECT,"$compression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
   }
   else{
     open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
@@ -1907,7 +1933,7 @@ sub autodetect_polyA_type{
     warn "Attempting to auto-detect PolyA type from the first 1 million sequences of the first file (>> $ARGV[0] <<)\n\n";
 
     if ($ARGV[0] =~ /gz$/){
-    open (AUTODETECT,"pigz -d -p $cores -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
+    open (AUTODETECT,"$compression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
     }
     else{
     open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
