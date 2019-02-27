@@ -42,10 +42,10 @@ file_sanity_check($filenames[0]);
 
 my $compression_path;
 my $python_2_or_3;
-my $pigz_installation;
+my $pigz_return;
 
 if (defined $cores){
-    $python_2_or_3 = `python -c "import sys; print(sys.version[0])"`
+    $python_2_or_3 = `python -c "import sys; print(sys.version[0])"`;
     if ($python_2_or_3 == 3){
         warn "Python 3 found, proceeding with multicore cutadapt using $cores cores.\n";
     } elsif ($python_2_or_3 == 2) {
@@ -56,7 +56,7 @@ if (defined $cores){
     }
     $pigz_return = system "pigz --version";
     if ($pigz_return == -1) {
-        warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again."
+        warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again.\n";
         $compression_path = "gzip";
     } else {
         warn "pigz detected. Proceeding with multicore (de)compression.";
@@ -2128,7 +2128,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 31 01 2019
+                               Last update: 27 02 2019
 
 VERSION
     exit;
