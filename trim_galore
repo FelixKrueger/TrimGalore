@@ -38,7 +38,6 @@ my ($cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
 USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    for more options\n\n" unless (@filenames);
-file_sanity_check($filenames[0]);
 
 my $compression_path;
 my $python_2_or_3;
@@ -54,12 +53,12 @@ if (defined $cores){
     } else {
         die "\nPython not detected. Python needed run cutadapt.\n\n";
     }
-    $pigz_return = system "pigz --version";
+    $pigz_return = system "pigz --version 2> /dev/null";
     if ($pigz_return == -1) {
         warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again.\n";
         $compression_path = "gzip";
     } else {
-        warn "pigz detected. Proceeding with multicore (de)compression.";
+        warn "pigz detected. Proceeding with multicore (de)compression using $cores cores.\n";
         $compression_path = "pigz -p $cores";
     }
 } else {
@@ -67,6 +66,8 @@ if (defined $cores){
     $compression_path = "gzip";
     $cores = 1;
 }
+
+file_sanity_check($filenames[0]);
 
 if (defined $hardtrim5){
     warn "Hard-trimming from the 3'-end selected. File(s) will be trimmed to leave the leftmost $hardtrim5 bp on the 5'-end, and Trim Galore will then exit.\n\n";
