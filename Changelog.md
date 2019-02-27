@@ -2,19 +2,20 @@
 
 ### Version 0.5.0_dev 
 
-* Added option `--hardtrim5 INT`, which allows you to hard-clip sequences from their 3' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_5prime.fq(.gz). This is useful when you want to shorten reads to a certain read length. Here is an example:
-
-```
-before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
---hardtrim5 20: CCTAAGGAAACAAGTACACT
-```
-
 * Added option `--hardtrim3 INT,` which allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_3prime.fq(.gz). We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences. Here is an example :
 
 ```
 before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
 --hardtrim3 20:                                                   TTTTTAAGAAAATGGAAAAT
 ```
+
+* Added new option `--basename <PREFERRED_NAME>` to use `PREFERRED_NAME` as the basename for output files, instead of deriving the filenames from the input files. Single-end data would be called `PREFERRED_NAME_trimmed.fq(.gz)`, or `PREFERRED_NAME_val_1.fq(.gz)` and `PREFERRED_NAME_val_2.fq(.gz)` for paired-end data. `--basename` only works when 1 file (single-end) or 2 files (paired-end) are specified, but not for longer lists (see #43).
+
+* Added option `--2colour/--nextseq INT` whereby INT selects the quality cutoff that is normally set with `-q`, only that qualities of G bases are ignored. `-q` and `--2colour/--nextseq INT` are mutually exclusive (see [#41](https://github.com/FelixKrueger/TrimGalore/issues/41))
+
+* Added check to see if Read 1 and Read 2 files were given as the very same file.
+
+* If an output directory which was specified with `-o output_directory` did not exist, it will be created for you.
 
 ### 28-06-18: Version 0.5.0 
 
