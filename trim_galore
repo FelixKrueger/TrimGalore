@@ -33,40 +33,11 @@ BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.5.1_dev';
 
-my ($cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename) = process_commandline();
+my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename) = process_commandline();
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
 USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    for more options\n\n" unless (@filenames);
-
-my $compression_path;
-my $python_2_or_3;
-my $pigz_return;
-
-if (defined $cores){
-    $python_2_or_3 = `python -c "import sys; print(sys.version[0])"`;
-    if ($python_2_or_3 == 3){
-        warn "Python 3 found, proceeding with multicore cutadapt using $cores cores.\n";
-    } elsif ($python_2_or_3 == 2) {
-        warn "Python 2 found, multicore not supported proceeding with single core cutadapt.\n";
-        $cores = 1;
-    } else {
-        die "\nPython not detected. Python needed run cutadapt.\n\n";
-    }
-    $pigz_return = system "pigz --version 2> /dev/null";
-    if ($pigz_return == -1) {
-        warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again.\n";
-        $compression_path = "gzip";
-    } else {
-        warn "pigz detected. Proceeding with multicore (de)compression using $cores cores.\n";
-        $compression_path = "pigz -p $cores";
-    }
-} else {
-    warn "Multicore support not enabled. Proceeding with single core trimming.\n";
-    $compression_path = "gzip";
-    $cores = 1;
-}
-
 file_sanity_check($filenames[0]);
 
 if (defined $hardtrim5){
@@ -2060,6 +2031,7 @@ sub process_commandline{
     my $nextseq;
     my $basename;
     my $cores;
+    my $compression_path;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2133,6 +2105,35 @@ sub process_commandline{
 
 VERSION
     exit;
+  }
+
+
+  ### Check python version and also if pigz is installed
+  my $python_2_or_3;
+  my $pigz_return;
+
+  if (defined $cores){
+      $python_2_or_3 = `python -c "import sys; print(sys.version[0])"`;
+      if ($python_2_or_3 == 3){
+          warn "Python 3 found, proceeding with multicore cutadapt using $cores cores.\n";
+      } elsif ($python_2_or_3 == 2) {
+          warn "Python 2 found, multicore not supported proceeding with single core cutadapt.\n";
+          $cores = 1;
+      } else {
+          die "\nPython not detected. Python needed run cutadapt.\n\n";
+      }
+      $pigz_return = system "pigz --version 2> /dev/null";
+      if ($pigz_return == -1) {
+          warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again.\n";
+          $compression_path = "gzip";
+      } else {
+          warn "pigz detected. Proceeding with multicore (de)compression using $cores cores.\n";
+          $compression_path = "pigz -p $cores";
+      }
+  } else {
+      warn "Multicore support not enabled. Proceeding with single core trimming.\n";
+      $compression_path = "gzip";
+      $cores = 1;
   }
 
 
@@ -2495,7 +2496,7 @@ VERSION
         }
     }
 
-    return ($cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename);
+    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename);
 }
 
 sub Ncounter{
