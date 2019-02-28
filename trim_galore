@@ -26,12 +26,14 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 27 Feb 2019
+## last modified on 28 Feb 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.5.1_dev';
+my $cutadapt_version;
+my $python_version;
 
 my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename) = process_commandline();
 
@@ -43,7 +45,7 @@ file_sanity_check($filenames[0]);
 if (defined $hardtrim5){
     warn "Hard-trimming from the 3'-end selected. File(s) will be trimmed to leave the leftmost $hardtrim5 bp on the 5'-end, and Trim Galore will then exit.\n\n";
     foreach my $file(@filenames){
-    hardtrim_to_5prime_end($file);
+		hardtrim_to_5prime_end($file);
     }
     exit;
 }
@@ -51,7 +53,7 @@ if (defined $hardtrim5){
 if (defined $hardtrim3){
     warn "Hard-trimming from 5'-end selected. File(s) will be trimmed to leave the rightmost $hardtrim3 bp on the 3'-end, and Trim Galore will then exit.\n\n";
     foreach my $file(@filenames){
-    hardtrim_to_3prime_end($file);
+		hardtrim_to_3prime_end($file);
     }
     exit;
 }
@@ -60,9 +62,9 @@ if ($clock){
     warn "\nIT'S TIME FOR CLOCK PROCESSING!!!\t\t\t\t\t\t\t\t\t[pun intended]\n\n";
 
     while (@ARGV){
-    my $in1 = shift @ARGV;
-    my $in2 = shift @ARGV;
-    clockwork($in1,$in2);
+		my $in1 = shift @ARGV;
+		my $in2 = shift @ARGV;
+		clockwork($in1,$in2);
     }
     warn "\nPre-processing finished...\n\nPlease run Trim Galore again to remove adapters, poor quality bases as well as UMI/fixed sequences from the 3'-end of the reads.\nA sample command for this is:\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntrim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 *.clock_UMI.R1.fq.gz *.clock_UMI.R2.fq.gz\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\nTrim Galore Epigenetic Clock processing complete.\n\n";
     exit;
@@ -77,16 +79,16 @@ sub clockwork{
     ### INPUT FILES
     my ($in1,$in2) = @_;
     if ($in1 =~ /\.gz$/){
-    open ($in1_fh,"$compression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
+		open ($in1_fh,"$compression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
     }
     else{
-    open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
+		open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
     }
     if ($in2 =~ /\.gz$/){
-    open ($in2_fh,"$compression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
+		open ($in2_fh,"$compression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
     }
     else{
-    open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
+		open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
     }
     # warn " Input file name 1: $in1\n";
     # warn " Input file name 2: $in2\n";
@@ -106,31 +108,31 @@ sub clockwork{
 
     ### READ 1
     if ($gzip or $in1 =~ /\.gz$/){
-    if ($dont_gzip){
-        open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
+		if ($dont_gzip){
+			open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
+		}
+		else{
+			$out1 .= '.gz';
+			open ($read1_fh,"| $compression_path -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
+		}
     }
     else{
-        $out1 .= '.gz';
-        open ($read1_fh,"| $compression_path -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
-    }
-    }
-    else{
-    open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
+		open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
     }
     warn "Writing dual trimmed version of the input file '$in1' to '$out1'\n";
 
     ### READ 2
     if ($gzip or $in2 =~ /\.gz$/){
-    if ($dont_gzip){
-        open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
+		if ($dont_gzip){
+			open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
+		}
+		else{
+			$out2 .= '.gz';
+			open ($read2_fh,"| $compression_path -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
+		}
     }
     else{
-        $out2 .= '.gz';
-        open ($read2_fh,"| $compression_path -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
-    }
-    }
-    else{
-    open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
+		open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
     }
     warn "Writing dual trimmed version of the input file '$in2' to '$out2'\n                 ---\n";
     # warn "Output file name 1: $out1\n";
@@ -155,106 +157,106 @@ sub clockwork{
     my $filtered_count = 0;
     my $r1_contains_rc = 0;
 
-   ORANGE: while (1){
+	ORANGE: while (1){
 
-    my $one1 = <$in1_fh>;
-    my $one2 = <$in1_fh>;
-    my $one3 = <$in1_fh>;
-    my $one4 = <$in1_fh>;
+		my $one1 = <$in1_fh>;
+		my $one2 = <$in1_fh>;
+		my $one3 = <$in1_fh>;
+		my $one4 = <$in1_fh>;
 
-    my $two1 = <$in2_fh>;
-    my $two2 = <$in2_fh>;
-    my $two3 = <$in2_fh>;
-    my $two4 = <$in2_fh>;
+		my $two1 = <$in2_fh>;
+		my $two2 = <$in2_fh>;
+		my $two3 = <$in2_fh>;
+		my $two4 = <$in2_fh>;
 
-    last unless  ($one4 and $two4);
-    chomp $one2; # sequence
-    chomp $two2; # sequence
+		last unless  ($one4 and $two4);
+		chomp $one2; # sequence
+		chomp $two2; # sequence
 
-    chomp $one1; # read ID, need to append UMIs to the read ID
-    chomp $two1; # read ID, need to append UMIs to the read ID
+		chomp $one1; # read ID, need to append UMIs to the read ID
+		chomp $two1; # read ID, need to append UMIs to the read ID
 
-    chomp $one4; # quality
-    chomp $two4; # quality
+		chomp $one4; # quality
+		chomp $two4; # quality
 
-    ++$count; # sequence count
+		++$count; # sequence count
 
-    if ($count % 1000000 ==0){
-        warn "Processed $count sequences so far...\n";
-    }
-    my $r1_barcode;
-    my $r2_barcode;
-    my $r1_fix;
-    my $r2_fix;
+		if ($count % 1000000 ==0){
+			warn "Processed $count sequences so far...\n";
+		}
+		my $r1_barcode;
+		my $r2_barcode;
+		my $r1_fix;
+		my $r2_fix;
 
 
-    $r1_barcode = substr($one2,0,8);
-    $r2_barcode = substr($two2,0,8);
-    $r1_fix = substr($one2,8,4);
-    $r2_fix = substr($two2,8,4);
-    # warn "$one2\n$two2\n$r1_barcode\t$r1_fix\n$r2_barcode\t$r2_fix\n\n";sleep(1);
+		$r1_barcode = substr($one2,0,8);
+		$r2_barcode = substr($two2,0,8);
+		$r1_fix = substr($one2,8,4);
+		$r2_fix = substr($two2,8,4);
+		# warn "$one2\n$two2\n$r1_barcode\t$r1_fix\n$r2_barcode\t$r2_fix\n\n";sleep(1);
 
-    # this part of code simply counts the different types of sequence that occurred at the constant region where we expected
-    # to read CAGT in both reads. Both R1 and R2 are taken into account at the same time
-    unless ($r1_fix eq 'CAGT' and $r2_fix eq 'CAGT'){
-        $freqs{$r1_fix}++;
-        $freqs{$r2_fix}++;
-        $filtered_count++;
-    }
+		# this part of code simply counts the different types of sequence that occurred at the constant region where we expected
+		# to read CAGT in both reads. Both R1 and R2 are taken into account at the same time
+		unless ($r1_fix eq 'CAGT' and $r2_fix eq 'CAGT'){
+			$freqs{$r1_fix}++;
+			$freqs{$r2_fix}++;
+			$filtered_count++;
+		}
 
-    ### BOTH READ1 AND READ2 should look like this:
+		### BOTH READ1 AND READ2 should look like this:
 
-    # 0        8    12 13                                    INDEX position
-    # UUUUUUUU CAGT A  FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF   SEQUENCE
+		# 0        8    12 13                                    INDEX position
+		# UUUUUUUU CAGT A  FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF   SEQUENCE
 
-    # where:
-    #    U = UMI base
-    # CAGT = fixed sequence
-    #    A = A-tail
-    # FFFF = RRBS-fragment to be aligned
+		# where:
+		#    U = UMI base
+		# CAGT = fixed sequence
+		#    A = A-tail
+		# FFFF = RRBS-fragment to be aligned
 
-    ### Capturing the sequence after the A from A-tailing (FFFFFFFFFFFFFF...)
+		### Capturing the sequence after the A from A-tailing (FFFFFFFFFFFFFF...)
 
-    my $seq1 = substr($one2,13); # truncated sequence without UMIs or fixed sequence
-    my $seq2 = substr($two2,13);
+		my $seq1 = substr($one2,13); # truncated sequence without UMIs or fixed sequence
+		my $seq2 = substr($two2,13);
 
-    my $qual1 = substr($one4,13); # truncated quality string without barcode or fixed sequence
-    my $qual2 = substr($two4,13);
+		my $qual1 = substr($one4,13); # truncated quality string without barcode or fixed sequence
+		my $qual2 = substr($two4,13);
 
-    # warn "$one1\n";
-    $one1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
-    #warn "$one1\n";
+		# warn "$one1\n";
+		$one1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
+		#warn "$one1\n";
 
-    #warn "$two1\n";
-    $two1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
-    #warn "$two1\n";
-    #   warn "$one2\n          $seq1\n$one4\n          $qual1\n~~\n$two2\n          $seq2\n$two4\n          $qual2\n\n";sleep(1);
+		#warn "$two1\n";
+		$two1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
+		#warn "$two1\n";
+		#   warn "$one2\n          $seq1\n$one4\n          $qual1\n~~\n$two2\n          $seq2\n$two4\n          $qual2\n\n";sleep(1);
 
-    print ${read1_fh} "$one1\n";
-    print ${read1_fh} "$seq1\n";
-    print ${read1_fh} "+\n";      # replacing this with a + for space and format reasons
-    print ${read1_fh} "$qual1\n";
+		print ${read1_fh} "$one1\n";
+		print ${read1_fh} "$seq1\n";
+		print ${read1_fh} "+\n";      # replacing this with a + for space and format reasons
+		print ${read1_fh} "$qual1\n";
 
-    print ${read2_fh} "$two1\n";
-    print ${read2_fh} "$seq2\n";
-    print ${read2_fh} "+\n";      # replacing this with a + for space and format reasons
-    print ${read2_fh} "$qual2\n";
+		print ${read2_fh} "$two1\n";
+		print ${read2_fh} "$seq2\n";
+		print ${read2_fh} "+\n";      # replacing this with a + for space and format reasons
+		print ${read2_fh} "$qual2\n";
 
-    # sleep(1);
+		# sleep(1);
 
-    $r1{$r1_barcode}++;
-    $r2{$r2_barcode}++;
+		$r1{$r1_barcode}++;
+		$r2{$r2_barcode}++;
 
-    $fix1{$r1_fix}++;
-    $fix2{$r2_fix}++;
+		$fix1{$r1_fix}++;
+		$fix2{$r2_fix}++;
     }
 
     my $perc;
     if ($count){
-    $perc = sprintf("%.2f",$filtered_count/$count * 100);
+		$perc = sprintf("%.2f",$filtered_count/$count * 100);
     }
     else{
-    $perc = 'N/A';
+		$perc = 'N/A';
     }
 
     warn "Sequences processed in total: $count\nthereof had fixed sequence CAGT in both R1 and R2:\t $filtered_count ($perc%)\n     ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
@@ -273,28 +275,6 @@ sub rc{
 
 my $path_to_fastqc = 'fastqc';
 
-# Before we start let's have quick look if Cutadapt seems to be working with the path information provided
-# To change the path to Cutadapt use --path_to_cutadapt /full/path/to/the/Cutadapt/executable
-
-if(defined $path_to_cutadapt){
-  warn "Path to Cutadapt set as: '$path_to_cutadapt' (user defined)\n";
-  # we'll simply use this
-}
-else{
-  $path_to_cutadapt = 'cutadapt'; # default, assuming it is in the PATH
-  warn "Path to Cutadapt set as: '$path_to_cutadapt' (default)\n";
-}
-my $cutadapt_version;
-my $return = system "$path_to_cutadapt --version"; #>/dev/null 2>&1";
-if ($return == -1){
-  die "Failed to execute Cutadapt porperly. Please install Cutadapt first and make sure it is in the PATH, or specify the path to the Cutadapt executable using --path_to_cutadapt /path/to/cutadapt\n\n";
-}
-else{
-  warn "Cutadapt seems to be working fine (tested command '$path_to_cutadapt --version')\n";
-  $cutadapt_version = `$path_to_cutadapt --version`;
-  chomp $cutadapt_version;
-  # warn "Cutadapt version: $cutadapt_version\n";
-}
 
 ########################################################################
 
@@ -303,62 +283,62 @@ else{
 
 ### SETTING DEFAULTS UNLESS THEY WERE SPECIFIED
 unless (defined $cutoff){
-   unless ($nextseq){
-           $cutoff = 20;
-       }
+	unless ($nextseq){
+       $cutoff = 20;
+    }
 }
+
 my $phred_score_cutoff = $cutoff; # only relevant for report
 my $adapter_name = '';
 unless (defined $adapter){
     if ($nextera){
-    $adapter = 'CTGTCTCTTATA';
-    $adapter_name = 'Nextera Transposase sequence; user defined';
+		$adapter = 'CTGTCTCTTATA';
+		$adapter_name = 'Nextera Transposase sequence; user defined';
     }
     elsif($small_rna){
-    $adapter = 'TGGAATTCTCGG';
-    $adapter_name = 'Illumina small RNA adapter; user defined';
+		$adapter = 'TGGAATTCTCGG';
+		$adapter_name = 'Illumina small RNA adapter; user defined';
     }
     elsif($illumina){
-    $adapter = 'AGATCGGAAGAGC';
-    $adapter_name = 'Illumina TruSeq, Sanger iPCR; user defined';
+		$adapter = 'AGATCGGAAGAGC';
+		$adapter_name = 'Illumina TruSeq, Sanger iPCR; user defined';
     }
     else{ # default
+		### If other -a and/or -a2 were given
+		if ($polyA){ # specialised PolyA trimming
+			($adapter,$adapter_name) = autodetect_polyA_type();
 
-    ### If other -a and/or -a2 were given
-    if ($polyA){ # specialised PolyA trimming
-        ($adapter,$adapter_name) = autodetect_polyA_type();
-
-        if ($validate){ # we need to select -a2 as the reverse complement to -a
-        if ($adapter =~ /A+/){
-            $adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
-            $a2 = extend_adapter_sequence("T",150); # defaulting to 150 bp
-        }
-        elsif($adapter =~ /T+/){
-            $adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
-            $a2 = extend_adapter_sequence("A",150);
-        }
-        else{
-            die "Something unexpected happened with the Poly-A autodetection, please check\n";
-        }
-        # warn "Paired-end Poly-A detection, set the following parameters:\n";
-        # warn " -a: $adapter\n-a2: $a2\n   ~~~~~~~~~~ \n\n";sleep(1);
-        }
-        else{
-        # Single end
-        if ($adapter =~ /A+/){
-            $adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
-        }
-        elsif($adapter =~ /T+/){
-            $adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
-        }
-        else{
-            die "Something unexpected happened with the Poly-A autodetection, please check\n";
-        }
-        }
-    }
-    else{ # ADAPTER TRIMMING; DEFAULT
-        ($adapter,$adapter_name) = autodetect_adapter_type();
-    }
+			if ($validate){ # we need to select -a2 as the reverse complement to -a
+				if ($adapter =~ /A+/){
+					$adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
+					$a2 = extend_adapter_sequence("T",150); # defaulting to 150 bp
+				}
+				elsif($adapter =~ /T+/){
+					$adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
+					$a2 = extend_adapter_sequence("A",150);
+				}
+				else{
+					die "Something unexpected happened with the Poly-A autodetection, please check\n";
+				}
+				# warn "Paired-end Poly-A detection, set the following parameters:\n";
+				# warn " -a: $adapter\n-a2: $a2\n   ~~~~~~~~~~ \n\n";sleep(1);
+			}
+			else{
+				# Single end
+				if ($adapter =~ /A+/){
+					$adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
+				}
+				elsif($adapter =~ /T+/){
+					$adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
+				}
+				else{
+					die "Something unexpected happened with the Poly-A autodetection, please check\n";
+				}
+			}
+		}
+		else{ # ADAPTER TRIMMING; DEFAULT
+			($adapter,$adapter_name) = autodetect_adapter_type();
+		}
     }
 }
 else{
@@ -369,16 +349,16 @@ else{
 ### may be removed if T, TG, or TGG etc gets trimmed off the end (changed b ack up from 16 to 18bp to remove noise from alignment files, 18 11 2015)
 if ($adapter eq 'TGGAATTCTCGG'){
     unless (defined $length_cutoff){ # user defined length cutoff wins over auto-detection
-    $length_cutoff = 18;
-    warn "Reducing length cutoff to 18bp for small RNA-Seq reads because a cutoff of 20bp may remove some short species of small RNAs if they had been trimmed by 1,2 or 3bp\n";
+		$length_cutoff = 18;
+		warn "Reducing length cutoff to 18bp for small RNA-Seq reads because a cutoff of 20bp may remove some short species of small RNAs if they had been trimmed by 1,2 or 3bp\n";
     }
 
     ### If the file is a smallRNA library and paired-end we set the Illumina 5' adapter as the $a2 sequence
     if ($validate){
-    unless (defined $a2){
-        $a2 = 'GATCGTCGGACT';
-        warn "Setting the Illumina smallRNA 5' adapter as adapter 2: 'GATCGTCGGACT'\n";
-    }
+		unless (defined $a2){
+			$a2 = 'GATCGTCGGACT';
+			warn "Setting the Illumina smallRNA 5' adapter as adapter 2: 'GATCGTCGGACT'\n";
+		}
     }
 }
 
@@ -388,11 +368,11 @@ unless (defined $length_cutoff){
 
 
 unless (defined $a2){ # optional adapter for the second read in a pair. Only works for --paired trimming
-  $a2 = '';
+	$a2 = '';
 }
 
 unless (defined $stringency){
-  $stringency = 1;
+	$stringency = 1;
 }
 
 if ($phred_encoding == 64){
@@ -417,26 +397,26 @@ sub trim{
     $report =~ s/$/_trimming_report.txt/;
 
 
-  if ($no_report_file) {
-      $report = File::Spec->devnull;
-      open (REPORT,'>',$report) or die "Failed to write to file '$report': $!\n";
-      # warn "Redirecting report output to /dev/null\n";
-  }
+	if ($no_report_file) {
+		$report = File::Spec->devnull;
+		open (REPORT,'>',$report) or die "Failed to write to file '$report': $!\n";
+		# warn "Redirecting report output to /dev/null\n";
+	}
     else{
-    open (REPORT,'>',$output_dir.$report) or die "Failed to write to file '$report': $!\n";
-      warn "Writing report to '$output_dir$report'\n";
+		open (REPORT,'>',$output_dir.$report) or die "Failed to write to file '$report': $!\n";
+		warn "Writing report to '$output_dir$report'\n";
     }
 
     warn "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
     print REPORT "\nSUMMARISING RUN PARAMETERS\n==========================\nInput filename: $filename\n";
 
     if ($validate){ # paired-end mode
-    warn "Trimming mode: paired-end\n";
-    print REPORT "Trimming mode: paired-end\n";
+		warn "Trimming mode: paired-end\n";
+		print REPORT "Trimming mode: paired-end\n";
     }
     else{
-    warn "Trimming mode: single-end\n";
-    print REPORT "Trimming mode: single-end\n";
+		warn "Trimming mode: single-end\n";
+		print REPORT "Trimming mode: single-end\n";
     }
 
     warn "Trim Galore version: $trimmer_version\n";
@@ -445,10 +425,21 @@ sub trim{
     warn "Cutadapt version: $cutadapt_version\n";
     print REPORT "Cutadapt version: $cutadapt_version\n";
 
-    if (defined $phred_score_cutoff){
-          warn "Quality Phred score cutoff: $phred_score_cutoff\n";
-        print REPORT "Quality Phred score cutoff: $phred_score_cutoff\n";
+	if (defined $python_version){
+		warn "Python version: $python_version\n";
+		print REPORT "Python version: $python_version\n";
+	}
+
+    if (defined $cores){
+        warn "Number of cores used for trimming: $cores\n";
+		print REPORT "Number of cores used for trimming: $cores\n";
     }
+	
+    if (defined $phred_score_cutoff){
+        warn "Quality Phred score cutoff: $phred_score_cutoff\n";
+		print REPORT "Quality Phred score cutoff: $phred_score_cutoff\n";
+    }
+
 
     warn "Quality encoding type selected: ASCII+$phred_encoding\n";
     print REPORT "Quality encoding type selected: ASCII+$phred_encoding\n";
@@ -473,11 +464,11 @@ sub trim{
     }
 
     print REPORT "Maximum trimming error rate: $error_rate";
-    if ($error_rate == 0.1){
-    print REPORT " (default)\n";
+	if ($error_rate == 0.1){
+		print REPORT " (default)\n";
     }
     else{
-    print REPORT "\n";
+		print REPORT "\n";
     }
 
     if ($a2){
@@ -613,7 +604,7 @@ sub trim{
 			warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
 			# sleep (1);
 		  
-			open (QUAL,"$path_to_cutadapt -f fastq -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
+			open (QUAL,"$path_to_cutadapt  -j $cores -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
 
 			my $qual_count = 0;
 		  
@@ -664,7 +655,7 @@ sub trim{
 			# open (OUT,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
 			# }
 			$output_filename .= '.gz';
-			open (OUT,"| gzip -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+			open (OUT,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
 		}
 	}
 	else{
@@ -692,19 +683,19 @@ sub trim{
 			if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 				warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 			else{                            # this is read 2 of a pair
 				warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$a2' from file $temp <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 		}
 		### Using the same adapter for both read 1 and read 2
 		else{
 			warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
 			# sleep (3);
-			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 		}
       
 		close WRITER or die $!; # not needed
@@ -879,20 +870,20 @@ sub trim{
 			### Figure out whether current file counts as read 1 or read 2 of paired-end files
 			if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 				warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 			else{                            # this is read 2 of a pair
 				$isR2 = 1;
 				warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$a2' from file $temp <<< \n";	
 				# For Read 2 we need to trim the PolyT (or PolyA) from the 5' end instead! Hence -g $a2 and not -a! 
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 		}
 		### Using the same adapter for both read 1 and read 2 - Single end will use the same adapters are Read 1s for paired-end files
 		else{
 			warn "\n  >>> Now performing single-end Poly-A trimming for with the sequence: '$adapter' from file $temp <<< \n";
 			# sleep (3);
-			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt -f fastq -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 		}
 		
 		close WRITER or die $!; # not needed
@@ -1024,19 +1015,19 @@ sub trim{
 			if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 				warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 			}
 			else{                            # this is read 2 of a pair
 				warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
 			}
 		}
 		### Using the same adapter for both read 1 and read 2
 		else{
 			warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 			#sleep (1);
-			$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt -f fastq -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+			$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 		}
       
 		close WRITER or die $!; # not needed
@@ -2080,16 +2071,16 @@ sub process_commandline{
                  'j|cores=i' => \$cores,
       );
 
-  ### EXIT ON ERROR if there were errors with any of the supplied options
-  unless ($command_line){
-    die "Please respecify command line options\n";
-  }
+	### EXIT ON ERROR if there were errors with any of the supplied options
+	unless ($command_line){
+		die "Please respecify command line options\n";
+	}
 
-  ### HELPFILE
-  if ($help){
-    print_helpfile();
-    exit;
-  }
+	### HELPFILE
+	if ($help){
+		print_helpfile();
+		exit;
+	}
 
 
 
@@ -2102,58 +2093,133 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 27 02 2019
+                               Last update: 28 02 2019
 
 VERSION
     exit;
   }
 
 
-  ### Check python version and also if pigz is installed
-  my $python_2_or_3;
-  my $pigz_return;
+	# NUMBER OF CORES
+	if (defined $cores){
+		if ($cores < 1){
+			die "Please a use a positive integer for the number of cores to be used, and re-specify!\n\n";
+		}
+		elsif($cores == 1){
+			warn "Proceeding with single-core trimming (user-defined)\n";
+		}
+		elsif($cores >= 8){
+			warn "Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for $cores cores). Please consider re-specifying\n"; sleep(2);
+		}
+	}
+	else {
+		warn "Multicore support not enabled. Proceeding with single-core trimming.\n";
+		$compression_path = "gzip";
+		$cores = 1;
+	}
+	
+	
+	# Before we start let's have quick look if Cutadapt seems to be working with the path information provided
+	# To change the path to Cutadapt use --path_to_cutadapt /full/path/to/the/Cutadapt/executable
 
-  if (defined $cores){
-      $python_2_or_3 = `python -c "import sys; print(sys.version[0])"`;
-      if ($python_2_or_3 == 3){
-          warn "Python 3 found, proceeding with multicore cutadapt using $cores cores.\n";
-      } elsif ($python_2_or_3 == 2) {
-          warn "Python 2 found, multicore not supported proceeding with single core cutadapt.\n";
-          $cores = 1;
-      } else {
-          die "\nPython not detected. Python needed run cutadapt.\n\n";
-      }
-      $pigz_return = system "pigz --version 2> /dev/null";
-      if ($pigz_return == -1) {
-          warn "pigz not detected. Proceeding with gzip. To increase speed, please install 'pigz' and run again.\n";
-          $compression_path = "gzip";
-      } else {
-          warn "pigz detected. Proceeding with multicore (de)compression using $cores cores.\n";
-          $compression_path = "pigz -p $cores";
-      }
-  } else {
-      warn "Multicore support not enabled. Proceeding with single core trimming.\n";
-      $compression_path = "gzip";
-      $cores = 1;
-  }
+	if(defined $path_to_cutadapt){
+		warn "Path to Cutadapt set as: '$path_to_cutadapt' (user defined)\n";
+		# we'll simply use this
+	}
+	else{
+		$path_to_cutadapt = 'cutadapt'; # default, assuming it is in the PATH
+		warn "Path to Cutadapt set as: '$path_to_cutadapt' (default)\n";
+	}
+	
+	
+	my $return = system "$path_to_cutadapt --version 2>&1 > /dev/null ";
+	if ($return == 0){
+		warn "Cutadapt seems to be working fine (tested command '$path_to_cutadapt --version')\n";
+		$cutadapt_version = `$path_to_cutadapt --version`;
+		chomp $cutadapt_version;	
+		# warn "Cutadapt version: $cutadapt_version\n";
+	}
+	else{
+		die "Failed to execute Cutadapt porperly. Please install Cutadapt first and make sure it is in the PATH, or specify the path to the Cutadapt executable using --path_to_cutadapt /path/to/cutadapt\n\n";
+	}
 
 
-  ### SUPRESS WARNINGS
-  if (defined $suppress_warn){
-    $DOWARN = 0;
-  }
 
-  ### QUALITY SCORES
-  my $phred_encoding;
-  if ($phred33){
-    if ($phred64){
-      die "Please specify only a single quality encoding type (--phred33 or --phred64)\n\n";
-    }
-    $phred_encoding = 33;
-  }
-  elsif ($phred64){
-    $phred_encoding = 64;
-  }
+
+	# We only need to test for pigz if the user asked for multi-core processing
+	if ($cores > 1){
+	
+		## Check Python  Version
+		# warn "Let's also find out the Python version used. $path_to_cutadapt\n";
+		my $location_of_cutadapt = `which $path_to_cutadapt`;
+		#warn "Location is: $location_of_cutadapt\n";
+		
+		# Reading the first line of the cutadapt executable, since this tends to contain the python version it is using
+		open (my $first_line,$location_of_cutadapt) or die "Failed to read the first line of the Cutadapt executable: $!";
+		$_= <$first_line>;
+		chomp;
+		# warn "This is the first line:\n>>>$_<<<\n";
+		close $first_line;
+		
+		if ($_ =~ /\#!/){
+			# warn "Found a shebangline: >>>$_<<<\n";
+			$_ =~ s/\#!//; 
+			# warn "Truncated shebangline: >>>$_<<<\n";
+		}
+	
+		my $python_return = `$_ --version`;
+		chomp $python_return;
+		# warn "Python return: $python_return\n";
+		
+		if ($python_return =~ /Python 3.*/){
+			warn "Cutadapt seems to be using Python 3! Proceeding with multi-core enabled Cutadapt using $cores cores\n";
+		}
+		elsif ($python_return =~ /Python 2.*/){
+			warn "Python 2 found, multi-core not supported. Proceeding with Cutadapt in single-core mode\n";
+			$cores = 1;
+		}
+		else {
+			die "\nPython not detected. Python needed to run Cutadapt\n\n";
+		}
+		$python_version = $python_return;
+		$python_version =~ s/^Python //;
+		### only proceeding if $cores is still > 1, i.e. if Python 3 was found
+		if ($cores > 1){
+			
+			### Test if pigz is installed
+			my $pigz_return = system ("pigz --version 2> /dev/null");
+			# warn "PIGZ returned: $pigz_return\n";
+			if ($pigz_return == 0) {
+				warn "Parallel gzip (pigz) detected. Proceeding with multicore (de)compression using $cores cores\n\n";
+				$compression_path = "pigz -p $cores";
+			} 
+			else {
+				warn "Proceeding with 'gzip' for compression. PLEASE NOTE: Using multi-cores for trimming with 'gzip' only has only very limited effect! (see here: https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103)\n";
+				warn "To increase performance, please install 'pigz' and run again\n\n";
+				$compression_path = "gzip";
+			}
+		} 
+	}
+	unless (defined $compression_path){
+		$compression_path = "gzip"; # fall-back option
+	}
+
+	### SUPRESS WARNINGS
+	if (defined $suppress_warn){
+		$DOWARN = 0;
+	}
+
+	### QUALITY SCORES
+	my $phred_encoding;
+	if ($phred33){
+		if ($phred64){
+			die "Please specify only a single quality encoding type (--phred33 or --phred64)\n\n";
+		}
+		$phred_encoding = 33;
+	}
+	elsif ($phred64){
+		$phred_encoding = 64;
+	}
   unless ($phred33 or $phred64){
       unless (defined $hardtrim5 or $hardtrim3 or $clock){   # we don't need warnings if we simply hard-trim or Clock-trim a file
       warn "No quality encoding type selected. Assuming that the data provided uses Sanger encoded Phred scores (default)\n\n";
@@ -2204,12 +2270,7 @@ VERSION
     $error_rate = 0.1; # (default)
   }
 
-  if (defined $cores) {
-    # Do nothing
-  } else {
-    $cores = 1;
-  }
-
+ 
   if ($nextera and $small_rna or $nextera and $illumina or $illumina and $small_rna ){
     die "You can't use several different adapter types at the same time. Make your choice or consider using -a and -a2\n\n";
   }
@@ -2650,6 +2711,25 @@ trim_galore [options] <filename(s)>
                         PREFERRED_NAME_val_1.fq(.gz) and PREFERRED_NAME_val_2.fq(.gz) for paired-end data. --basename
                         only works when 1 file (single-end) or 2 files (paired-end) are specified, but not for longer lists.
 
+-j/--cores INT          Number of cores to be used for trimming [default: 1]. For Cutadapt to work with multiple cores, it
+                        requires Python 3 as well as parallel gzip (pigz) installed on the system. The version of Python used 
+                        is detected from the shebang line of the Cutadapt executable (either 'cutadapt', or a specified path).
+                        If Python 2 is detected, --cores is set to 1.
+                        If pigz cannot be detected on your system, Trim Galore reverts to using gzip compression. Please note
+                        that gzip compression will slow down multi-core processes so much that it is hardly worthwhile, please 
+                        see: https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103 for more info).
+						
+                        Actual core usage: It should be mentioned that the actual number of cores used is a little convoluted.
+                        Assuming that Python 3 is used and pigz is installed, --cores 2 would use 2 cores to read the input
+                        (probably not at a high usage though), 2 cores to write to the output (at moderately high usage), and 
+                        2 cores for Cutadapt itself + 2 additional cores for Cutadapt (not sure what they are used for) + 1 core
+                        for Trim Galore itself. So this can be up to 9 cores, even though most of them won't be used at 100% for
+                        most of the time. Paired-end processing uses twice as many cores for the validation (= writing out) step.
+                        --cores 4 would then be: 4 (read) + 4 (write) + 4 (Cutadapt) + 2 (extra Cutadapt) +	1 (Trim Galore) = 15.
+
+                        It seems that --cores could be a sweet spot, anything above has diminishing returns.
+			
+
 
 SPECIFIC TRIMMING - without adapter/quality trimming
 
@@ -2657,15 +2737,15 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         to <int> bp at the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit.
                         Hard-trimmed output files will end in .<int>_5prime.fq(.gz). Here is an example:
 
-            before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
-            --hardtrim5 20: CCTAAGGAAACAAGTACACT
+                        before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
+                        --hardtrim5 20: CCTAAGGAAACAAGTACACT
 
 --hardtrim3 <int>       Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences
                         to <int> bp at the 3'-end. Once hard-trimming of files is complete, Trim Galore will exit.
                         Hard-trimmed output files will end in .<int>_3prime.fq(.gz). Here is an example:
 
-            before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
-            --hardtrim3 20:                                                   TTTTTAAGAAAATGGAAAAT
+                        before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
+                        --hardtrim3 20:                                                   TTTTTAAGAAAATGGAAAAT
 
 --clock                 In this mode, reads are trimmed in a specific way that is currently used for the Mouse
                         Epigenetic Clock (see here: Multi-tissue DNA methylation age predictor in mouse, Stubbs et al.,
@@ -2675,7 +2755,7 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         In it's current implementation, the dual-UMI RRBS reads come in the following format:
 
                         Read 1  5' UUUUUUUU CAGTA FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF TACTG UUUUUUUU 3'
-            Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ATGAC UUUUUUUU 5'
+                        Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ATGAC UUUUUUUU 5'
 
                         Where UUUUUUUU is a random 8-mer unique molecular identifier (UMI), CAGTA is a constant region,
                         and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The UMIs for Read 1 (R1) and
@@ -2705,28 +2785,28 @@ SPECIFIC TRIMMING - without adapter/quality trimming
 --polyA                 This is a new, still experimental, trimming mode to identify and remove poly-A tails from sequences.
                         When --polyA is selected, Trim Galore attempts to identify from the first supplied sample whether
                         sequences contain more often a stretch of either 'AAAAAAAAAA' or 'TTTTTTTTTT'. This determines
-            if Read 1 of a paired-end end file, or single-end files, are trimmed for PolyA or PolyT. In case of
+                        if Read 1 of a paired-end end file, or single-end files, are trimmed for PolyA or PolyT. In case of
                         paired-end sequencing, Read2 is trimmed for the complementary base from the start of the reads. The
                         auto-detection uses a default of A{20} for Read1 (3'-end trimming) and T{150} for Read2 (5'-end trimming).
-            These values may be changed manually using the options -a and -a2.
+                        These values may be changed manually using the options -a and -a2.
 
-            In addition to trimming the sequences, white spaces are replaced with _ and it records in the read ID
-            how many bases were trimmed so it can later be used to identify PolyA trimmed sequences, e.g. _PolyA:32
-            in the following example:
+                        In addition to trimming the sequences, white spaces are replaced with _ and it records in the read ID
+                        how many bases were trimmed so it can later be used to identify PolyA trimmed sequences, e.g. _PolyA:32
+                        in the following example:
 
                         \@READ-ID:1:1102:22039:36996 1:N:0:CCTAATCC
-            GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                        GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
-            \@READ-ID:1:1102:22039:36996_1:N:0:CCTAATCC_PolyA:32
-            GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACC
+                        \@READ-ID:1:1102:22039:36996_1:N:0:CCTAATCC_PolyA:32
+                        GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACC
 
-            PLEASE NOTE: The poly-A trimming mode expects that sequences were both adapter and quality trimmed
-            before looking for Poly-A tails, and it is the user's responsibility to carry out an initial round of
-            trimming. The following sequence:
-
-            1) trim_galore file.fastq.gz
-            2) trim_galore --polyA file_trimmed.fq.gz
-            3) zcat file_trimmed_trimmed.fq.gz | grep -A 3 PolyA | grep -v ^-- > PolyA_trimmed.fastq
+                        PLEASE NOTE: The poly-A trimming mode expects that sequences were both adapter and quality trimmed
+                        before looking for Poly-A tails, and it is the user's responsibility to carry out an initial round of
+                        trimming. The following sequence:
+ 
+                        1) trim_galore file.fastq.gz
+                        2) trim_galore --polyA file_trimmed.fq.gz
+                        3) zcat file_trimmed_trimmed.fq.gz | grep -A 3 PolyA | grep -v ^-- > PolyA_trimmed.fastq
 
                         Will 1) trim qualities and Illumina adapter contamination, 2) find and remove PolyA contamination.
                         Finally, if desired, 3) will specifically find PolyA trimmed sequences to a specific FastQ file of your choice.
@@ -2814,7 +2894,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 27 February 2019.
+Last modified on 28 February 2019.
 
 HELP
   exit;
