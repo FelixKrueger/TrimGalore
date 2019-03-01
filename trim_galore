@@ -2167,7 +2167,7 @@ VERSION
 			# warn "Truncated shebangline: >>>$_<<<\n";
 		}
 	
-		my $python_return = `$_ --version`;
+		my $python_return = `$_ --version 2>&1`;
 		chomp $python_return;
 		# warn "Python return: $python_return\n";
 		
