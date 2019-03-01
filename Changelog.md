@@ -1,6 +1,6 @@
 # Trim Galore Changelog
 
-### Version 0.5.0_dev 
+### Version 0.5.1_dev 
 
 * Added option `--hardtrim3 INT,` which allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_3prime.fq(.gz). We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences. Here is an example :
 
@@ -16,6 +16,29 @@ before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATG
 * Added check to see if Read 1 and Read 2 files were given as the very same file.
 
 * If an output directory which was specified with `-o output_directory` did not exist, it will be created for you.
+
+* The option `--max_n INT` now also works in single-end RRBS mode.
+
+* Added multi-threading support with the new option `-j/--cores INT`; many thanks to Frankie James for initiating this. Multi-threading support works effectively if Cutadapt is run with Python 3, and if parallel gzip (`pigz`) is installed:
+
+<img title="Multi-threading benchmark" style="float:right;margin:20px 20 20 600px" id="Multi-threading support" src="Docs/Images/pigz_bench.png" >
+
+For Cutadapt to work with multiple cores, it requires Python 3 as well as parallel gzip (pigz) installed on the system. The version of Python used is detected from the shebang line of the Cutadapt executable (either 'cutadapt', or a specified path). If Python 2 is detected, `--cores` is set to 1 and multi-core processing will be disabled. If `pigz` cannot be detected on your system, Trim Galore reverts to using `gzip` compression. Please note however, that `gzip` compression will slow down multi-core processes so much that it is hardly worthwhile, please see: [here](https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103) for more info).
+
+Actual core usage: It should be mentioned that the actual number of cores used is a little convoluted. Assuming that Python 3 is used and `pigz` is installed, `--cores 2` would use:
+
+- 2 cores to read the input (probably not at a high usage though)
+- 2 cores to write to the output (at moderately high usage)
+- 2 cores for Cutadapt itself
+- 2 additional cores for Cutadapt (not sure what they are used for)
+- 1 core for Trim Galore itself
+
+So this can be up to 9 cores, even though most of them won't be used at 100% for most of the time. Paired-end processing uses twice as many cores for the validation (= writing out) step as Trim Galore reads and writes from and to two files at the same time, respectively.
+
+`--cores 4` would then be: 4 (read) + 4 (write) + 4 (Cutadapt) + 2 (extra Cutadapt) +     1 (Trim Galore) = ~15 cores in total.
+
+From the graph above it seems that `--cores 4` could be a sweet spot, anything above appear to have diminishing returns.
+
 
 ### 28-06-18: Version 0.5.0 
 
