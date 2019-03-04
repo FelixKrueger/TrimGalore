@@ -244,7 +244,7 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
   * Default: `OFF`
   
 * `--2colour/--nextseq INT`
-  * This enables the option '--nextseq-trim=3'CUTOFF' within Cutadapt, which will set a quality cutoff (that is normally given with -q instead), but qualities of G bases are ignored. This trimming is in common for the NextSeq- and NovaSeq-platforms, where basecalls without any signal are called as high-quality G bases. This is mutually exlusive with `-q INT`.
+  * This enables the option `--nextseq-trim=3'CUTOFF` within Cutadapt, which will set a quality cutoff (that is normally given with -q instead), but qualities of G bases are ignored. This trimming is in common for the NextSeq- and NovaSeq-platforms, where basecalls without any signal are called as high-quality G bases. More on the issue of G-overcalling may be found here: https://sequencing.qcfail.com/articles/illumina-2-colour-chemistry-can-overcall-high-confidence-g-bases/. This is mutually exlusive with `-q INT`.
 
 * `--path_to_cutadapt </path/to/cutadapt>`
   
