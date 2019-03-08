@@ -1,5 +1,10 @@
 # Trim Galore Changelog
 
+### Version 0.6.0_dev
+
+* Added a check for very old versions Cutadapt, so that single-core trimming still works with Cutadapt versions prior to 1.15. 
+
+
 ### Version 0.6.0 (Release on 1 Mar 2019)
 
 * Added option `--hardtrim3 INT,` which allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_3prime.fq(.gz). We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences. Here is an example :
