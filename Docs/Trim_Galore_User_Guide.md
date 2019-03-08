@@ -3,10 +3,10 @@
 [<img title="Babraham Bioinformatics" style="float:right;margin:20px 20 20 600px" id="Babraham Bioinformatics" src="Images/logo.png" height="88" >](http://www.bioinformatics.babraham.ac.uk/index.html)
 
 
-Last update: 06/29/2018
+Last update: 04/03/2019
 
 #### Table of Contents
-* [Introduction](#version-043)
+* [Introduction](#version-060)
 * [Methodology](#adaptive-quality-and-adapter-trimming-with-trim-galore)
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
@@ -16,7 +16,7 @@ Last update: 06/29/2018
   * [RRBS-specific options](#rrbs-specific-options-mspi-digested-material)
   * [Paired-end specific options](#paired-end-specific-options)
 
-## Version 0.4.4
+## Version 0.6.0
 
 For all high throughput sequencing applications, we would recommend performing some quality control on the data, as it can often straight away point you towards the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). Thorough quality control and taking appropriate steps to remove problems is vital for the analysis of almost all sequencing applications. This is even more critical for the proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In our [brief guide to RRBS](http://www.bioinformatics.babraham.ac.uk/projects/bismark/RRBS_Guide.pdf) we discuss the following points:
 
@@ -30,11 +30,11 @@ For all high throughput sequencing applications, we would recommend performing s
 Poor base call qualities or adapter contamination are however just as relevant for 'normal', i.e. non-RRBS, libraries.
 
 
-## Adaptive quality and adapter trimming with Trim Galore!
+## Adaptive quality and adapter trimming with Trim Galore
 
 We have tried to implement a method to rid RRBS libraries (or other kinds of sequencing datasets) of potential problems in one convenient process. For this we have developed a wrapper script (trim_galore) that makes use of the publicly available adapter trimming tool [Cutadapt](https://cutadapt.readthedocs.io/en/stable/) and [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) for optional quality control once the trimming process has completed.
 
-Even though Trim Galore! works for any (base space) high throughput dataset (e.g. downloaded from the SRA) this section describes its use mainly with respect to RRBS libraries.
+Even though Trim Galore works for any (base space) high throughput dataset (e.g. downloaded from the SRA) this section describes its use mainly with respect to RRBS libraries.
 
 ### Step 1: Quality Trimming
 In the first step, low-quality base calls are trimmed off from the 3' end of the reads before adapter removal. This efficiently removes poor quality portions of the reads.
@@ -146,22 +146,29 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 
 * `-h/--help`
   * Print this help message and exits.
+  
 * `-v/--version`
   * Print the version information and exits.
+  
 * `-q/--quality <INT>`
   * Trim low-quality ends from reads in addition to adapter removal. For RRBS samples, quality trimming will be performed first, and adapter trimming is carried in a second round. Other files are quality and adapter trimmed in a single pass. The algorithm is the same as the one used by BWA (Subtract INT from all qualities; compute partial sums from all indices to the end of the sequence; cut sequence at the index at which the sum is minimal).
-  * Default Phred score: `20`.
+  * Default Phred score: `20`
+  
 * `--phred33`
   * Instructs Cutadapt to use `ASCII+33` quality scores as Phred scores (Sanger/Illumina 1.9+ encoding) for quality trimming.
   * Default: `ON`
+  
 * `--phred64`
   * Instructs Cutadapt to use `ASCII+64` quality scores as Phred scores (Illumina 1.5 encoding) for quality trimming.
+  
 * `--fastqc`
   * Run FastQC in the default mode on the FastQ file once trimming is complete.
+  
 * `--fastqc_args "<ARGS>"`
   * Passes extra arguments to FastQC. If more than one argument is to be passed to FastQC they must be in the form `arg1 arg2 [..]`.
   * An example would be: `--fastqc_args "--nogroup --outdir /home/"`.
   * Passing extra arguments will automatically invoke FastQC, so `--fastqc` does not have to be specified separately.
+
 * `-a/--adapter <STRING>`
   * Adapter sequence to be trimmed. If not specified explicitly, Trim Galore will try to auto-detect whether the Illumina universal, Nextera transposase or Illumina small RNA adapter sequence was used. Also see `--illumina`, `--nextera` and `--small_rna`.
   * If no adapter can be detected within the first 1 million sequences of the first file specified Trim Galore defaults to `--illumina`. A single base may also be given as e.g. `-a A{10}`, to be expanded to `-a AAAAAAAAAA`.
@@ -171,60 +178,100 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 
 * `--illumina`
   * Adapter sequence to be trimmed is the first 13bp of the Illumina universal adapter `AGATCGGAAGAGC` instead of the default auto-detection of adapter sequence.
+
 * `--nextera`
   * Adapter sequence to be trimmed is the first 12bp of the Nextera adapter `CTGTCTCTTATA` instead of the default auto-detection of adapter sequence.
+
 * `--small_rna`
   * Adapter sequence to be trimmed is the first 12bp of the _Illumina Small RNA 3' Adapter_ `TGGAATTCTCGG` instead of the default auto-detection of adapter sequence. 
   * Selecting to trim smallRNA adapters will also lower the `--length` value to 18bp. If the smallRNA libraries are paired-end then `-a2` will be set to the Illumina small RNA 5' adapter automatically (`GATCGTCGGACT`) unless `-a 2` had been defined explicitly.
 * `--max_length <INT>`
   * Discard reads that are longer than <INT> bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences.
+
 * `-s/--stringency <INT>`
   * Overlap with adapter sequence required to trim a sequence.
   * Defaults to a very stringent setting of `1`, _i.e._ even a single base pair of overlapping sequence will be trimmed of the 3' end of any read.
+
 * `-e <ERROR RATE>`
   * Maximum allowed error rate (no. of errors divided by the length of the matching region)
   * Default: `0.1`
+
 * `--gzip`
   * Compress the output file with `gzip`.
   * If the input files are gzip-compressed the output files will be automatically gzip compressed as well.
+
 * `--dont_gzip`
   * Output files won't be compressed with gzip. This overrides `--gzip`.
+  
 * `--length <INT>`
   * Discard reads that became shorter than length INT because of either quality or adapter trimming. A value of `0` effectively disables this behaviour.
   * Default: `20 bp`.
   * For paired-end files, both reads of a read-pair need to be longer than <INT> bp to be printed out to validated paired-end files (see option `--paired`). If only one read became too short there is the possibility of keeping such unpaired single-end reads (see `--retain_unpaired`).
   * Default pair-cutoff: `20 bp`.
+
 * `--max_n COUNT`
   * The total number of `Ns` (as integer) a read may contain before it will be removed altogether.
   * In a paired-end setting, either read exceeding this limit will result in the entire pair being removed from the trimmed output files.
+
 * `--trim-n`
   * Removes `Ns` from either side of the read.
   * This option does currently not work in RRBS mode.
+
 * `-o/--output_dir <DIR>`
-  * If specified all output will be written to this directory instead of the current directory.
+  * If specified all output will be written to this directory instead of the current directory. If the directory doesn't exist it will be created for you.
+
 * `--no_report_file`
   * If specified no report file will be generated.
+
 * `--suppress_warn`
   * If specified any output to `STDOUT` or `STDERR` will be suppressed.
+
 * `--clip_R1 <int>`
   * Instructs Trim Galore to remove <int> bp from the 5' end of read 1 (or single-end reads). This may be useful if the qualities were very poor, or if there is some sort of unwanted bias at the 5' end.
   * Default: `OFF`
+
 * `--clip_R2 <int>	`
   * Instructs Trim Galore to remove <int> bp from the 5' end of read 2 (paired-end reads only). This may be useful if the qualities were very poor, or if there is some sort of unwanted bias at the 5' end.
   * For paired-end BS-Seq, it is recommended to remove the first few bp because the end-repair reaction may introduce a bias towards low methylation. Please refer to the M-bias plot section in the Bismark User Guide for some examples.
   * Default: `OFF`
+
 * `--three_prime_clip_R1 <int>`
   * Instructs Trim Galore to remove `<int>` bp from the 3' end of read 1 (or single-end reads) _AFTER_ adapter/quality trimming has been performed. This may remove some unwanted bias from the 3' end that is not directly related to adapter sequence or basecall quality.
   * Default: `OFF`
+
 * `--three_prime_clip_R2 <int>`
   * Instructs Trim Galore to re move `<int>` bp from the 3' end of read 2 _AFTER_ adapter/quality trimming has been performed. This may remove some unwanted bias from the 3' end that is not directly related to adapter sequence or basecall quality.
   * Default: `OFF`
+  
+* `--2colour/--nextseq INT`
+  * This enables the option `--nextseq-trim=3'CUTOFF` within Cutadapt, which will set a quality cutoff (that is normally given with -q instead), but qualities of G bases are ignored. This trimming is in common for the NextSeq- and NovaSeq-platforms, where basecalls without any signal are called as high-quality G bases. More on the issue of G-overcalling may be found here: https://sequencing.qcfail.com/articles/illumina-2-colour-chemistry-can-overcall-high-confidence-g-bases/. This is mutually exlusive with `-q INT`.
+
+* `--path_to_cutadapt </path/to/cutadapt>`
+  
+  * You may use this option to specify a path to the Cutadapt executable, e.g. `/my/home/cutadapt-1.7.1/bin/cutadapt`. Else it is assumed that Cutadapt is in the `PATH`.
+
+* `--basename <PREFERRED_NAME>`
+
+  * Use PREFERRED_NAME as the basename for output files, instead of deriving the filenames from the input files. Single-end data would be called `PREFERRED_NAME_trimmed.fq(.gz)`, or `PREFERRED_NAME_val_1.fq(.gz)` and `PREFERRED_NAME_val_2.fq(.gz)` for paired-end data. `--basename` only works when 1 file (single-end) or 2 files (paired-end) are specified, but not for longer lists.
+
+* `-j/--cores INT` 
+
+  * Number of cores to be used for trimming [default: 1]. For Cutadapt to work with multiple cores, it requires Python 3 as well as parallel gzip (`pigz`) installed on the system. The version of Python used is detected from the shebang line of the Cutadapt executable (either `cutadapt`, or a specified path). If Python 2 is detected, `--cores` is set to `1`. If `pigz` cannot be detected on your system, Trim Galore reverts to using `gzip` compression. Please note that `gzip` compression will slow down multi-core processes so much that it is hardly worthwhile, please see: https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103 for more info).
+
+  * Actual core usage: It should be mentioned that the actual number of cores used is a little convoluted. Assuming that Python 3 is used and pigz is installed, `--cores 2` would use 2 cores to read the input (probably not at a high usage though), 2 cores to write to the output (at moderately high usage), and 2 cores for Cutadapt itself + 2 additional cores for Cutadapt (not sure what they are used for) + 1 core for Trim Galore itself. So this can be up to 9 cores, even though most of them won't be used at 100% for most of the time. Paired-end processing uses twice as many cores for the validation (= writing out) step. `--cores 4` would then be: 4 (read) + 4 (write) + 4 (Cutadapt) + 2 (extra Cutadapt) +     1 (Trim Galore) = 15, and so forth.
+
+  * It seems that `--cores 4` could be a sweet spot, anything above has diminishing returns.
+
+
 
 ### SPECIFIC TRIMMING - without adapter/quality trimming
 
 * `--hardtrim5 <int>`
-  * Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences to <int> bp from the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit. Hard-trimmed output files will end in `.<int>.fq(.gz)`.
+  * Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences to <int> bp from the 3'-end. Once hard-trimming of files is complete, Trim Galore will exit. Hard-trimmed output files will end in `.<int>bp_5prime.fq(.gz)`.
 
+* `--hardtrim3 <int>`
+  * Instead of performing adapter-/quality trimming, this option will simply hard-trim sequences to <int> bp from the 5'-end. Once hard-trimming of files is complete, Trim Galore will exit. Hard-trimmed output files will end in `.<int>bp_3prime.fq(.gz)`.
+  
 * `--clock`
   * In this mode, reads are trimmed in a specific way that is currently used for the Mouse Epigenetic Clock (see here: Multi-tissue DNA methylation age predictor in mouse, Stubbs et al., Genome Biology, 2017 18:68 https://doi.org/10.1186/s13059-017-1203-5). Following this, Trim Galore will exit.
 
@@ -260,8 +307,10 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 ### RRBS-specific options (MspI digested material):
 * `--rrbs`
   * Specifies that the input file was an MspI digested RRBS sample (recognition site: `CCGG`). Sequences which were adapter-trimmed will have a further 2 bp removed from their 3' end. This is to avoid that the filled-in C close to the second MspI site in a sequence is used for methylation calls. Sequences which were merely trimmed because of poor quality will not be shortened further.
+
 * `--non_directional`
   * Selecting this option for non-directional RRBS libraries will screen quality-trimmed sequences for `CAA` or `CGA` at the start of the read and, if found, removes the first two base pairs. Like with the option `--rrbs` this avoids using cytosine positions that were filled-in during the end-repair step. `--non_directional` requires `--rrbs` to be specified as well.
+
 * `--keep`
   * Keep the quality trimmed intermediate file. If not specified the temporary file will be deleted after adapter trimming. Only has an effect for RRBS samples since other FastQ files are not trimmed for poor qualities separately.
   * Default: `OFF`
