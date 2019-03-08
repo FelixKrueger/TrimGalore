@@ -26,12 +26,12 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 01 Mar 2019
+## last modified on 08 Mar 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.0';
+my $trimmer_version = '0.6.0_dev';
 my $cutadapt_version;
 my $python_version;
 
@@ -586,6 +586,16 @@ sub trim{
 
     my $temp;
 
+	### We need to make sure that Cutadapt still runs if users use a fairly old version of Cutadapt, as multi-core handling is only supported sincce
+	### Cutadapt version 1.15. Edited on 08 03 2019
+	if ($cutadapt_version < 1.15){
+		warn "Your version of Cutadapt is fairly old (detected v$cutadapt_version), please consider updating Cutadapt!\n";
+		$cores = ""; # need to delete -j entirely as Cutadapt 
+	}
+	else{
+		$cores = "-j $cores";
+	}
+
     ### Proceeding differently for RRBS and other type of libraries
     if ($rrbs){
       
@@ -604,7 +614,7 @@ sub trim{
 			warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
 			# sleep (1);
 		  
-			open (QUAL,"$path_to_cutadapt  -j $cores -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
+			open (QUAL,"$path_to_cutadapt  $cores -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
 
 			my $qual_count = 0;
 		  
@@ -683,19 +693,19 @@ sub trim{
 			if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 				warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 			else{                            # this is read 2 of a pair
 				warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$a2' from file $temp <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  $cores -e $error_rate -O $stringency -a $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 		}
 		### Using the same adapter for both read 1 and read 2
 		else{
 			warn "\n  >>> Now performing adapter trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
 			# sleep (3);
-			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 		}
       
 		close WRITER or die $!; # not needed
@@ -870,20 +880,20 @@ sub trim{
 			### Figure out whether current file counts as read 1 or read 2 of paired-end files
 			if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 				warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$adapter' from file $temp <<< \n";
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 			else{                            # this is read 2 of a pair
 				$isR2 = 1;
 				warn "\n  >>> Now performing Poly-A trimming for the adapter sequence: '$a2' from file $temp <<< \n";	
 				# For Read 2 we need to trim the PolyT (or PolyA) from the 5' end instead! Hence -g $a2 and not -a! 
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  $cores -e $error_rate -O $stringency -g $a2 $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 			}
 		}
 		### Using the same adapter for both read 1 and read 2 - Single end will use the same adapters are Read 1s for paired-end files
 		else{
 			warn "\n  >>> Now performing single-end Poly-A trimming for with the sequence: '$adapter' from file $temp <<< \n";
 			# sleep (3);
-			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  -j $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
+			$pid = open3 (\*WRITER, \*TRIM, \*ERROR,"$path_to_cutadapt  $cores -e $error_rate -O $stringency -a $adapter $output_dir$temp") or die "Failed to launch Cutadapt: $!\n";
 		}
 		
 		close WRITER or die $!; # not needed
@@ -1015,19 +1025,19 @@ sub trim{
 			if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
 				warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 			}
 			else{                            # this is read 2 of a pair
 				warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$a2' from file $filename <<< \n";
 				#sleep (1);
-				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
+				$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $a2 $filename") or die "Failed to launch Cutadapt: $!";
 			}
 		}
 		### Using the same adapter for both read 1 and read 2
 		else{
 			warn "\n  >>> Now performing quality (cutoff '$quality_cutoff') and adapter trimming in a single pass for the adapter sequence: '$adapter' from file $filename <<< \n";
 			#sleep (1);
-			$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  -j $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
+			$pid = open3 (\*WRITER, \*TRIM, \*ERROR, "$path_to_cutadapt  $cores -e $error_rate $quality_cutoff -O $stringency $trim_n -a $adapter $filename") or die "Failed to launch Cutadapt: $!";
 		}
       
 		close WRITER or die $!; # not needed
@@ -2093,7 +2103,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 01 03 2019
+                               Last update: 08 03 2019
 
 VERSION
     exit;
@@ -2894,7 +2904,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 01 March 2019.
+Last modified on 08 March 2019.
 
 HELP
   exit;
