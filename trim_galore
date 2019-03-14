@@ -431,8 +431,10 @@ sub trim{
 	}
 
     if (defined $cores){
-        warn "Number of cores used for trimming: $cores\n";
-		print REPORT "Number of cores used for trimming: $cores\n";
+		my $temp = $cores;
+		$temp =~ s/-j //;
+        warn "Number of cores used for trimming: $temp\n";
+		print REPORT "Number of cores used for trimming: $temp\n";
     }
 	
     if (defined $phred_score_cutoff){
@@ -589,11 +591,18 @@ sub trim{
 	### We need to make sure that Cutadapt still runs if users use a fairly old version of Cutadapt, as multi-core handling is only supported sincce
 	### Cutadapt version 1.15. Edited on 08 03 2019
 	if ($cutadapt_version < 1.15){
-		warn "Your version of Cutadapt is fairly old (detected v$cutadapt_version), please consider updating Cutadapt!\n";
-		$cores = ""; # need to delete -j entirely as Cutadapt 
+		if ($cores > 1){
+			die "I'm sorry but your version of Cutadapt is too old to support multi-core trimming. Please update Cutadapt, and try again\n\n";
+		}
+		else{ #default single-core prcessing with old version of Cutadapt
+			warn "Your version of Cutadapt is fairly old (detected v$cutadapt_version), please consider updating Cutadapt!\n";
+			$cores = ""; # need to delete -j entirely as Cutadapt 	
+		}	
 	}
 	else{
-		$cores = "-j $cores";
+		unless ($cores =~ /^-j \d+$/){ # if it was set before, don't change it again
+			$cores = "-j $cores";
+		}
 	}
 
     ### Proceeding differently for RRBS and other type of libraries
@@ -1267,10 +1276,11 @@ sub trim{
                 warn "ORIGINAL FILE 1: >>$file_1<<\tRENAMING TO:>>$tempname_1<<\n";
                 warn "ORIGINAL FILE 2: >>$file_2<<\tRENAMING TO:>>$tempname_2<<\n";
 
-                rename $file_1, $tempname_1;
-                rename $file_2, $tempname_2;
+                rename "${output_dir}/${file_1}","${output_dir}/$tempname_1";
+                rename "${output_dir}/${file_2}","${output_dir}/$tempname_2";
                 $file_1 = $tempname_1;
                 $file_2 = $tempname_2;
+			
             }
             # sleep (1);
 
