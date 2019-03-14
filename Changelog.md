@@ -4,6 +4,9 @@
 
 * Added a check for very old versions Cutadapt, so that single-core trimming still works with Cutadapt versions prior to 1.15. 
 
+- Fixed the way single-core trimming was dealt with in paired-end mode (which was introduced by the above 'fix')
+
+- the option `--basename preferred_name` should now correclty work when specified in conjunction with `--output_dir`
 
 ### Version 0.6.0 (Release on 1 Mar 2019)
 
