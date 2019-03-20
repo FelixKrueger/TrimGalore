@@ -26,12 +26,12 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 08 Mar 2019
+## last modified on 20 Mar 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.0_dev';
+my $trimmer_version = '0.6.1';
 my $cutadapt_version;
 my $python_version;
 
@@ -2113,7 +2113,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 08 03 2019
+                               Last update: 20 03 2019
 
 VERSION
     exit;
@@ -2914,7 +2914,7 @@ Paired-end specific options:
                         Default: 35 bp.
 
 
-Last modified on 08 March 2019.
+Last modified on 19 March 2019.
 
 HELP
   exit;
