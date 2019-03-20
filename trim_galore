@@ -1271,13 +1271,13 @@ sub trim{
             ### FILE RENAMING
             if ($basename){
                 warn "Now renaming the output files\n\n";
-                my $tempname_1 = "${basename}$1" if ($file_1 =~ /(_trimmed.*)$/);
-                my $tempname_2 = "${basename}$1" if ($file_2 =~ /(_trimmed.*)$/);
+                my $tempname_1 = "${basename}_R1$1" if ($file_1 =~ /(_trimmed.*)$/);
+                my $tempname_2 = "${basename}_R2$1" if ($file_2 =~ /(_trimmed.*)$/);
                 warn "ORIGINAL FILE 1: >>$file_1<<\tRENAMING TO:>>$tempname_1<<\n";
                 warn "ORIGINAL FILE 2: >>$file_2<<\tRENAMING TO:>>$tempname_2<<\n";
 
-                rename "${output_dir}/${file_1}","${output_dir}/$tempname_1";
-                rename "${output_dir}/${file_2}","${output_dir}/$tempname_2";
+                rename "${output_dir}${file_1}","${output_dir}$tempname_1";
+                rename "${output_dir}${file_2}","${output_dir}$tempname_2";
                 $file_1 = $tempname_1;
                 $file_2 = $tempname_2;
 			
