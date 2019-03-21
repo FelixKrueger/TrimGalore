@@ -31,7 +31,7 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.1';
+my $trimmer_version = '0.6.1_dev';
 my $cutadapt_version;
 my $python_version;
 
@@ -2113,7 +2113,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 20 03 2019
+                               Last update: 21 03 2019
 
 VERSION
     exit;
@@ -2176,33 +2176,52 @@ VERSION
 		
 		# Reading the first line of the cutadapt executable, since this tends to contain the python version it is using
 		open (my $first_line,$location_of_cutadapt) or die "Failed to read the first line of the Cutadapt executable: $!";
-		$_= <$first_line>;
-		chomp;
-		# warn "This is the first line:\n>>>$_<<<\n";
+		my $shebang = <$first_line>;
+		chomp $shebang;
+		# warn "This is the first line:\n>>>$shebang<<<\n";
 		close $first_line;
 		
-		if ($_ =~ /\#!/){
-			# warn "Found a shebangline: >>>$_<<<\n";
-			$_ =~ s/\#!//; 
-			# warn "Truncated shebangline: >>>$_<<<\n";
-		}
+		# the shebang line seems to contain a path to Python
+		if ($shebang =~ /python/i){
+			if ($_ =~ /\#!/){
+				# warn "Found a shebangline: >>>$_<<<\n";
+				$_ =~ s/\#!//; 
+				# warn "Truncated shebangline: >>>$_<<<\n";
+			}
 	
-		my $python_return = `$_ --version 2>&1`;
-		chomp $python_return;
-		# warn "Python return: $python_return\n";
+			my $python_return = `$shebang --version 2>&1`;
+			chomp $python_return;
+			# warn "Python return: $python_return\n";
 		
-		if ($python_return =~ /Python 3.*/){
-			warn "Cutadapt seems to be using Python 3! Proceeding with multi-core enabled Cutadapt using $cores cores\n";
+			if ($python_return =~ /Python 3.*/){
+				warn "Cutadapt seems to be using Python 3! Proceeding with multi-core enabled Cutadapt using $cores cores\n";
+			}
+			elsif ($python_return =~ /Python 2.*/){
+				warn "Python 2 found, multi-core not supported. Proceeding with Cutadapt in single-core mode\n";
+				$cores = 1;
+			}
+			else{
+				die "No Python detected. Python required to run Cutadapt!\n\n";
+			}
+			
+			$python_version = $python_return;
+			$python_version =~ s/^Python //;
 		}
-		elsif ($python_return =~ /Python 2.*/){
-			warn "Python 2 found, multi-core not supported. Proceeding with Cutadapt in single-core mode\n";
-			$cores = 1;
+		else{
+			# the shebang line doesn't seem to contain a path to Python. Instead, someone edited the Cutadapt executable to look differently.
+			# An example for this is the latest version of Miniconda:
+			### #!/bin/sh
+			### '''exec' /long/path/to/conda/envs/deepsv/bin/python "$0" "$@"
+			### ' '''
+			### # -*- coding: utf-8 -*-
+			### ...
+			
+			### interestingly, Anacondo does not seem to do this
+			warn "Could not detect version of Python used by Cutadapt from the first line of Cutadapt (but found this: >>>$shebang<<<)\n";
+			$python_version = 'could not detect';
+			warn "Letting the (modified) Cutadapt deal with the Python version instead\n";
 		}
-		else {
-			die "\nPython not detected. Python needed to run Cutadapt\n\n";
-		}
-		$python_version = $python_return;
-		$python_version =~ s/^Python //;
+		
 		### only proceeding if $cores is still > 1, i.e. if Python 3 was found
 		if ($cores > 1){
 			
@@ -2913,8 +2932,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-
-Last modified on 19 March 2019.
+Last modified on 21 March 2019.
 
 HELP
   exit;
