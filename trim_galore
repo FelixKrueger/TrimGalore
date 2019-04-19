@@ -590,19 +590,37 @@ sub trim{
 
 	### We need to make sure that Cutadapt still runs if users use a fairly old version of Cutadapt, as multi-core handling is only supported sincce
 	### Cutadapt version 1.15. Edited on 08 03 2019
-	if ($cutadapt_version < 1.15){
-		if ($cores > 1){
-			die "I'm sorry but your version of Cutadapt is too old to support multi-core trimming. Please update Cutadapt, and try again\n\n";
+	# if the Cutadapt version has more . in the version, we discard the second one.
+	# warn "Version was: $cutadapt_version\n";
+	if ($cutadapt_version =~ /(\d+\.\d+)\.\d+/){
+		$cutadapt_version = $1;
+	}
+	# warn "Version now is: $cutadapt_version\n"; 
+	my ($major_version,$sub_version) = ($1,$2) if ($cutadapt_version =~ /^(\d+)\.(\d+)$/);
+	# warn "Major: $major_version\nSub version: $sub_version\n";
+	# sleep(3);
+	if ($major_version == 1){ # versions prior to 1.15 did not support the -j option
+		if ($sub_version < 15){
+			if ($cores > 1){
+				die "I'm sorry but your version of Cutadapt is too old to support multi-core trimming. Please update Cutadapt, and try again\n\n";
+			}
+			else{ #default single-core prcessing with old version of Cutadapt
+				warn "Your version of Cutadapt is fairly old (detected v$cutadapt_version), please consider updating Cutadapt!\n";
+				$cores = ""; # need to delete -j entirely as Cutadapt 	
+			}	
 		}
-		else{ #default single-core prcessing with old version of Cutadapt
-			warn "Your version of Cutadapt is fairly old (detected v$cutadapt_version), please consider updating Cutadapt!\n";
-			$cores = ""; # need to delete -j entirely as Cutadapt 	
-		}	
+		else{
+			warn "Cutadapt seems to be reasonably up-to-date. Setting -j $cores\n";
+			unless ($cores =~ /^-j \d+$/){ # if it was set before, don't change it again
+				$cores = "-j $cores";
+			}
+		}
+	}
+	elsif ($major_version > 1){
+		warn "Cutadapt seems to be fairly up-to-date (version $cutadapt_version). Setting -j $cores\n";
 	}
 	else{
-		unless ($cores =~ /^-j \d+$/){ # if it was set before, don't change it again
-			$cores = "-j $cores";
-		}
+		die "Cutadapt major version was not 1 or higher. Simply too old...\n";
 	}
 
     ### Proceeding differently for RRBS and other type of libraries
@@ -2157,7 +2175,7 @@ VERSION
 		warn "Cutadapt seems to be working fine (tested command '$path_to_cutadapt --version')\n";
 		$cutadapt_version = `$path_to_cutadapt --version`;
 		chomp $cutadapt_version;	
-		# warn "Cutadapt version: $cutadapt_version\n";
+		warn "Cutadapt version: $cutadapt_version\n";
 	}
 	else{
 		die "Failed to execute Cutadapt porperly. Please install Cutadapt first and make sure it is in the PATH, or specify the path to the Cutadapt executable using --path_to_cutadapt /path/to/cutadapt\n\n";
@@ -2238,6 +2256,9 @@ VERSION
 				$compression_path = "gzip";
 			}
 		} 
+	}
+	else{
+		warn "single-core operation.\n"
 	}
 	unless (defined $compression_path){
 		$compression_path = "gzip"; # fall-back option
