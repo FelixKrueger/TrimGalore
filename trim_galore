@@ -2183,9 +2183,9 @@ VERSION
 		
 		# the shebang line seems to contain a path to Python
 		if ($shebang =~ /python/i){
-			if ($_ =~ /\#!/){
+			if ($shebang =~ /\#!/){
 				# warn "Found a shebangline: >>>$_<<<\n";
-				$_ =~ s/\#!//; 
+				$shebang =~ s/\#!//; 
 				# warn "Truncated shebangline: >>>$_<<<\n";
 			}
 	
