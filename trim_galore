@@ -618,6 +618,9 @@ sub trim{
 	}
 	elsif ($major_version > 1){
 		warn "Cutadapt seems to be fairly up-to-date (version $cutadapt_version). Setting -j $cores\n";
+		unless ($cores =~ /^-j \d+$/){ # if it was set before, don't change it again
+			$cores = "-j $cores";
+		}
 	}
 	else{
 		die "Cutadapt major version was not 1 or higher. Simply too old...\n";
@@ -2953,7 +2956,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 21 March 2019.
+Last modified on 07 May 2019.
 
 HELP
   exit;
