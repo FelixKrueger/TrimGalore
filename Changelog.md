@@ -5,6 +5,8 @@
 
 - Changed the version checking mechanism so that Trim Galore even works in single-core mode if the version of Cutadapt was 7 years old...
 
+- Fixed setting `-j $cores` for Cutadapt versions 2.X or above.
+
 
 ### Version 0.6.1 (Release on 20 Mar 2019)
 
