@@ -26,12 +26,12 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 07 May 2019
+## last modified on 11 June 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.2';
+my $trimmer_version = '0.6.2_dev';
 my $cutadapt_version;
 my $python_version;
 
@@ -976,7 +976,11 @@ sub trim{
 			### CHANGING THE readID to remove white spaces and adding PolyA trimming information
 			$l1 =~ s/\s+/_/g; # removing white spaces from readID
 			if ($diff > 0){ # only adding the PolyA removal tag if some A's were really removed, so we can filter these out later if desired
+				# warn "$l1\n";
+				$l1 =~ s/\@/\@${diff}:A:/; # also adding the PolyA trimmed reads to the start of the read in the format
+				# "trimmed_bases:A:" as this is the current Way Thermo Fisher are handling it
 				$l1 .= "_PolyA:$diff";
+				# warn "$l1\n~~~~~~~~~~~~~\n"; sleep(1);
 			}
 			
 			### Shortening all sequences by 1 bp on the 3' end - This is probably no longer needed since we have stopped using Bowtie (1)
@@ -2854,13 +2858,13 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         These values may be changed manually using the options -a and -a2.
 
                         In addition to trimming the sequences, white spaces are replaced with _ and it records in the read ID
-                        how many bases were trimmed so it can later be used to identify PolyA trimmed sequences, e.g. _PolyA:32
-                        in the following example:
+                        how many bases were trimmed so it can later be used to identify PolyA trimmed sequences. This is currently done
+                        by writing tags to both the start ("32:A:") and end ("_PolyA:32") of the reads in the following example:
 
                         \@READ-ID:1:1102:22039:36996 1:N:0:CCTAATCC
                         GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
-                        \@READ-ID:1:1102:22039:36996_1:N:0:CCTAATCC_PolyA:32
+                        \@32:A:READ-ID:1:1102:22039:36996_1:N:0:CCTAATCC_PolyA:32
                         GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTTATAAACACC
 
                         PLEASE NOTE: The poly-A trimming mode expects that sequences were both adapter and quality trimmed
@@ -2956,7 +2960,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 07 May 2019.
+Last modified on 11 June 2019.
 
 HELP
   exit;
