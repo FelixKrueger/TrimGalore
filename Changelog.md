@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Version 0.6.1_dev (Release on 08 05 2019)
+### Version 0.6.2 (Release on 08 05 2019)
 
 - Changed the version checking mechanism so that Trim Galore even works in single-core mode if the version of Cutadapt was 7 years old...
 
