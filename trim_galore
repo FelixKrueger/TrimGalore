@@ -31,7 +31,7 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.2_dev';
+my $trimmer_version = '0.6.3';
 my $cutadapt_version;
 my $python_version;
 
