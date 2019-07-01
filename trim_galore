@@ -36,6 +36,7 @@ my $cutadapt_version;
 my $python_version;
 
 my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename) = process_commandline();
+my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
@@ -337,7 +338,7 @@ unless (defined $adapter){
 			}
 		}
 		else{ # ADAPTER TRIMMING; DEFAULT
-			($adapter,$adapter_name) = autodetect_adapter_type();
+			($adapter,$adapter_name,$report_message) = autodetect_adapter_type();
 		}
     }
 }
@@ -445,6 +446,11 @@ sub trim{
 
     warn "Quality encoding type selected: ASCII+$phred_encoding\n";
     print REPORT "Quality encoding type selected: ASCII+$phred_encoding\n";
+
+    if ($report_message){
+    	# warn "adding Auto-detection statement\n";
+    	print REPORT $report_message;
+    }
 
     warn "Adapter sequence: '$adapter' ($adapter_name)\n";
     print REPORT "Adapter sequence: '$adapter' ($adapter_name)\n";
@@ -581,6 +587,7 @@ sub trim{
             print REPORT "Output file will be GZIP compressed\n";
         }
     }
+
 
     warn "\n";
     print REPORT "\n";
@@ -822,6 +829,7 @@ sub trim{
 	  
 			### directional read
 			unless ($nd == 1){
+				warn "Do we ever get here?\n";
 				# only trimming Read 1 of a pair for a further 2bp from their 3' end
 				if ($validate){ # paired end
 					if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
@@ -1899,49 +1907,72 @@ sub autodetect_adapter_type{
   }
 
   my $highest;
+  my $third;
   my $second;
   my $seq;
   my $adapter_name;
+  my $report_message;
 
-  warn "Found perfect matches for the following adapter sequences:\nAdapter type\tCount\tSequence\tSequences analysed\tPercentage\n";
-  foreach my $adapter (sort {$adapters{$b}->{count}<=>$adapters{$a}->{count}} keys %adapters){
+  	warn "Found perfect matches for the following adapter sequences:\nAdapter type\tCount\tSequence\tSequences analysed\tPercentage\n";
+  	foreach my $adapter (sort {$adapters{$b}->{count}<=>$adapters{$a}->{count}} keys %adapters){
 
-    my $percentage = sprintf("%.2f",$adapters{$adapter}->{count}/$count*100);
+    	my $percentage = sprintf("%.2f",$adapters{$adapter}->{count}/$count*100);
 
-    warn "$adapter\t$adapters{$adapter}->{count}\t$adapters{$adapter}->{seq}\t$count\t$percentage\n";
+    	warn "$adapter\t$adapters{$adapter}->{count}\t$adapters{$adapter}->{seq}\t$count\t$percentage\n";
 
-    unless (defined $highest){
-      $highest = $adapter;
-      $seq = $adapters{$adapter}->{seq};
-      $adapter_name = $adapters{$adapter}->{name};
-      next;
-    }
-    unless (defined $second){
-      $second = $adapter;
-    }
+	    unless (defined $highest){
+		    $highest = $adapter;
+		    $seq = $adapters{$adapter}->{seq};
+	      	$adapter_name = $adapters{$adapter}->{name};
+	      	next;
+	    }
+	    unless (defined $second){
+	      	$second = $adapter;
+	      	next;
+	    }
+ 		unless (defined $third){
+	      	$third = $adapter;
+	      	next;
+	    }
   }
 
+	
+  	if ($adapters{$highest}->{count} == $adapters{$second}->{count} and $adapters{$highest}->{count} == $adapters{$third}->{count}){
+    	warn "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
+    	$report_message .= "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
 
-  # using the highest occurrence as adapter to look out for
-  if ($adapters{$highest}->{count} == $adapters{$second}->{count}){
-    warn "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count})\n";
-
-    if ($adapters{$highest}->{count} == 0){
-      warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
-      $adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
-      $seq = 'AGATCGGAAGAGC';
+  		warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
+  		$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n";
+  		$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
+  		$seq = 'AGATCGGAAGAGC';  
     }
-    else{
-      warn "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
-    }
-  }
-  else{
-    warn "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
-  }
+    elsif ($adapters{$highest}->{count} == $adapters{$second}->{count} ){
+		warn "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
+    	$report_message .= "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
+    
+    	# If one of the highest contaminants was the Illumina adapter, we set that one and print a warning		
+    	if ( ($highest eq 'Illumina') or ($second eq 'Illumina')) {
+    		warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
+      		$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior.\n";
+      		$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
+      		$seq = 'AGATCGGAAGAGC';
+    	}
+    	else{
+    		warn "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior).\n";
+      		$report_message .= "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior.\n";
+      		$adapter_name = 'Nextera; (assigned because of inconclusive auto-detection)';
+      		$seq = 'CTGTCTCTTATA';	
+      	}
+  	}
+  	else{
+  		# using the highest occurrence as adapter to look out for
+    	$report_message .= "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n";
+    	warn "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
+  	}
 
   close AUTODETECT;
 
-  return ($seq,$adapter_name);
+  return ($seq,$adapter_name,$report_message);
 
 }
 
