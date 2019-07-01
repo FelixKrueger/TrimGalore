@@ -26,12 +26,12 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 11 June 2019
+## last modified on 01 July 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.3';
+my $trimmer_version = '0.6.3_dev';
 my $cutadapt_version;
 my $python_version;
 
@@ -545,17 +545,17 @@ sub trim{
     print REPORT "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
     }
     if ($clip_r2){
-    warn "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
-    print REPORT "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
-    }
+		warn "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
+		print REPORT "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
+	}
 
     if ($three_prime_clip_r1){
-    warn "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
-    print REPORT "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
+		warn "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
+		print REPORT "All Read 1 sequences will be trimmed by $three_prime_clip_r1 bp from their 3' end to avoid poor qualities or biases\n";
     }
     if ($three_prime_clip_r2){
-    warn "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
-    print REPORT "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
+		warn "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
+		print REPORT "All Read 2 sequences will be trimmed by $three_prime_clip_r2 bp from their 3' end to avoid poor qualities or biases\n";
     }
 
     if ($fastqc){
@@ -789,21 +789,34 @@ sub trim{
 	  
 			### NON-DIRECTIONAL RRBS
 			if ($non_directional){
-				if (length$seq > 2){
-					if ($seq =~ /^CAA/){
+				$nd = 1;
+				if (length$seq > 2){ # only doing something if the read is longer than 2bp
+					
+					# only trimming Read 1 of a pair for a further 2bp from their 3' end
+					if ($seq =~ /^CAA/){ # this might be a non-directional sequence
 						++$CAA;
 						$seq = substr ($seq,2,length($seq)-2);
 						$qual = substr ($qual,2,length($qual)-2);
 						++$rrbs_trimmed_start;
-						$nd = 1;
 					}
-					elsif ($seq =~ /^CGA/){
+					elsif ($seq =~ /^CGA/){ # this might be a non-directional sequence
 						$seq = substr ($seq,2,length($seq)-2);
 						$qual = substr ($qual,2,length($qual)-2);
 						++$CGA;
 						++$rrbs_trimmed_start;
-						$nd = 1;
-					}	
+					}
+					else{ 							
+						# If the reads look like standard OT/OB sequences (CGG/TGG) 
+						# we need to trim in the same way as for directional sequences
+						if (length$seq < $quality_trimmed_seq_length){
+							$seq = substr ($seq,0,length($seq)-2);
+							$qual = substr ($qual,0,length($qual)-2);
+							++$rrbs_trimmed;
+						}
+					}							
+				}
+				else{
+					# read is too short anyway (so it will probably not survive the length filtering step
 				}
 			}
 	  
@@ -1191,10 +1204,10 @@ sub trim{
 	if ($rrbs){
 		my $percentage_shortened;
 		if ($count){
-		$percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
+			$percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
 			warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
 			print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
-			}
+		}
 		else{
 			warn "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
 			print REPORT "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
@@ -2309,15 +2322,15 @@ VERSION
           $nextseq = '';
       }
 
-  ### NON-DIRECTIONAL RRBS
-  if ($non_directional){
-    unless ($rrbs){
-      die "Option '--non_directional' requires '--rrbs' to be specified as well. Please re-specify!\n";
-    }
-  }
-  else{
-    $non_directional = 0;
-  }
+	### NON-DIRECTIONAL RRBS
+	if ($non_directional){
+		unless ($rrbs){
+			die "Option '--non_directional' requires '--rrbs' to be specified as well. Please re-specify!\n";
+		}
+	}
+	else{
+		$non_directional = 0;
+	}
 
   if ($fastqc_args){
     $fastqc = 1; # specifying fastqc extra arguments automatically means that FastQC will be executed
@@ -2566,20 +2579,20 @@ VERSION
       $trim_n = '';
   }
 
-  ### RRBS
-  if ($rrbs){
-      unless ($non_directional){ # only setting this for directional mode
-      if ($validate){
-          unless (defined $clip_r2){ # user specified R2 clipping overrides the default setting of --clip_r2 2  # added 07 Dec 2016
-          warn "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)\n"; # sleep(1);
-          $clip_r2 = 2;
-          }
-      }
-      }
-  }
-  else{
-      $rrbs = 0;
-  }
+	### RRBS
+	if ($rrbs){
+		unless ($non_directional){ # only setting this for directional mode
+			if ($validate){
+				unless (defined $clip_r2){ # user specified R2 clipping overrides the default setting of --clip_r2 2  # added 07 Dec 2016
+					warn "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)\n"; # sleep(1);
+					$clip_r2 = 2;
+				}
+			}
+		}
+	}
+	else{
+		$rrbs = 0;
+	}
 
   if (defined $hardtrim5){
       unless ($hardtrim5 > 0 and $hardtrim5 < 1000){
