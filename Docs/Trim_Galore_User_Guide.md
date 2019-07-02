@@ -3,20 +3,22 @@
 [<img title="Babraham Bioinformatics" style="float:right;margin:20px 20 20 600px" id="Babraham Bioinformatics" src="Images/logo.png" height="88" >](http://www.bioinformatics.babraham.ac.uk/index.html)
 
 
-Last update: 04/03/2019
+Last update: 02/07/2019
 
 #### Table of Contents
 * [Introduction](#version-060)
 * [Methodology](#adaptive-quality-and-adapter-trimming-with-trim-galore)
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
+    - [Auto-detection](#adapter-auto-detection)
+    - [Auto-detection](#manual-adapter-sequence-specification)
   3. [Removing Short Sequences](#step-3-removing-short-sequences)
   4. [Specialised Trimming - hard- and Epigenetic Clock Trimming](#step-4-specialised-trimming)
 * [Full list of options for Trim Galore!](#full-list-of-options-for-trim-galore)
   * [RRBS-specific options](#rrbs-specific-options-mspi-digested-material)
   * [Paired-end specific options](#paired-end-specific-options)
 
-## Version 0.6.0
+## Version 0.6.3 dev
 
 For all high throughput sequencing applications, we would recommend performing some quality control on the data, as it can often straight away point you towards the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). Thorough quality control and taking appropriate steps to remove problems is vital for the analysis of almost all sequencing applications. This is even more critical for the proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In our [brief guide to RRBS](http://www.bioinformatics.babraham.ac.uk/projects/bismark/RRBS_Guide.pdf) we discuss the following points:
 
@@ -48,7 +50,10 @@ In the first step, low-quality base calls are trimmed off from the 3' end of the
 > Here is an example of a dataset downloaded from the SRA which was trimmed with a Phred score threshold of 20 (data set DRR001650_1 from Kobayashi et al., 2012).
 
 ### Step 2: Adapter Trimming
-In the next step, Cutadapt finds and removes adapter sequences from the 3’ end of reads. If no sequence was supplied it will attempt to auto-detect the adapter which has been used. For this it will analyse the first 1 million sequences of the first specified file and attempt to find the first 12 or 13bp of the following standard adapters:
+In the next step, Cutadapt finds and removes adapter sequences from the 3’ end of reads. 
+
+#### Adapter auto-detection
+If no sequence was supplied, Trim Galore will attempt to auto-detect the adapter which has been used. For this it will analyse the first 1 million sequences of the first specified file and attempt to find the first 12 or 13bp of the following standard adapters:
 
 ```
 Illumina:   AGATCGGAAGAGC
@@ -56,7 +61,10 @@ Small RNA:  TGGAATTCTCGG
 Nextera:    CTGTCTCTTATA
 ```
 
-If no adapter can be detected within the first 1 million sequences Trim Galore defaults to `--illumina`. The auto-detection behaviour can be overruled by specifying an adapter sequence manually or by using `--illumina`, `--nextera` or `--small_rna`. (Please note the first 13 bp of the standard Illumina paired-end adapters (`AGATCGGAAGAGC`) recognise and removes adapter from most standard libraries, including the TruSeq and Sanger iTag adapters).
+If no adapter contamination can be detected within the first 1 million sequences, or in case of a tie between several different adapters Trim Galore defaults to `--illumina`, as long as the Illumina adapter sequence was one of the options. If there was a tie between the Nextera and small RNA adapter, the default is `--nextera`. The auto-detection results are shown on screen and also printed to the trimming report for reference.
+
+#### Manual adapter sequence specification
+The auto-detection behaviour can be overruled by specifying an adapter sequence manually or by using `--illumina`, `--nextera` or `--small_rna`. (Please note the first 13 bp of the standard Illumina paired-end adapters (`AGATCGGAAGAGC`) recognise and removes adapter from most standard libraries, including the TruSeq and Sanger iTag adapters).
 
 To control the stringency of the adapter removal process one gets to specify the minimum number of required overlap with the adapter sequence; else it will default to 1. This default setting is extremely stringent, i.e. an overlap with the adapter sequence of even a single bp is spotted and removed. This may appear unnecessarily harsh; however, as a reminder adapter contamination may in a Bisulfite-Seq setting lead to mis-alignments and hence incorrect methylation calls, or result in the removal of the sequence as a whole because of too many mismatches in the alignment process.
 
