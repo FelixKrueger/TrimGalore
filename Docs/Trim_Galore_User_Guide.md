@@ -11,7 +11,7 @@ Last update: 02/07/2019
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
     - [Auto-detection](#adapter-auto-detection)
-    - [Auto-detection](#manual-adapter-sequence-specification)
+    - [Manual adapter sequence specification](#manual-adapter-sequence-specification)
   3. [Removing Short Sequences](#step-3-removing-short-sequences)
   4. [Specialised Trimming - hard- and Epigenetic Clock Trimming](#step-4-specialised-trimming)
 * [Full list of options for Trim Galore!](#full-list-of-options-for-trim-galore)
@@ -61,10 +61,10 @@ Small RNA:  TGGAATTCTCGG
 Nextera:    CTGTCTCTTATA
 ```
 
-If no adapter contamination can be detected within the first 1 million sequences, or in case of a tie between several different adapters Trim Galore defaults to `--illumina`, as long as the Illumina adapter sequence was one of the options. If there was a tie between the Nextera and small RNA adapter, the default is `--nextera`. The auto-detection results are shown on screen and also printed to the trimming report for reference.
+If no adapter contamination can be detected within the first 1 million sequences, or in case of a tie between several different adapters, Trim Galore defaults to `--illumina`, as long as the Illumina adapter sequence was one of the options. If there was a tie between the Nextera and small RNA adapter, the default is `--nextera`. The auto-detection results are shown on screen and printed to the trimming report for future reference.
 
 #### Manual adapter sequence specification
-The auto-detection behaviour can be overruled by specifying an adapter sequence manually or by using `--illumina`, `--nextera` or `--small_rna`. (Please note the first 13 bp of the standard Illumina paired-end adapters (`AGATCGGAAGAGC`) recognise and removes adapter from most standard libraries, including the TruSeq and Sanger iTag adapters).
+The auto-detection behaviour can be overruled by specifying an adapter sequence manually or by using `--illumina`, `--nextera` or `--small_rna`. **Please note**: the first 13 bp of the standard Illumina paired-end adapters (`AGATCGGAAGAGC`) recognise and removes adapter from most standard libraries, including the Illumina TruSeq and Sanger iTag adapters. This sequence is present on both sides of paired-end sequences, and is present in all adapters before the unique Index sequence occurs. So for any 'normal' kind of sequencing you do not need to specify anything but `--illumina`, or better yet just use the auto-detection. 
 
 To control the stringency of the adapter removal process one gets to specify the minimum number of required overlap with the adapter sequence; else it will default to 1. This default setting is extremely stringent, i.e. an overlap with the adapter sequence of even a single bp is spotted and removed. This may appear unnecessarily harsh; however, as a reminder adapter contamination may in a Bisulfite-Seq setting lead to mis-alignments and hence incorrect methylation calls, or result in the removal of the sequence as a whole because of too many mismatches in the alignment process.
 
