@@ -2182,7 +2182,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 21 03 2019
+                               Last update: 02 07 2019
 
 VERSION
     exit;
@@ -2726,7 +2726,9 @@ trim_galore [options] <filename(s)>
                         try to auto-detect whether the Illumina universal, Nextera transposase or Illumina
                         small RNA adapter sequence was used. Also see '--illumina', '--nextera' and
                         '--small_rna'. If no adapter can be detected within the first 1 million sequences
-                        of the first file specified Trim Galore defaults to '--illumina'. A single base
+                        of the first file specified or if there is a tie between several adapter sequences,
+                        Trim Galore defaults to '--illumina' (as long as the Illumina adapter was one of the
+                        options, else '--nextera' is the default). A single base
                         may also be given as e.g. -a A{10}, to be expanded to -a AAAAAAAAAA.
 
 -a2/--adapter2 <STRING> Optional adapter sequence to be trimmed off read 2 of paired-end files. This
@@ -3004,7 +3006,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 11 June 2019.
+Last modified on 02 July 2019.
 
 HELP
   exit;
