@@ -6,6 +6,8 @@
 
 - Changed the trimming mode for paired-end `--rrbs` in conjunction with `--non_directional`: previously, Read 2 was only trimmed for `CGA` or `CAA` at the 5' end, but not trimmed for read-through contamination at the 3' end if no 5' contamination had been removed. This problem had been introduced in v0.4.3, but since non-directional RRBS is not very common it had not been spotted so far. 
 
+- File names for single-end trimming are now changed correctly when both `--output_dir` and `--basename` were specified together (was working correctly for PE mode already) 
+
 ### Version 0.6.3 (Release on 27 06 2019)
 
 - Also added the number of PolyA trimmed bases to the start of the read in the format `trimmed_bases:A:`
