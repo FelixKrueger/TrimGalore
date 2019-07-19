@@ -26,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 01 July 2019
+## last modified on 19 July 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -1279,7 +1279,7 @@ sub trim{
             my $tempname = "${basename}$1" if ($output_filename =~ /(_trimmed.*)$/);
             warn "ORIGINAL FILE 1: >>$output_filename<<\tRENAMING TO:>>$tempname<<\n";
 
-            rename $output_filename, $tempname;
+            rename "${output_dir}$output_filename", "${output_dir}$tempname";
             $output_filename = $tempname;
         }
 
@@ -3006,7 +3006,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 02 July 2019.
+Last modified on 19 July 2019.
 
 HELP
   exit;
