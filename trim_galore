@@ -26,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 19 July 2019
+## last modified on 31 July 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -35,7 +35,7 @@ my $trimmer_version = '0.6.3_dev';
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename) = process_commandline();
+my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed) = process_commandline();
 my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
@@ -311,11 +311,11 @@ unless (defined $adapter){
 
 			if ($validate){ # we need to select -a2 as the reverse complement to -a
 				if ($adapter =~ /A+/){
-					$adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
+					$adapter =  extend_adapter_sequence("A",20);  # defaulting to 20
 					$a2 = extend_adapter_sequence("T",150); # defaulting to 150 bp
 				}
 				elsif($adapter =~ /T+/){
-					$adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
+					$adapter =  extend_adapter_sequence("T",20);  # defaulting to 20
 					$a2 = extend_adapter_sequence("A",150);
 				}
 				else{
@@ -327,10 +327,10 @@ unless (defined $adapter){
 			else{
 				# Single end
 				if ($adapter =~ /A+/){
-					$adapter =  extend_adapter_sequence("A",20);  # defaulting to 15
+					$adapter =  extend_adapter_sequence("A",20);  # defaulting to 20
 				}
 				elsif($adapter =~ /T+/){
-					$adapter =  extend_adapter_sequence("T",20);  # defaulting to 15
+					$adapter =  extend_adapter_sequence("T",20);  # defaulting to 20
 				}
 				else{
 					die "Something unexpected happened with the Poly-A autodetection, please check\n";
@@ -486,6 +486,12 @@ sub trim{
 
     warn "Minimum required adapter overlap (stringency): $stringency bp\n";
     print REPORT "Minimum required adapter overlap (stringency): $stringency bp\n";
+
+
+    if (defined $consider_already_trimmed){
+    	warn "During adapter auto-detection, files are considered already adapter-trimmed if the highest found adapter was found equal to or lower than: $consider_already_trimmed\n";
+	    print REPORT "During adapter auto-detection, files are considered already adapter-trimmed if the highest found adapter was found equal to or lower than: $consider_already_trimmed\n";
+    }
 
     if ($validate){
         warn "Minimum required sequence length for both reads before a sequence pair gets removed: $length_cutoff bp\n";
@@ -1468,19 +1474,19 @@ sub hardtrim_to_3prime_end{
     # warn "Output file name: $output_filename\n";
 
     if ($output_filename =~ /\.fastq$/){
-    $output_filename =~ s/\.fastq$/.${hardtrim3}bp_3prime.fq/;
+    	$output_filename =~ s/\.fastq$/.${hardtrim3}bp_3prime.fq/;
     }
     elsif ($output_filename =~ /\.fastq\.gz$/){
-    $output_filename =~ s/\.fastq\.gz$/.${hardtrim3}bp_3prime.fq/;
+    	$output_filename =~ s/\.fastq\.gz$/.${hardtrim3}bp_3prime.fq/;
     }
     elsif ($output_filename =~ /\.fq$/){
-    $output_filename =~ s/\.fq$/.${hardtrim3}bp_3prime.fq/;
+   		$output_filename =~ s/\.fq$/.${hardtrim3}bp_3prime.fq/;
     }
     elsif ($output_filename =~ /\.fq\.gz$/){
-    $output_filename =~ s/\.fq\.gz$/.${hardtrim3}bp_3prime.fq/;
+    	$output_filename =~ s/\.fq\.gz$/.${hardtrim3}bp_3prime.fq/;
     }
     else{
-    $output_filename =~ s/$/.${hardtrim3}bp_3prime.fq/;
+    	$output_filename =~ s/$/.${hardtrim3}bp_3prime.fq/;
     }
 
     if ($gzip or $filename =~ /\.gz$/){
@@ -1941,33 +1947,89 @@ sub autodetect_adapter_type{
     	warn "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
     	$report_message .= "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
 
-  		warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
-  		$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n";
-  		$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
-  		$seq = 'AGATCGGAAGAGC';  
+  		if (defined $consider_already_trimmed){
+  			if ($adapters{$highest}->{count} <= $consider_already_trimmed ){
+  				warn "No auto-detected adapter sequence exceeded the user-specified 'already adapter-trimmed' limit ($consider_already_trimmed). Setting adapter sequence to -a X\n";
+  				$report_message .= "No auto-detected adapter sequence exceeded the user-specified 'already adapter-trimmed' limit ($consider_already_trimmed). Setting adapter sequence to -a X\n";
+  				$adapter_name = 'No adapter trimming [suppressed by user]';
+  				$seq = 'X'; 
+			}
+			else{
+  				warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
+  				$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n";
+  				$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
+  				$seq = 'AGATCGGAAGAGC';  
+    		}
+	  	}
+  		else{
+  			warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
+  			$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n";
+  			$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
+  			$seq = 'AGATCGGAAGAGC';  
+    	}
     }
     elsif ($adapters{$highest}->{count} == $adapters{$second}->{count} ){
 		warn "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
     	$report_message .= "Unable to auto-detect most prominent adapter from the first specified file (count $highest: $adapters{$highest}->{count}, count $second: $adapters{$second}->{count}, count $third: $adapters{$third}->{count})\n";
     
-    	# If one of the highest contaminants was the Illumina adapter, we set that one and print a warning		
-    	if ( ($highest eq 'Illumina') or ($second eq 'Illumina')) {
-    		warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
-      		$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior.\n";
-      		$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
-      		$seq = 'AGATCGGAAGAGC';
-    	}
-    	else{
-    		warn "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior).\n";
-      		$report_message .= "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior.\n";
-      		$adapter_name = 'Nextera; (assigned because of inconclusive auto-detection)';
-      		$seq = 'CTGTCTCTTATA';	
-      	}
+    	if (defined $consider_already_trimmed){
+  			if ($adapters{$highest}->{count} <= $consider_already_trimmed ){
+  				warn "The highest auto-detected adapter sequence did not exceed the user-specified 'already adapter-trimmed' limit ($consider_already_trimmed). Setting adapter sequence to -a X\n";
+  				$report_message .= "The highest auto-detected adapter sequence did not exceed the user-specified 'already adapter-trimmed' limit ($consider_already_trimmed). Setting adapter sequence to -a X\n";
+  				$adapter_name = 'No adapter trimming [suppressed by user]';
+  				$seq = 'X'; 
+			}
+			else{
+				# If one of the highest contaminants was the Illumina adapter, we set that one and print a warning		
+		    	if ( ($highest eq 'Illumina') or ($second eq 'Illumina')) {
+		    		warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
+		      		$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior.\n";
+		      		$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
+		      		$seq = 'AGATCGGAAGAGC';
+		    	}
+		    	else{
+		    		warn "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior).\n";
+		      		$report_message .= "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior.\n";
+		      		$adapter_name = 'Nextera; (assigned because of inconclusive auto-detection)';
+		      		$seq = 'CTGTCTCTTATA';	
+		      	}
+		    }
+		}
+		else{
+			# If one of the highest contaminants was the Illumina adapter, we set that one and print a warning		
+	    	if ( ($highest eq 'Illumina') or ($second eq 'Illumina')) {
+	    		warn "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior).\n\n";
+	      		$report_message .= "Defaulting to Illumina universal adapter ( AGATCGGAAGAGC ). Specify -a SEQUENCE to avoid this behavior.\n";
+	      		$adapter_name = 'Illumina TruSeq, Sanger iPCR; default (inconclusive auto-detection)';
+	      		$seq = 'AGATCGGAAGAGC';
+	    	}
+	    	else{
+	    		warn "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior).\n";
+	      		$report_message .= "Defaulting to Nextera adapter as next best option ( CTGTCTCTTATA ). Specify -a SEQUENCE to avoid this behavior.\n";
+	      		$adapter_name = 'Nextera; (assigned because of inconclusive auto-detection)';
+	      		$seq = 'CTGTCTCTTATA';	
+	      	}
+	    }
   	}
   	else{
-  		# using the highest occurrence as adapter to look out for
-    	$report_message .= "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n";
-    	warn "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
+  		if (defined $consider_already_trimmed){
+  			if ($adapters{$highest}->{count} <= $consider_already_trimmed ){
+  				warn "The highest auto-detected adapter sequence did not exceed the user-specified 'already adapter-trimmed' limit ($consider_already_trimmed). Setting adapter sequence to -a X\n";
+  				$report_message .= "The highest auto-detected adapter sequence did not exceed the user-specified 'already adapter-trimmed' limit ($consider_already_trimmed). Setting adapter sequence to -a X\n";
+  				$adapter_name = 'No adapter trimming [suppressed by user]';
+  				$seq = 'X'; 
+			}
+			else{
+				# using the highest occurrence as adapter to look out for
+    			$report_message .= "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n";
+    			warn "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
+  			}
+  		}
+  		else{
+			# using the highest occurrence as adapter to look out for
+    		$report_message .= "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n";
+    		warn "Using $highest adapter for trimming (count: $adapters{$highest}->{count}). Second best hit was $second (count: $adapters{$second}->{count})\n\n";
+  		}
   	}
 
   close AUTODETECT;
@@ -2113,6 +2175,7 @@ sub process_commandline{
     my $basename;
     my $cores;
     my $compression_path;
+    my $consider_already_trimmed;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2158,6 +2221,7 @@ sub process_commandline{
                  '2colour|nextseq=i' => \$nextseq,
                  'basename=s' => \$basename,
                  'j|cores=i' => \$cores,
+                 'consider_already_trimmed=i' => \$consider_already_trimmed,
       );
 
 	### EXIT ON ERROR if there were errors with any of the supplied options
@@ -2182,7 +2246,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 02 07 2019
+                               Last update: 31 07 2019
 
 VERSION
     exit;
@@ -2669,7 +2733,18 @@ VERSION
         }
     }
 
-    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename);
+    if (defined $consider_already_trimmed){
+    	# making sure the range is sensible
+    	unless ($consider_already_trimmed >= 0 and $consider_already_trimmed <= 10000){
+    		die "Please select a threshold for when a sample should not be adapter trimmed at all (--consider_already_trimmed) in the range of [0-1000] (inclusive)\n";
+    	}
+    	if ($nextera or $small_rna or $illumina){
+    		die "The threshold for --consider_already_trimmed [INT] only works in conjunction with adapter auto-detection. Make your choice and try again\n\n";
+  		}
+  		warn "During the adapter auto-detection, any counts equal to or lower than >$consider_already_trimmed< will be considered as 'file was already adapter-trimmed'. Only quality trimming will be carried out (setting -a X)\n"; sleep(1);
+    }
+
+    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed);
 }
 
 sub Ncounter{
@@ -2748,6 +2823,12 @@ trim_galore [options] <filename(s)>
                         to trim smallRNA adapters will also lower the --length value to 18bp. If the smallRNA
                         libraries are paired-end then a2 will be set to the Illumina small RNA 5' adapter
                         automatically (GATCGTCGGACT) unless -a 2 had been defined explicitly.
+
+--consider_already_trimmed <INT>     During adapter auto-detection, the limit set by <INT> allows the user to 
+                        set a threshold up to which the file is considered already adapter-trimmed. If no adapter
+                        sequence exceeds this threshold, no additional adapter trimming will be performed (technically,
+                        the adapter is set to '-a X'). Quality trimming is still performed as usual.
+                        Default: NOT SELECTED (i.e. normal auto-detection precedence rules apply).                     
 
 --max_length <INT>      Discard reads that are longer than <INT> bp after trimming. This is only advised for
                         smallRNA sequencing to remove non-small RNA sequences.
@@ -3006,7 +3087,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 19 July 2019.
+Last modified on 31 July 2019.
 
 HELP
   exit;
