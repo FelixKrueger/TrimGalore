@@ -1,6 +1,6 @@
 # Trim Galore Changelog
 
-### Version 0.6.3_dev
+### Version 0.6.4 (Release on 01 Aug 2019)
 
 - Changed the adapter auto-detection procedure so that inconclusive detection always defaults to `--illumina`, unless none of the top 2, equal contaminants was 'Illumina', in which case it now defaults to `--nextera`. A warning message about this is now printed to the screen as well as to the trimming report.
 
