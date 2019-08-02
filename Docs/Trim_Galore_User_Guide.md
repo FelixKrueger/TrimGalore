@@ -6,7 +6,7 @@
 Last update: 02/07/2019
 
 #### Table of Contents
-* [Introduction](#version-060)
+* [Introduction](#version-063)
 * [Methodology](#adaptive-quality-and-adapter-trimming-with-trim-galore)
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
