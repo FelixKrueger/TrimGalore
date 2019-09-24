@@ -2246,12 +2246,19 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 31 07 2019
+                               Last update: 24 09 2019
 
 VERSION
     exit;
   }
 
+    # testing whether the filenames contain white space. This can only ever be the case if passed within "quotes"
+    foreach my $filename (@ARGV){
+        if ($filename =~ /\s+/){
+            die "\n[FATAL ERROR]: Input file names ('$filename') supplied with whitespace(s). Please move to directory containing the input file(s),
+               and/or avoid using whitespace(s) at all costs (e.g. consider using '_' instead), and try again.\n\n";
+        }
+    }
 
 	# NUMBER OF CORES
 	if (defined $cores){
@@ -2599,6 +2606,11 @@ VERSION
 
     ### OUTPUT DIR PATH
     if (defined $output_dir){
+
+        if ($output_dir =~ /\s+/){
+            die "\n[FATAL OPTION]: Output directory name (>>$output_dir<<) contained whitespace(s). Please replace whitespace(s) with '_' and try again.\n\n";
+        }
+
         unless ($output_dir eq ''){
             unless ($output_dir =~ /\/$/){
                 $output_dir =~ s/$/\//;
