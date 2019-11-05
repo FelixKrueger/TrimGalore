@@ -6,6 +6,8 @@
 
 - In a `--paired --basename BASE` scenario, the output files will now be called `BASE_val_1.fq.gz BASE_val_2.fq.gz` as described in the documentation (we previously also added `_R1` and `_R2`).
 
+- removed a superflous warning statement for directional RRBS mode
+
 
 ### Version 0.6.4 (Release on 01 Aug 2019)
 
