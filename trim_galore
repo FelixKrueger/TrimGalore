@@ -26,12 +26,12 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 31 July 2019
+## last modified on 05 11 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.4';
+my $trimmer_version = '0.6.4_dev';
 my $cutadapt_version;
 my $python_version;
 
@@ -835,7 +835,6 @@ sub trim{
 	  
 			### directional read
 			unless ($nd == 1){
-				warn "Do we ever get here?\n";
 				# only trimming Read 1 of a pair for a further 2bp from their 3' end
 				if ($validate){ # paired end
 					if ( scalar(@filenames)%2 == 0){ # this is read 1 of a pair
