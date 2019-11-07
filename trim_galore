@@ -26,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 05 11 2019
+## last modified on 07 11 2019
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -1322,8 +1322,8 @@ sub trim{
             ### FILE RENAMING
             if ($basename){
                 warn "Now renaming the output files\n\n";
-                my $tempname_1 = "${basename}$1" if ($file_1 =~ /(_trimmed.*)$/);
-                my $tempname_2 = "${basename}$1" if ($file_2 =~ /(_trimmed.*)$/);
+                my $tempname_1 = "${basename}_R1$1" if ($file_1 =~ /(_trimmed.*)$/);
+                my $tempname_2 = "${basename}_R2$1" if ($file_2 =~ /(_trimmed.*)$/);
                 warn "ORIGINAL FILE 1: >>$file_1<<\tRENAMING TO:>>$tempname_1<<\n";
                 warn "ORIGINAL FILE 2: >>$file_2<<\tRENAMING TO:>>$tempname_2<<\n";
 
@@ -1534,10 +1534,12 @@ sub hardtrim_to_3prime_end{
 
 sub validate_paired_end_files{
 
-  my $file_1 = shift;
-  my $file_2 = shift;
+    my $file_1 = shift;
+    my $file_2 = shift;
 
-  warn "file_1: $file_1, file_2: $file_2\n\n";
+    warn "file_1: $file_1, file_2: $file_2\n\n";
+    
+   
 
   if ($file_1 =~ /\.gz$/){
       open (IN1,"$compression_path -d -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
@@ -1555,22 +1557,34 @@ sub validate_paired_end_files{
 
   warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
 
-  my $out_1 = $file_1;
-  my $out_2 = $file_2;
+    my $out_1 = $file_1;
+    my $out_2 = $file_2;
 
-  if ($out_1 =~ /gz$/){
-      $out_1 =~ s/trimmed\.fq\.gz$/val_1.fq/;
-  }
-  else{
-      $out_1 =~ s/trimmed\.fq$/val_1.fq/;
-  }
+    if ($out_1 =~ /gz$/){
+        $out_1 =~ s/trimmed\.fq\.gz$/val_1.fq/;
+    }
+    else{
+        $out_1 =~ s/trimmed\.fq$/val_1.fq/;
+    }
 
-  if ($out_2 =~ /gz$/){
-      $out_2 =~ s/trimmed\.fq\.gz$/val_2.fq/;
-  }
-  else{
-      $out_2 =~ s/trimmed\.fq$/val_2.fq/;
-  }
+    if ($out_2 =~ /gz$/){
+        $out_2 =~ s/trimmed\.fq\.gz$/val_2.fq/;
+    }
+    else{
+        $out_2 =~ s/trimmed\.fq$/val_2.fq/;
+    }
+
+    if ($basename){
+        ### FILE RENAMING
+        warn "Renaming the output files (AGAIN).\n";
+        # warn "ORIGINAL FILE 1: >>$out_1<<\n";
+        $out_1 =~ s/_R1_val_1.fq$/_val_1.fq/;
+        # warn "ORIGINAL FILE 1: >>$out_1<<\n";
+
+        # warn "ORIGINAL FILE 2: >>$out_2<<\n";
+        $out_2 =~ s/_R2_val_2.fq$/_val_2.fq/;
+        # warn "ORIGINAL FILE 2: >>$out_2<<\n";
+    }
 
   if ($gzip){
       if ($dont_gzip){
@@ -1598,8 +1612,8 @@ sub validate_paired_end_files{
       open (R2,'>',$output_dir.$out_2) or die "Couldn't write to $out_2 $!\n";
   }
 
-  warn "Writing validated paired-end read 1 reads to $out_1\n";
-  warn "Writing validated paired-end read 2 reads to $out_2\n\n";
+  warn "Writing validated paired-end Read 1 reads to $out_1\n";
+  warn "Writing validated paired-end Read 2 reads to $out_2\n\n";
 
   my $unpaired_1;
   my $unpaired_2;
@@ -3098,7 +3112,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 31 July 2019.
+Last modified on 07 November 2019.
 
 HELP
   exit;
