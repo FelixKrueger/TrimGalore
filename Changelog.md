@@ -1,6 +1,6 @@
 # Trim Galore Changelog
 
-### Version 0.6.4_dev
+### Version 0.6.5 (Release on 19 Nov 2019)
 
 - Added checks for whitespace(s) within input filenames, or a potential output folder name (supplied with `-o`). `[FATAL ERROR]` messages will advise users to use `_` instead.
 
