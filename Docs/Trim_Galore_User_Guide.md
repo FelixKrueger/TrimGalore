@@ -196,7 +196,7 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 * `--max_length <INT>`
   * Discard reads that are longer than <INT> bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences.
 
-* `-s/--stringency <INT>`
+* `--stringency <INT>`
   * Overlap with adapter sequence required to trim a sequence.
   * Defaults to a very stringent setting of `1`, _i.e._ even a single base pair of overlapping sequence will be trimmed of the 3' end of any read.
 
