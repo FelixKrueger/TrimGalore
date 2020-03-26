@@ -1,5 +1,9 @@
 # Trim Galore Changelog
 
+### Version 0.6.5dev
+
+- Chaged the way in which we test for the version of Cutadapt, more here: https://github.com/FelixKrueger/TrimGalore/issues/85
+
 ### Version 0.6.5 (Release on 19 Nov 2019)
 
 - Added checks for whitespace(s) within input filenames, or a potential output folder name (supplied with `-o`). `[FATAL ERROR]` messages will advise users to use `_` instead.
