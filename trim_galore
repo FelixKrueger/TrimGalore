@@ -2500,6 +2500,11 @@ VERSION
             my $tmp_adapter = extend_adapter_sequence(uc$1,$2);
             warn "Adapter sequence given as >$adapter< expanded to: >$tmp_adapter<\n";
             $adapter = $tmp_adapter;
+            $adapter = uc$adapter;
+        }
+        elsif($adapter =~ /file:(.+)/){ # This is a custom solution https://github.com/FelixKrueger/TrimGalore/issues/86
+            warn "Using the following FastA file for multiple possible adapter sequences: >$1<\n";
+            sleep(3);
         }
         elsif($adapter =~ /\s+-a\s+/){ # This is a custom solution https://github.com/FelixKrueger/TrimGalore/issues/86
             warn "If you are trying to supply several adapters, please adhere to the following format:\n";
@@ -2524,27 +2529,38 @@ VERSION
       }
   }
 
-  if (defined $adapter2){
-      unless ($validate){
-      die "An optional adapter for read 2 of paired-end files requires '--paired' to be specified as well! Please re-specify\n";
-      }
+    if (defined $adapter2){
+        unless ($validate){
+            die "An optional adapter for read 2 of paired-end files requires '--paired' to be specified as well! Please re-specify\n";
+        }
 
-      # The adapter may be given as a single base that occurs a number of times
-      # in the form BASE{number of times}, e.g. "-a2 A{10}"
-      if ($adapter2 =~ /^([ACTGN]){(\d+)}$/){
-      # warn "Base: $1\n# repeats: $2\n";
-      my $tmp_adapter2 = extend_adapter_sequence(uc$1,$2);
+        # The adapter may be given as a single base that occurs a number of times
+        # in the form BASE{number of times}, e.g. "-a2 A{10}"
+        if ($adapter2 =~ /^([ACTGN]){(\d+)}$/){
+            # warn "Base: $1\n# repeats: $2\n";
+            my $tmp_adapter2 = extend_adapter_sequence(uc$1,$2);
 
-      warn "Adapter2 sequence given as >$adapter2< expanded to: >$tmp_adapter2<\n";
-      $adapter2 = $tmp_adapter2;
-      }
-      else{
-      unless ($adapter2 =~ /^[ACTGNactgn]+$/){
-          die "Optional adapter 2 sequence must contain DNA characters only (A,C,T,G or N)!\n";
-      }
-      }
-      $adapter2 = uc$adapter2;
-  }
+            warn "Adapter2 sequence given as >$adapter2< expanded to: >$tmp_adapter2<\n";
+            $adapter2 = $tmp_adapter2;
+            $adapter2 = uc$adapter2;
+        }
+        elsif($adapter2 =~ /file:(.+)/){# This is a custom solution https://github.com/FelixKrueger/TrimGalore/issues/86
+                warn "Using the following FastA file for multiple possible adapter 2 sequences: >$1<\n";
+                sleep(3);
+        }
+        elsif($adapter2 =~ /\s+-a\s+/){ # This is a custom solution https://github.com/FelixKrueger/TrimGalore/issues/86
+            warn "If you are trying to supply several adapters for Read 2, please adhere to the following format:\n";
+            warn "-a2 \" AGCTAGCG -a TCTCTTATAT -a TTTATTCGGATTTAT\"\n";
+            sleep(3);
+        }
+        else{
+            unless ($adapter2 =~ /^[ACTGNactgn]+$/){
+                die "Optional adapter 2 sequence must contain DNA characters only (A,C,T,G or N)!\n";
+            }
+            $adapter2 = uc$adapter2;
+        }
+        
+    }
 
   ### LENGTH CUTOFF
   # this gets set right at the start after the adapter auto-detection has been concluded
