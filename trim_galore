@@ -2489,24 +2489,29 @@ VERSION
   }
 
 
-  if (defined $adapter){
+    if (defined $adapter){
 
-      # The adapter may be given as a single base that occurs a number of times
-      # in the form BASE{number of times}, e.g. "-a A{10}"
-      if ($adapter =~ /^([ACTGN]){(\d+)}$/){
-      # warn "Base: $1\n# repeats: $2\n";
+        # The adapter may be given as a single base that occurs a number of times
+        # in the form BASE{number of times}, e.g. "-a A{10}"
+        if ($adapter =~ /^([ACTGN]){(\d+)}$/){
+            # warn "Base: $1\n# repeats: $2\n";
 
 
-      my $tmp_adapter = extend_adapter_sequence(uc$1,$2);
-      warn "Adapter sequence given as >$adapter< expanded to: >$tmp_adapter<\n";
-      $adapter = $tmp_adapter;
-      }
-      else{
-      unless ($adapter =~ /^[ACTGNXactgnx]+$/){
-          die "Adapter sequence must contain DNA characters only (A,C,T,G or N)!\n";
-      }
-      }
-      $adapter = uc$adapter;
+            my $tmp_adapter = extend_adapter_sequence(uc$1,$2);
+            warn "Adapter sequence given as >$adapter< expanded to: >$tmp_adapter<\n";
+            $adapter = $tmp_adapter;
+        }
+        elsif($adapter =~ /\s+-a\s+/){ # This is a custom solution https://github.com/FelixKrueger/TrimGalore/issues/86
+            warn "If you are trying to supply several adapters, please adhere to the following format:\n";
+            warn "-a \" AGCTAGCG -a TCTCTTATAT -a TTTATTCGGATTTAT\"\n";
+            sleep(3);
+        }
+        else{ # default
+            unless ($adapter =~ /^[ACTGNXactgnx]+$/){
+                die "Adapter sequence must contain DNA characters only (A,C,T,G or N)!\n";
+            }    
+            $adapter = uc$adapter;
+        }
 
       if ($illumina){
       die "You can't supply an adapter sequence AND use the Illumina universal adapter sequence. Make your choice.\n\n";
