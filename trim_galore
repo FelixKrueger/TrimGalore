@@ -35,13 +35,19 @@ my $trimmer_version = '0.6.5dev';
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed) = process_commandline();
+my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
 my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
 die "\nPlease provide the filename(s) of one or more FastQ file(s) to launch Trim Galore!\n
 USAGE:  'trim_galore [options] <filename(s)>'    or    'trim_galore --help'    for more options\n\n" unless (@filenames);
 file_sanity_check($filenames[0]);
+
+################################################################
+###                                                          ###
+###     SPECIALITY TRIMMING SECTION - EXITING AFTERWARDS     ###
+###                                                          ###
+################################################################
 
 if (defined $hardtrim5){
     warn "Hard-trimming from the 3'-end selected. File(s) will be trimmed to leave the leftmost $hardtrim5 bp on the 5'-end, and Trim Galore will then exit.\n\n";
@@ -62,13 +68,186 @@ if (defined $hardtrim3){
 if ($clock){
     warn "\nIT'S TIME FOR CLOCK PROCESSING!!!\t\t\t\t\t\t\t\t\t[pun intended]\n\n";
 
-    while (@ARGV){
-		my $in1 = shift @ARGV;
-		my $in2 = shift @ARGV;
+    while (@filenames){
+		my $in1 = shift @filenames;
+		my $in2 = shift @filenames;
 		clockwork($in1,$in2);
     }
     warn "\nPre-processing finished...\n\nPlease run Trim Galore again to remove adapters, poor quality bases as well as UMI/fixed sequences from the 3'-end of the reads.\nA sample command for this is:\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntrim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 *.clock_UMI.R1.fq.gz *.clock_UMI.R2.fq.gz\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\nTrim Galore Epigenetic Clock processing complete.\n\n";
     exit;
+}
+
+
+if (defined $umi_from_r2){
+    
+    my $umi_length = $umi_from_r2;
+    
+    warn "~"x120 . "\n";
+    warn "\nTrim Galore speciality trimming: transferring the first $umi_length bp from Read 2 to the read ID (of both reads)\n\n";
+    warn "~"x120 . "\n\n";
+
+    while (@filenames){
+		my $in1 = shift @filenames;
+		my $in2 = shift @filenames;
+    	implicon_umi($in1,$in2,$umi_length);
+    }
+
+    warn "~"x120 . "\n";
+    warn "\nPre-processing finished. ${umi_length}bp from the 5'-end of READ2 have been transferred to the Read ID of both R1 and R2. Exiting...\n\n";
+    warn "~"x120 . "\n\n";
+    exit;
+}
+
+sub implicon_umi{
+
+    ### FILEHANDLES
+    my ($in1_fh,$in2_fh); # input filehandles
+    my ($read1_fh,$read2_fh); # output filehandles
+
+    ### INPUT FILES
+    my ($in1,$in2,$umi_length) = @_;
+    if ($in1 =~ /\.gz$/){
+		open ($in1_fh,"$compression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
+    }
+    else{
+		open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
+    }
+    if ($in2 =~ /\.gz$/){
+		open ($in2_fh,"$compression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
+    }
+    else{
+		open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
+    }
+    # warn " Input file name 1: $in1\n";
+    # warn " Input file name 2: $in2\n";
+    
+    ### OUTPUT FILES
+    my $out1 = (split (/\//,$in1))[-1];
+    my $out2 = (split (/\//,$in2))[-1];
+
+    $out1 =~ s/(\.fastq$|\.fastq\.gz$)//;
+    $out1 =~ s/(\.fq$|\.fq\.gz$)//;
+    $out1 =~ s/_?R1$//;
+
+    $out1 .= "_${umi_length}bp_UMI_R1.fastq"; # appending to the end
+
+    $out2 =~ s/(\.fastq$|\.fastq\.gz$)//;
+    $out2 =~ s/(\.fq$|\.fq\.gz$)//;
+    $out2 =~ s/_?R[234]$//;
+
+    $out2 .= "_${umi_length}bp_UMI_R2.fastq"; # appending to the end
+
+
+    ### READ 1
+    if ($gzip or $in1 =~ /\.gz$/){
+		if ($dont_gzip){
+			open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
+		}
+		else{
+			$out1 .= '.gz';
+			open ($read1_fh,"| $compression_path -c - > ${output_dir}${out1}") or die "Can't write to '$out1': $!\n";
+		}
+    }
+    else{
+		open ($read1_fh,'>',$output_dir.$out1) or die "Can't open '$out1': $!\n";
+    }
+    warn "Writing UMI trimmed version of the input file '$in1' to '$out1'\n";
+
+    ### READ 2
+    if ($gzip or $in2 =~ /\.gz$/){
+		if ($dont_gzip){
+			open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
+		}
+		else{
+			$out2 .= '.gz';
+			open ($read2_fh,"| $compression_path -c - > ${output_dir}${out2}") or die "Can't write to '$out2': $!\n";
+		}
+    }
+    else{
+		open ($read2_fh,'>',$output_dir.$out2) or die "Can't open '$out2': $!\n";
+    }
+    warn "Writing UMI trimmed version of the input file '$in2' to '$out2'\n\n";
+
+    my %freqs;
+    my $umi_1;
+    my $umi_2;
+
+    # print "Processing files $in1 and $in2\n";
+    my %r1; # storing the barcodes for R1
+    my %r2; # storing the barcodes for R2
+
+    my $count = 0;
+
+	TYRION: while (1){
+
+		my $one1 = <$in1_fh>;
+		my $one2 = <$in1_fh>;
+		my $one3 = <$in1_fh>;
+		my $one4 = <$in1_fh>;
+
+		my $two1 = <$in2_fh>;
+		my $two2 = <$in2_fh>;
+		my $two3 = <$in2_fh>;
+		my $two4 = <$in2_fh>;
+
+		last unless ($one4 and $two4);
+
+		# chomp $one2; # sequence. currently not required
+		chomp $two2; # sequence
+
+		chomp $one1; # read ID, need to append UMIs to the read ID
+		chomp $two1; # read ID, need to append UMIs to the read ID
+
+		# chomp $one4; # quality. currently not required
+		chomp $two4; # quality
+
+		++$count; # sequence count
+
+		if ($count % 1000000 ==0){
+			warn "Processed $count sequences so far...\n";
+		}
+	
+        ### For IMPLICON SEQUNCING, READ2 looks like this:
+
+		# 0        8                       INDEX position
+		# UUUUUUUU FFFFFFFFFFFFFFFFF....
+
+		# where:
+		#   U = UMI base
+		#   F = SEQUENCE to be aligned
+
+		### Capturing the sequence after the UMI (FFFFFFFFFFFFFF...)
+        my $r2_barcode = substr($two2,0,$umi_length);
+        
+		my $seq2  = substr($two2,$umi_length); # truncated sequence without UMIs
+        my $qual2 = substr($two4,$umi_length);         # truncated quality string without barcode
+        # warn "$r2_barcode\n$two2\n$two4\n$seq2\n$qual2\n";      sleep(1);
+
+        # APPENDING TO THE READ IDs
+		# warn "$one1\n";
+		$one1 .= ":${r2_barcode}";
+		# warn "$one1\n";
+
+		#warn "$two1\n";
+		$two1 .= ":${r2_barcode}";
+		# warn "$two1\n";
+	    # warn "=====\n$one2\n$one2\n$one4\n$one4\n~~\n$two2\n        $seq2\n$two4\n$qual2\n=====\n\n";sleep(1);
+
+		print ${read1_fh} "$one1\n";
+		print ${read1_fh} "$one2\n";
+		print ${read1_fh} "+\n";      # replacing this with a + for space and format reasons
+		print ${read1_fh} "$one4\n";
+
+		print ${read2_fh} "$two1\n";
+		print ${read2_fh} "$seq2\n";
+		print ${read2_fh} "+\n";      # replacing this with a + for space and format reasons
+		print ${read2_fh} "$qual2\n";
+
+		# $r1{$r1_barcode}++;
+		# $r2{$r2_barcode}++;
+    }
+
+    warn "Sequences processed in total: $count\n\n     ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 }
 
 sub clockwork{
@@ -263,12 +442,12 @@ sub clockwork{
     warn "Sequences processed in total: $count\nthereof had fixed sequence CAGT in both R1 and R2:\t $filtered_count ($perc%)\n     ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 }
 
-sub rc{
-    my $string = shift;
-    $string = reverse($string);
-    $string =~ tr/GATC/CTAG/;
-    return $string;
-}
+################################################################
+###                                                          ###
+###              SPECIALITY TRIMMING SECTION - END           ###
+###                                                          ###
+################################################################
+
 
 
 ########################################################################
@@ -2189,6 +2368,7 @@ sub process_commandline{
     my $cores;
     my $compression_path;
     my $consider_already_trimmed;
+    my $implicon;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2235,6 +2415,7 @@ sub process_commandline{
                  'basename=s' => \$basename,
                  'j|cores=i' => \$cores,
                  'consider_already_trimmed=i' => \$consider_already_trimmed,
+                 'implicon'  => \$implicon,
       );
 
 	### EXIT ON ERROR if there were errors with any of the supplied options
@@ -2259,7 +2440,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 24 09 2019
+                               Last update: 05 05 2020
 
 VERSION
     exit;
@@ -2746,7 +2927,7 @@ VERSION
       }
   }
 
-  ### The
+  ### Epigenetic Clock pre-processing
   if ($clock){
       if ($validate){ # already selected as paired-end mode
       # Fine. Currently, the Clock protocol requires paired-end reads with dual UMIs
@@ -2790,7 +2971,23 @@ VERSION
   		warn "During the adapter auto-detection, any counts equal to or lower than >$consider_already_trimmed< will be considered as 'file was already adapter-trimmed'. Only quality trimming will be carried out (setting -a X)\n"; sleep(1);
     }
 
-    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed);
+    # UMI from READ2: Support for IMPLICON technique
+    my $umi_from_r1; # not needed just yet
+    my $umi_from_r2; 
+
+    if ($implicon){
+        warn "IMPLICON speciality trimming selected. Transferring first 8bp from Read 2 as UMI to the read IDs\n";
+
+        if ($validate){ # already selected as paired-end mode
+            # Fine. IMPLICON protocol requires paired-end reads for transfer of UMIs
+        }
+        else{
+            die "\nOption --implicon selected, but the processing is still set to single-end mode. The IMPLICON protocol requires paired-end sequencing with unique molecular identifiers (UMIs) as the first 8bp of READ2. Please respecify...\n\n";
+        }
+        $umi_from_r2 = 8;
+    }
+
+    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
 }
 
 sub Ncounter{
@@ -2802,10 +2999,18 @@ sub Ncounter{
   return $ncount;
 }
 
+sub rc{
+    my $string = shift;
+    $string = reverse($string);
+    $string =~ tr/GATC/CTAG/;
+    return $string;
+}
+
 sub extend_adapter_sequence{
     my ($letter,$number) = @_;
     return (${letter}x$number);
 }
+
 
 
 
