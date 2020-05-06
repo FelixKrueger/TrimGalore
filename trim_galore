@@ -26,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 26 03 2020
+## last modified on 05 05 2020
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -3256,6 +3256,28 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         Will 1) trim qualities and Illumina adapter contamination, 2) find and remove PolyA contamination.
                         Finally, if desired, 3) will specifically find PolyA trimmed sequences to a specific FastQ file of your choice.
 
+--implicon              This is a special mode of operation for paired-end data, such as required for the IMPLICON method, where a UMI sequence
+                        is getting transferred from the start of Read 2 to the readID of both reads. Following this, Trim Galore will exit.
+
+                        In it's current implementation, the UMI carrying reads come in the following format:
+
+                        Read 1  5' FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF 3'
+                        Read 2  3' UUUUUUUUFFFFFFFFFFFFFFFFFFFFFFFFFFFF 5'
+
+                        Where UUUUUUUU is a random 8-mer unique molecular identifier (UMI) and FFFFFFF... is the actual fragment to be
+                        sequenced. The UMI of Read 2 (R2) is written into the read ID of both reads and removed from the actual sequence.
+                        Here is an example:
+
+                        R1: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT
+                            ATCTAGTTCAGTACGGTGTTTTCGAATTAGAAAAATATGTATAGAGGAAATAGATATAAAGGCGTATTCGTTATTG
+                        R2: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT
+                            CAATTTTGCAGTACAAAAATAATACCTCCTCTATTTATCCAAAATCACAAAAAACCACCCACTTAACTTTCCCTAA
+                        
+                        After --implicon trimming:
+                        R1: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT:CAATTTTG
+                            ATCTAGTTCAGTACGGTGTTTTCGAATTAGAAAAATATGTATAGAGGAAATAGATATAAAGGCGTATTCGTTATTG
+                        R2: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT:CAATTTTG
+                                    CAGTACAAAAATAATACCTCCTCTATTTATCCAAAATCACAAAAAACCACCCACTTAACTTTCCCTAA
 
 RRBS-specific options (MspI digested material):
 
@@ -3338,7 +3360,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 07 November 2019.
+Last modified on 06 May 2020.
 
 HELP
   exit;
