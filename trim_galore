@@ -26,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 05 05 2020
+## last modified on 11 05 2020
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -234,9 +234,9 @@ sub implicon_umi{
 	    # warn "=====\n$one2\n$one2\n$one4\n$one4\n~~\n$two2\n        $seq2\n$two4\n$qual2\n=====\n\n";sleep(1);
 
 		print ${read1_fh} "$one1\n";
-		print ${read1_fh} "$one2\n";
+		print ${read1_fh} "$one2";
 		print ${read1_fh} "+\n";      # replacing this with a + for space and format reasons
-		print ${read1_fh} "$one4\n";
+		print ${read1_fh} "$one4";
 
 		print ${read2_fh} "$two1\n";
 		print ${read2_fh} "$seq2\n";
