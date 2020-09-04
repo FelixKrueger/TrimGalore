@@ -1,6 +1,6 @@
 # Trim Galore Changelog
 
-### Version 0.6.5dev
+### Version 0.6.6 (Release on 04 Sep 2020)
 
 - Changed the way in which we test for the version of Cutadapt, more here: https://github.com/FelixKrueger/TrimGalore/issues/85
 
