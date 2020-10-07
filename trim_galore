@@ -784,7 +784,7 @@ sub trim{
 	### Cutadapt version 1.15. Edited on 08 03 2019
 	# if the Cutadapt version has more . in the version, we discard the second one.
 	# warn "Version was: $cutadapt_version\n";
-	if ($cutadapt_version =~ /(\d+\.\d+)\.\d+/){
+	if ($cutadapt_version =~ /(\d+\.\d+)\..+/){
 		$cutadapt_version = $1;
 	}
 	# warn "Version now is: $cutadapt_version\n"; 
@@ -3360,7 +3360,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 11 May 2020.
+Last modified on 07 October 2020.
 
 HELP
   exit;
