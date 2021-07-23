@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-20, Felix Krueger (felix.krueger@babraham.ac.uk)
+## This program is Copyright (C) 2012-21, Felix Krueger (felix.krueger@babraham.ac.uk)
 ## Edited by Frankie James (github.com/fjames003) for multi-core support
 
 ## This program is free software: you can redistribute it and/or modify
@@ -31,7 +31,7 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.6';
+my $trimmer_version = '0.6.7';
 my $cutadapt_version;
 my $python_version;
 
