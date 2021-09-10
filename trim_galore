@@ -26,7 +26,7 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 11 05 2020
+## last modified on 10 09 2021
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
@@ -3157,9 +3157,10 @@ trim_galore [options] <filename(s)>
                         only works when 1 file (single-end) or 2 files (paired-end) are specified, but not for longer lists.
 
 -j/--cores INT          Number of cores to be used for trimming [default: 1]. For Cutadapt to work with multiple cores, it
-                        requires Python 3 as well as parallel gzip (pigz) installed on the system. The version of Python used 
-                        is detected from the shebang line of the Cutadapt executable (either 'cutadapt', or a specified path).
-                        If Python 2 is detected, --cores is set to 1.
+                        requires Python 3 as well as parallel gzip (pigz) installed on the system. Trim Galore attempts to detect
+                        the version of Python used by calling Cutadapt. If Python 2 is detected, --cores is set to 1. If the Python
+                        version cannot be detected, Python 3 is assumed and we let Cutadapt handle potential issues itself.
+                        
                         If pigz cannot be detected on your system, Trim Galore reverts to using gzip compression. Please note
                         that gzip compression will slow down multi-core processes so much that it is hardly worthwhile, please 
                         see: https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103 for more info).
@@ -3360,7 +3361,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 07 October 2020.
+Last modified on 10 September 2021.
 
 HELP
   exit;
