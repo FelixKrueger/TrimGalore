@@ -26,16 +26,16 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 10 09 2021
+## last modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT) 
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.7';
+my $trimmer_version = '0.6.8';
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
 my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
@@ -482,6 +482,13 @@ unless (defined $adapter){
     elsif($illumina){
 		$adapter = 'AGATCGGAAGAGC';
 		$adapter_name = 'Illumina TruSeq, Sanger iPCR; user defined';
+    }
+    elsif($stranded_illumina){
+        # more information available here:
+        # "Trimming T-overhang options for the Illumina Stranded mRNA and Illumina Stranded Total RNA workflows"
+        # https://support.illumina.com/bulletins/2020/06/trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo.html
+		$adapter = 'ACTGTCTCTTATA';
+		$adapter_name = 'Illumina stranded mRNA and Total RNA; user defined (added for v0.6.8)';
     }
     else{ # default
 		### If other -a and/or -a2 were given
@@ -1254,6 +1261,8 @@ sub trim{
 
 		if ($nextseq){
       		$quality_cutoff = $nextseq;
+            warn "setting cutoff to: $nextseq\n"; 
+            sleep(1);
       	}
       	else{
       		$quality_cutoff = "-q $cutoff";
@@ -2355,6 +2364,7 @@ sub process_commandline{
   my $three_prime_clip_r1;
   my $three_prime_clip_r2;
   my $nextera;
+  my $stranded_illumina; # added on 15 Jan 2022; https://support.illumina.com/bulletins/2020/06/trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo.html
   my $small_rna;
   my $illumina;
   my $path_to_cutadapt;
@@ -2404,6 +2414,7 @@ sub process_commandline{
                  'three_prime_clip_R2=i' => \$three_prime_clip_r2,
                  'illumina' => \$illumina,
                  'nextera' => \$nextera,
+                 'stranded_illumina' => \$stranded_illumina,
                  'small_rna' => \$small_rna,
                  'path_to_cutadapt=s' => \$path_to_cutadapt,
                  'max_length=i' => \$max_length,
@@ -2442,7 +2453,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 11 05 2020
+                               Last update: 15 01 2022
 
 VERSION
     exit;
@@ -2649,7 +2660,7 @@ VERSION
   }
 
  
-  if ($nextera and $small_rna or $nextera and $illumina or $illumina and $small_rna ){
+  if ($nextera and $small_rna or $nextera and $illumina or $illumina and $small_rna or $nextera and $stranded_illumina or $stranded_illumina and $illumina or $stranded_illumina and $small_rna){
     die "You can't use several different adapter types at the same time. Make your choice or consider using -a and -a2\n\n";
   }
 
@@ -2702,13 +2713,13 @@ VERSION
         }
 
       if ($illumina){
-      die "You can't supply an adapter sequence AND use the Illumina universal adapter sequence. Make your choice.\n\n";
+        die "You can't supply an adapter sequence AND use the Illumina universal adapter sequence. Make your choice.\n\n";
       }
       if ($nextera){
-      die "You can't supply an adapter sequence AND use the Nextera transposase adapter sequence. Make your choice.\n\n";
+        die "You can't supply an adapter sequence AND use the Nextera transposase adapter sequence. Make your choice.\n\n";
       }
       if ($small_rna){
-      die "You can't supply an adapter sequence AND use the Illumina small RNA adapter sequence. Make your choice.\n\n";
+        die "You can't supply an adapter sequence AND use the Illumina small RNA adapter sequence. Make your choice.\n\n";
       }
   }
 
@@ -2989,7 +3000,7 @@ VERSION
         $umi_from_r2 = 8;
     }
 
-    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
+    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
 }
 
 sub Ncounter{
@@ -3067,6 +3078,13 @@ trim_galore [options] <filename(s)>
 
 --illumina              Adapter sequence to be trimmed is the first 13bp of the Illumina universal adapter
                         'AGATCGGAAGAGC' instead of the default auto-detection of adapter sequence.
+
+--stranded_illumina     Adapter sequence to be trimmed is the first 13bp of the Illumina stranded mRNA or Total
+                        RNA adapter 'ACTGTCTCTTATA' instead of the default auto-detection of adapter sequence. 
+                        Note that this sequence resembles the Nextera sequence with an additional A from A-tailing.
+                        Please also see https://github.com/FelixKrueger/TrimGalore/issues/127 or 
+                        https://support.illumina.com/bulletins/2020/06/trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo.html
+                        for further information. This sequence is currently NOT included in the adapter auto-detection.
 
 --nextera               Adapter sequence to be trimmed is the first 12bp of the Nextera adapter
                         'CTGTCTCTTATA' instead of the default auto-detection of adapter sequence.
@@ -3363,7 +3381,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 10 September 2021.
+Last modified on 15 January 2022.
 
 HELP
   exit;
