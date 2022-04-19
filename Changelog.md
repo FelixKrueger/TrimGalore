@@ -3,6 +3,10 @@
 
 - Added new option `--stranded_illumina` to allow trimming of the adapter sequence `ACTGTCTCTTATA` (whick looks like the Nextera sequence but with an additional A from A-tailing). See also here: https://github.com/FelixKrueger/TrimGalore/issues/127.
 
+### Version 0.6.7 (Release on 23 Jul 2021)
+
+- just to get a DOI via Zenodo
+
 ### Version 0.6.6 (Release on 04 Sep 2020)
 
 - Changed the way in which we test for the version of Cutadapt, more here: https://github.com/FelixKrueger/TrimGalore/issues/85
