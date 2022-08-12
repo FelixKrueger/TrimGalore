@@ -3,6 +3,10 @@
 
 - Added new option `--stranded_illumina` to allow trimming of the adapter sequence `ACTGTCTCTTATA` (whick looks like the Nextera sequence but with an additional A from A-tailing). See also here: https://github.com/FelixKrueger/TrimGalore/issues/127.
 
+- finally dropped the option `--trim1` entirely. It wasn't useful beyond Bowtie 1 paire-end mode, and hence people should cease using it
+
+- the option `--max_n COUNT` now interprets value between 0 and 1 as fraction of the read length (see [here](https://github.com/FelixKrueger/TrimGalore/issues/137))
+
 ### Version 0.6.7 (Release on 23 Jul 2021)
 
 - just to get a DOI via Zenodo
