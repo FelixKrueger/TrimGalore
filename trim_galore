@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-22, Felix Krueger (felix.krueger@babraham.ac.uk)
+## This program is Copyright (C) 2012-22, Felix Krueger (fkrueger@altoslabs.com)
 ## Edited by Frankie James (github.com/fjames003) for multi-core support
 
 ## This program is free software: you can redistribute it and/or modify
@@ -26,16 +26,19 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT) 
+## modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT)
+## last modified on 12 Aug 2022 to allow --max_n to be a fraction
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.8dev';
+my $last_modified = "12 08 2022";
+
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
 my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
@@ -649,7 +652,12 @@ sub trim{
     }
 
     if (defined $maxn){
-        warn "Maximum number of tolerated Ns: $maxn\n";
+        if (defined $maxn_fraction){
+            warn "Fraction of tolerated Ns: $maxn_fraction\n";
+        }
+        else{
+            warn "Maximum number of tolerated Ns: $maxn\n";
+        }
     }
 
     if ($nextseq){
@@ -731,11 +739,6 @@ sub trim{
     if ($non_directional){
         warn "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
         print REPORT "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
-    }
-
-    if ($trim){
-        warn "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
-        print REPORT "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
     }
 
     if ($clip_r1){
@@ -1045,13 +1048,7 @@ sub trim{
 				}
 			}
 
-			### Shortening all sequences by 1 bp on the 3' end 
-			# 28 02 2019: This was really only required for Bowtie 1 paired-end alignments, maybe we should drop this option in soon
-			if ($trim){
-				$seq = substr($seq,0,length($seq)-1);
-				$qual = substr($qual,0,length($qual)-1);
-			}
-	  
+
 			### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
 			if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
 				print OUT "$l1$seq\n$l3$qual\n";
@@ -1077,11 +1074,27 @@ sub trim{
 				if (defined $maxn){
 					my $n_count = Ncounter($seq);
 					# warn "Checking for Ns: Found $n_count\n";
-					if ($n_count > $maxn){
-						++$too_many_n;
-						next;
-					}
-				}	
+                    
+                    # consider Ns as fraction of the read length
+                    if (defined $maxn_fraction){
+                        # skipping the fraction calculation is the sequence is already 0 bp
+                        if (length$seq == 0){
+                            next; 
+                        }
+                        # warn "Calculating N fraction";
+                        my $fractN = $n_count/(length$seq);
+                        if ($fractN > $maxn_fraction){
+                            ++$too_many_n;
+                            next;
+                        }
+                    }
+                    else{
+                        if ($n_count > $maxn){
+                            ++$too_many_n;
+                            next;
+                        }
+                    }
+                }	
 		  
 				if (length $seq < $length_cutoff){
 					++$too_short;
@@ -1197,11 +1210,6 @@ sub trim{
 				# warn "$l1\n~~~~~~~~~~~~~\n"; sleep(1);
 			}
 			
-			### Shortening all sequences by 1 bp on the 3' end - This is probably no longer needed since we have stopped using Bowtie (1)
-			if ($trim){
-				$seq = substr($seq,0,length($seq)-1);
-				$qual = substr($qual,0,length($qual)-1);
-			}
 			
 			### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
 			if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
@@ -1308,12 +1316,6 @@ sub trim{
 	  
 			chomp $seq;
 			chomp $qual;
-
-			### Shortening all sequences by 1 bp on the 3' end
-			if ($trim){
-				$seq = substr($seq,0,length($seq)-1);
-				$qual = substr($qual,0,length($qual)-1);
-			}
 	  
 			### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
 			if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
@@ -1340,6 +1342,19 @@ sub trim{
 				if (defined $maxn){
 					my $n_count = Ncounter($seq);
 					# warn "Checking for Ns: Found $n_count\n";
+
+                    # consider Ns as fraction of the read length
+                    if (defined $maxn_fraction){
+                        # skipping the fraction calculation is the sequence is already 0 bp
+                        if (length$seq == 0){
+                            next; 
+                        }
+                        my $fractN = $n_count/(length$seq);
+                        if ($fractN > $maxn_fraction){
+                            ++$too_many_n;
+                            next;
+                        }
+                    }
 					if ($n_count > $maxn){
 						++$too_many_n;
 						next;
@@ -1433,21 +1448,21 @@ sub trim{
   
   
   
-  if ($validate){ ### only for paired-end files
-      warn "The length threshold of paired-end sequences gets evaluated later on (in the validation step)\n";
-  }
-  else{           ### Single-end file
-      warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-      print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-      if (defined $maxn){
-      warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
-      print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
-      }
-      if ($max_length){
-        warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
-      print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
-      }
-  }
+    if ($validate){ ### only for paired-end files
+        warn "The length threshold of paired-end sequences gets evaluated later on (in the validation step)\n";
+    }
+    else{           ### Single-end file
+        warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
+        print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
+        if (defined $maxn){
+            warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
+            print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
+        }
+        if ($max_length){
+            warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+            print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+        }
+    }
 
   if ($rrbs){
       my $percentage_rrbs_trimmed = sprintf ("%.1f",$rrbs_trimmed/$count*100);
@@ -1931,26 +1946,57 @@ sub validate_paired_end_files{
       }
       }
 
-      if (defined $maxn){
+        if (defined $maxn){
 
-      # Read 1
-      my $n_count = Ncounter($seq_1);
-      # warn "Checking Read 1 for Ns: Found $n_count\n";
-      if ($n_count > $maxn){
-          ++$too_many_N_pairs;
-          ++$sequence_pairs_removed;
-          next; # bailing straight away
-      }
+            # Read 1
+            my $n_count = Ncounter($seq_1);
+            # warn "Checking Read 1 for Ns: Found $n_count\n";
 
-      # Read 2
-      $n_count = Ncounter($seq_2);
-      # warn "Checking Read 2 for Ns: Found $n_count\n";
-      if ($n_count > $maxn){
-          ++$too_many_N_pairs;
-          ++$sequence_pairs_removed;
-          next;
-      }
-      }
+            # consider Ns as fraction of the read length
+            if (defined $maxn_fraction){
+                # skipping the fraction calculation is the sequence is already 0 bp
+                if (length$seq_1 == 0){
+                    next; 
+                }
+                my $fractN = $n_count/(length$seq_1);
+                if ($fractN > $maxn_fraction){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next;
+                }
+            }
+            else{   
+                if ($n_count > $maxn){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next; # bailing straight away
+                }
+            }
+
+            # Read 2
+            $n_count = Ncounter($seq_2);
+            # warn "Checking Read 2 for Ns: Found $n_count\n";
+
+            if (defined $maxn_fraction){
+                # skipping the fraction calculation is the sequence is already 0 bp
+                if (length$seq_2 == 0){
+                    next; 
+                }
+                my $fractN = $n_count/(length$seq_2);
+                if ($fractN > $maxn_fraction){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next;
+                }
+            }
+            else{   
+                if ($n_count > $maxn){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next;
+                }
+            }
+        }
 
       ### making sure that the reads do have a sensible length
       if ( (length($seq_1) < $length_cutoff) or (length($seq_2) < $length_cutoff) ){
@@ -2348,7 +2394,6 @@ sub process_commandline{
   my $phred33;
   my $phred64;
   my $fastqc_args;
-  my $trim;
   my $gzip;
   my $validate;
   my $retain;
@@ -2397,7 +2442,6 @@ sub process_commandline{
                  'phred33' => \$phred33,
                  'phred64' => \$phred64,
                  'fastqc_args=s' => \$fastqc_args,
-                 'trim1' => \$trim,
                  'gzip' => \$gzip,
                  'paired_end' => \$validate,
                  'retain_unpaired' => \$retain,
@@ -2418,7 +2462,7 @@ sub process_commandline{
                  'small_rna' => \$small_rna,
                  'path_to_cutadapt=s' => \$path_to_cutadapt,
                  'max_length=i' => \$max_length,
-                 'max_n=i'      => \$maxn,
+                 'max_n=s'      => \$maxn,
                  'trim-n'      => \$trimn,
                  'hardtrim5=i'      => \$hardtrim5,
                  'hardtrim3=i'      => \$hardtrim3,
@@ -2453,7 +2497,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 15 01 2022
+                               Last update: $last_modified
 
 VERSION
     exit;
@@ -2899,20 +2943,29 @@ VERSION
       }
   }
 
+    my $maxn_fraction;
 
-  if (defined $maxn){
-      unless ($maxn >= 0 and $maxn <= 100){
-      die "--max_n needs to be an integer between 0 and 100\nPlease respecify...\n\n";
-      }
-  }
+    if (defined $maxn){
+        if ($maxn > 0 and $maxn < 1){
+            warn "--max_n will be interpreted as a fraction of the read length ($maxn)";
+            $maxn_fraction = $maxn;
+        }
+        else{
+            # Converting number to integer
+            $maxn = int($maxn);
+            unless ($maxn >= 0 and $maxn <= 100){
+                die "--max_n needs to be an integer between 0 and 100.\nPlease respecify...\n\n";
+            }
+        }
+    }
 
-  my $trim_n;
-  if ($trimn){
-      $trim_n = '--trim-n';
-  }
-  else{
-      $trim_n = '';
-  }
+    my $trim_n;
+    if ($trimn){
+        $trim_n = '--trim-n';
+    }
+    else{
+        $trim_n = '';
+    }
 
 	### RRBS
 	if ($rrbs){
@@ -3000,7 +3053,7 @@ VERSION
         $umi_from_r2 = 8;
     }
 
-    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
+    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
 }
 
 sub Ncounter{
@@ -3127,9 +3180,10 @@ trim_galore [options] <filename(s)>
                         If only one read became too short there is the possibility of keeping such
                         unpaired single-end reads (see --retain_unpaired). Default pair-cutoff: 20 bp.
 
---max_n COUNT           The total number of Ns (as integer) a read may contain before it will be removed altogether.
+--max_n COUNT           The total number of Ns a read may contain before it will be removed altogether.
                         In a paired-end setting, either read exceeding this limit will result in the entire
-                        pair being removed from the trimmed output files.
+                        pair being removed from the trimmed output files. If COUNT is a number between 0 and 1,
+                        it is interpreted as a fraction of the read length.
 
 --trim-n                Removes Ns from either side of the read. This option does currently not work in RRBS mode.
 
@@ -3358,15 +3412,6 @@ Paired-end specific options:
                         Trim Galore! expects paired-end files to be supplied in a pairwise fashion, e.g.
                         file1_1.fq file1_2.fq SRR2_1.fq.gz SRR2_2.fq.gz ... .
 
--t/--trim1              Trims 1 bp off every read from its 3' end. This may be needed for FastQ files that
-                        are to be aligned as paired-end data with Bowtie. This is because Bowtie (1) regards
-                        alignments like this:
-
-                          R1 --------------------------->     or this:    ----------------------->  R1
-                          R2 <---------------------------                       <-----------------  R2
-
-                        as invalid (whenever a start/end coordinate is contained within the other read).
-                        NOTE: If you are planning to use Bowtie2, BWA etc. you don't need to specify this option.
 
 --retain_unpaired       If only one of the two paired-end reads became too short, the longer
                         read will be written to either '.unpaired_1.fq' or '.unpaired_2.fq'
@@ -3381,7 +3426,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 15 January 2022.
+Last modified on 12 Aug 2022.
 
 HELP
   exit;
