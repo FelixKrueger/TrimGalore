@@ -7,6 +7,8 @@
 
 - the option `--max_n COUNT` now interprets value between 0 and 1 as fraction of the read length (see [here](https://github.com/FelixKrueger/TrimGalore/issues/137))
 
+- enabled the option `--max_length` also for paired-end trimming (of small RNAs)
+
 ### Version 0.6.7 (Release on 23 Jul 2021)
 
 - just to get a DOI via Zenodo
