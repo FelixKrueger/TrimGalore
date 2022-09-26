@@ -3132,6 +3132,15 @@ trim_galore [options] <filename(s)>
                         options, else '--nextera' is the default). A single base
                         may also be given as e.g. -a A{10}, to be expanded to -a AAAAAAAAAA.
 
+                        At a special request, multiple adapters can also be specified like so:
+                        -a  " AGCTCCCG -a TTTCATTATAT -a TTTATTCGGATTTAT"
+                        -a2 " AGCTAGCG -a TCTCTTATAT -a TTTCGGATTTAT", or so:
+                        -a "file:../multiple_adapters.fa"
+                        -a2 "file:../different_adapters.fa"
+                        Potentially in conjucntion with the parameter "-n 3" to trim all adapters. Please note
+                        that this is NOT needed for standard trimming! 
+                        More Information here: https://github.com/FelixKrueger/TrimGalore/issues/86
+
 -a2/--adapter2 <STRING> Optional adapter sequence to be trimmed off read 2 of paired-end files. This
                         option requires '--paired' to be specified as well. If the libraries to be trimmed
                         are smallRNA then a2 will be set to the Illumina small RNA 5' adapter automatically
