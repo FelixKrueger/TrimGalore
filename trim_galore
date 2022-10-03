@@ -33,7 +33,7 @@ my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.8dev';
-my $last_modified = "26 09 2022";
+my $last_modified = "03 10 2022";
 
 my $cutadapt_version;
 my $python_version;
@@ -2067,7 +2067,7 @@ sub validate_paired_end_files{
     print REPORT "Total number of sequences analysed for the sequence pair length validation: $count\n\n";
     print REPORT "Number of sequence pairs removed because at least one read was shorter than the length cutoff ($length_cutoff bp): $sequence_pairs_removed ($percentage%)\n";
 
-    if ($keep){
+    if ($retain){
         warn "Number of unpaired read 1 reads printed: $read_1_printed\n";
         warn "Number of unpaired read 2 reads printed: $read_2_printed\n";
     }
