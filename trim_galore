@@ -2475,7 +2475,7 @@ VERSION
 		elsif($cores == 1){
 			warn "Proceeding with single-core trimming (user-defined)\n";
 		}
-		elsif($cores >= 8){
+		elsif($cores > 8){
 			warn "Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for $cores cores). Please consider re-specifying\n"; sleep(2);
 		}
 	}
