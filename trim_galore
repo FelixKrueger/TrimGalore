@@ -3309,8 +3309,8 @@ RRBS-specific options (MspI digested material):
                         libraries will in addition have the first 2 bp removed from the 5' end (by setting
                         '--clip_r2 2'). This is to avoid using artificial methylation calls from the filled-in
                         cytosine positions close to the 3' MspI site in sequenced fragments.
-                        This option is not recommended for users of the NuGEN ovation RRBS System 1-16
-                        kit (see below).
+                        This option is not recommended for users of the Tecan Ovation RRBS Methyl-Seq with TrueMethyl
+                        oxBS 1-16 kit (see below).
 
 --non_directional       Selecting this option for non-directional RRBS libraries will screen
                         quality-trimmed sequences for 'CAA' or 'CGA' at the start of the read
@@ -3326,9 +3326,9 @@ RRBS-specific options (MspI digested material):
                         for poor qualities separately.
 
 
-Note for RRBS using the NuGEN Ovation RRBS System 1-16 kit:
+Note for RRBS using the Tecan Ovation RRBS Methyl-Seq with TrueMethyl oxBS 1-16 kit:
 
-Owing to the fact that the NuGEN Ovation kit attaches a varying number of nucleotides (0-3) after each MspI
+Owing to the fact that the Tecan Ovation RRBS kit attaches a varying number of nucleotides (0-3) after each MspI
 site Trim Galore should be run WITHOUT the option --rrbs. This trimming is accomplished in a subsequent
 diversity trimming step afterwards (see their manual).
 
