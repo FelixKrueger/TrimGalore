@@ -3,6 +3,8 @@
 
 - Added new option `--stranded_illumina` to allow trimming of the adapter sequence `ACTGTCTCTTATA` (whick looks like the Nextera sequence but with an additional A from A-tailing). See also here: https://github.com/FelixKrueger/TrimGalore/issues/127.
 
+- Trim Galore will now preferentially use `igzip` for decompression, if installed. [More info here](https://github.com/FelixKrueger/TrimGalore/pull/149)
+
 ### Version 0.6.7 (Release on 23 Jul 2021)
 
 - just to get a DOI via Zenodo
