@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-22, Felix Krueger (felix.krueger@babraham.ac.uk)
+## This program is Copyright (C) 2012-23, Felix Krueger (fkrueger@altoslabs.com)
 ## Edited by Frankie James (github.com/fjames003) for multi-core support
 
 ## This program is free software: you can redistribute it and/or modify
@@ -26,16 +26,21 @@ use Cwd;
 
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
-## last modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT) 
+## modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT)
+## modified on 12 Aug 2022 to allow --max_n to be a fraction
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.8dev';
+my $trimmer_version = '0.6.8';
+my $last_modified = "28 01 2023";
+
 my $cutadapt_version;
 my $python_version;
 
+
 my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+
 my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
@@ -649,7 +654,12 @@ sub trim{
     }
 
     if (defined $maxn){
-        warn "Maximum number of tolerated Ns: $maxn\n";
+        if (defined $maxn_fraction){
+            warn "Fraction of tolerated Ns: $maxn_fraction\n";
+        }
+        else{
+            warn "Maximum number of tolerated Ns: $maxn\n";
+        }
     }
 
     if ($nextseq){
@@ -731,11 +741,6 @@ sub trim{
     if ($non_directional){
         warn "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
         print REPORT "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction\n";
-    }
-
-    if ($trim){
-        warn "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
-        print REPORT "All sequences will be trimmed by 1 bp on their 3' end to avoid problems with invalid paired-end alignments with Bowtie 1\n";
     }
 
     if ($clip_r1){
@@ -1045,13 +1050,7 @@ sub trim{
 				}
 			}
 
-			### Shortening all sequences by 1 bp on the 3' end 
-			# 28 02 2019: This was really only required for Bowtie 1 paired-end alignments, maybe we should drop this option in soon
-			if ($trim){
-				$seq = substr($seq,0,length($seq)-1);
-				$qual = substr($qual,0,length($qual)-1);
-			}
-	  
+
 			### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
 			if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
 				print OUT "$l1$seq\n$l3$qual\n";
@@ -1077,11 +1076,27 @@ sub trim{
 				if (defined $maxn){
 					my $n_count = Ncounter($seq);
 					# warn "Checking for Ns: Found $n_count\n";
-					if ($n_count > $maxn){
-						++$too_many_n;
-						next;
-					}
-				}	
+                    
+                    # consider Ns as fraction of the read length
+                    if (defined $maxn_fraction){
+                        # skipping the fraction calculation is the sequence is already 0 bp
+                        if (length$seq == 0){
+                            next; 
+                        }
+                        # warn "Calculating N fraction";
+                        my $fractN = $n_count/(length$seq);
+                        if ($fractN > $maxn_fraction){
+                            ++$too_many_n;
+                            next;
+                        }
+                    }
+                    else{
+                        if ($n_count > $maxn){
+                            ++$too_many_n;
+                            next;
+                        }
+                    }
+                }	
 		  
 				if (length $seq < $length_cutoff){
 					++$too_short;
@@ -1197,11 +1212,6 @@ sub trim{
 				# warn "$l1\n~~~~~~~~~~~~~\n"; sleep(1);
 			}
 			
-			### Shortening all sequences by 1 bp on the 3' end - This is probably no longer needed since we have stopped using Bowtie (1)
-			if ($trim){
-				$seq = substr($seq,0,length($seq)-1);
-				$qual = substr($qual,0,length($qual)-1);
-			}
 			
 			### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
 			if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
@@ -1308,12 +1318,6 @@ sub trim{
 	  
 			chomp $seq;
 			chomp $qual;
-
-			### Shortening all sequences by 1 bp on the 3' end
-			if ($trim){
-				$seq = substr($seq,0,length($seq)-1);
-				$qual = substr($qual,0,length($qual)-1);
-			}
 	  
 			### PRINTING (POTENTIALLY TRIMMED) SEQUENCE
 			if ($validate){ # printing the sequence without performing a length check (this is performed for the read pair separately later)
@@ -1340,6 +1344,19 @@ sub trim{
 				if (defined $maxn){
 					my $n_count = Ncounter($seq);
 					# warn "Checking for Ns: Found $n_count\n";
+
+                    # consider Ns as fraction of the read length
+                    if (defined $maxn_fraction){
+                        # skipping the fraction calculation is the sequence is already 0 bp
+                        if (length$seq == 0){
+                            next; 
+                        }
+                        my $fractN = $n_count/(length$seq);
+                        if ($fractN > $maxn_fraction){
+                            ++$too_many_n;
+                            next;
+                        }
+                    }
 					if ($n_count > $maxn){
 						++$too_many_n;
 						next;
@@ -1433,36 +1450,36 @@ sub trim{
   
   
   
-  if ($validate){ ### only for paired-end files
-      warn "The length threshold of paired-end sequences gets evaluated later on (in the validation step)\n";
-  }
-  else{           ### Single-end file
-      warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-      print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
-      if (defined $maxn){
-      warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
-      print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
-      }
-      if ($max_length){
-        warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
-      print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
-      }
-  }
+    if ($validate){ ### only for paired-end files
+        warn "The length threshold of paired-end sequences gets evaluated later on (in the validation step)\n";
+    }
+    else{           ### Single-end file
+        warn "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
+        print REPORT "Sequences removed because they became shorter than the length cutoff of $length_cutoff bp:\t$too_short ($percentage_too_short%)\n";
+        if (defined $maxn){
+            warn "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
+            print REPORT "Sequences removed because they contained more Ns than the cutoff of $maxn:\t$too_many_n ($percentage_too_many_n%)\n";
+        }
+        if ($max_length){
+            warn "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+            print REPORT "Sequences removed because after trimming they were longer than the maximum length cutoff of $max_length bp:\t$too_long ($percentage_too_long%)\n";
+        }
+    }
 
-  if ($rrbs){
-      my $percentage_rrbs_trimmed = sprintf ("%.1f",$rrbs_trimmed/$count*100);
-      warn "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
-      print REPORT "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
-  }
+    if ($rrbs){
+        my $percentage_rrbs_trimmed = sprintf ("%.1f",$rrbs_trimmed/$count*100);
+        warn "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
+        print REPORT "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t$rrbs_trimmed ($percentage_rrbs_trimmed%)\n";
+    }
 
-  if ($non_directional){
-      my $percentage_rrbs_trimmed_at_start = sprintf ("%.1f",$rrbs_trimmed_start/$count*100);
-      warn "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
-      print REPORT "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
-  }
+    if ($non_directional){
+        my $percentage_rrbs_trimmed_at_start = sprintf ("%.1f",$rrbs_trimmed_start/$count*100);
+        warn "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
+        print REPORT "RRBS reads trimmed by 2 bp at the start when read started with CAA ($CAA) or CGA ($CGA) in total:\t$rrbs_trimmed_start ($percentage_rrbs_trimmed_at_start%)\n";
+    }
 
-  warn "\n";
-  print REPORT "\n";
+    warn "\n";
+    print REPORT "\n";
 
     ### RUNNING FASTQC unless we are dealing with paired-end files
     unless($validate){
@@ -1525,44 +1542,40 @@ sub trim{
             }
             # sleep (1);
 
-        my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
+            my ($val_1,$val_2,$un_1,$un_2) = validate_paired_end_files($file_1,$file_2);
 
-        ### RUNNING FASTQC
-        if ($fastqc){
+            ### RUNNING FASTQC
+            if ($fastqc){
+                warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
+                if ($fastqc_args){
+                    system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
+                }
+                else{
+                    system ("$path_to_fastqc $output_dir$val_1");
+                }
 
-            warn "\n  >>> Now running FastQC on the validated data $val_1<<<\n\n";
+                warn "\n  >>> Now running FastQC on the validated data $val_2<<<\n\n";
+                #sleep (3);
 
-        if ($fastqc_args){
-            system ("$path_to_fastqc $fastqc_args $output_dir$val_1");
+                if ($fastqc_args){
+                    system ("$path_to_fastqc $fastqc_args $output_dir$val_2");
+                }
+                else{
+                    system ("$path_to_fastqc $output_dir$val_2");
+                }
+            }
+
+            warn "Deleting both intermediate output files $file_1 and $file_2\n";
+            unlink "$output_dir$file_1";
+            unlink "$output_dir$file_2";
+
+            warn "\n",'='x100,"\n\n";
+
+            $file_1 = undef; # setting file_1 and file_2 to undef once validation is completed
+            $file_2 = undef;
         }
-        else{
-            system ("$path_to_fastqc $output_dir$val_1");
-        }
-
-        warn "\n  >>> Now running FastQC on the validated data $val_2<<<\n\n";
-        #sleep (3);
-
-        if ($fastqc_args){
-        system ("$path_to_fastqc $fastqc_args $output_dir$val_2");
-        }
-        else{
-        system ("$path_to_fastqc $output_dir$val_2");
-        }
-
-      }
-
-      warn "Deleting both intermediate output files $file_1 and $file_2\n";
-      unlink "$output_dir$file_1";
-      unlink "$output_dir$file_2";
-
-      warn "\n",'='x100,"\n\n";
-      # sleep (1);
-
-      $file_1 = undef; # setting file_1 and file_2 to undef once validation is completed
-      $file_2 = undef;
-      }
-  }
-  close REPORT or warn "Failed to close filehandle REPORT: $!\n";
+    }
+    close REPORT or warn "Failed to close filehandle REPORT: $!\n";
 }
 
 sub hardtrim_to_5prime_end{
@@ -1574,10 +1587,10 @@ sub hardtrim_to_5prime_end{
     my $hardtrim_5; # filehandle
 
     if ($filename =~ /gz$/){
-    open ($in,"$decompression_path -d -c $filename |") or die "Couldn't read from file $!";
+      open ($in,"$decompression_path -d -c $filename |") or die "Couldn't read from file $!";
     }
     else{
-    open ($in,$filename) or die "Couldn't read from file $!";
+      open ($in,$filename) or die "Couldn't read from file $!";
     }
 
     ### OUTPUT FILE
@@ -1585,55 +1598,55 @@ sub hardtrim_to_5prime_end{
     # warn "Output file name: $output_filename\n";
 
     if ($output_filename =~ /\.fastq$/){
-    $output_filename =~ s/\.fastq$/.${hardtrim5}bp_5prime.fq/;
+        $output_filename =~ s/\.fastq$/.${hardtrim5}bp_5prime.fq/;
     }
     elsif ($output_filename =~ /\.fastq\.gz$/){
-    $output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp_5prime.fq/;
+        $output_filename =~ s/\.fastq\.gz$/.${hardtrim5}bp_5prime.fq/;
     }
     elsif ($output_filename =~ /\.fq$/){
-    $output_filename =~ s/\.fq$/.${hardtrim5}bp_5prime.fq/;
+        $output_filename =~ s/\.fq$/.${hardtrim5}bp_5prime.fq/;
     }
     elsif ($output_filename =~ /\.fq\.gz$/){
-    $output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp_5prime.fq/;
+        $output_filename =~ s/\.fq\.gz$/.${hardtrim5}bp_5prime.fq/;
     }
     else{
-    $output_filename =~ s/$/.${hardtrim5}bp_5prime.fq/;
+        $output_filename =~ s/$/.${hardtrim5}bp_5prime.fq/;
     }
 
     if ($gzip or $filename =~ /\.gz$/){
-    if ($dont_gzip){
-        open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+        if ($dont_gzip){
+            open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+        }
+        else{
+            $output_filename .= '.gz';
+            open ($hardtrim_5,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+        }
     }
     else{
-        $output_filename .= '.gz';
-        open ($hardtrim_5,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
-    }
-    }
-    else{
-    open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+        open ($hardtrim_5,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
     }
     warn "Writing trimmed version (using the first $hardtrim5 bp only) of the input file '$filename' to '$output_filename'\n";
 
     my $count = 0;
 
     while (1){
-    my $identifier = <$in>;
-    my $sequence = <$in>;
-    my $identifier2 = <$in>;
-    my $quality_score = <$in>;
+        my $identifier = <$in>;
+        my $sequence = <$in>;
+        my $identifier2 = <$in>;
+        my $quality_score = <$in>;
 
-    last unless ($identifier and $sequence and $identifier2 and $quality_score);
-    ++$count;
+        last unless ($identifier and $sequence and $identifier2 and $quality_score);
+        ++$count;
 
-    $sequence      =~ s/\r|\n//g; # cross-platform line ending trimming
-    $quality_score =~ s/\r|\n//g;
-           $identifier    =~ s/\r|\n//g;
-    $identifier2   =~ s/\r|\n//g;
+        $sequence      =~ s/\r|\n//g; # cross-platform line ending trimming
+        $quality_score =~ s/\r|\n//g;
+        $identifier    =~ s/\r|\n//g;
+        $identifier2   =~ s/\r|\n//g;
 
-    my $trimmed_sequence = substr($sequence,0,$hardtrim5);           # from the start to the $hardtrim5
-    my $trimmed_quality_score = substr($quality_score,0,$hardtrim5); # from the start to the $hardtrim5
+        my $trimmed_sequence = substr($sequence,0,$hardtrim5);           # from the start to the $hardtrim5
+        my $trimmed_quality_score = substr($quality_score,0,$hardtrim5); # from the start to the $hardtrim5
 
-    print {$hardtrim_5} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
+        print {$hardtrim_5} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
 
     }
     close $in or warn "Failed to close filehandle for $filename";
@@ -1729,23 +1742,25 @@ sub validate_paired_end_files{
 
     warn "file_1: $file_1, file_2: $file_2\n\n";
     
-   
+    my $one_seq_too_long = 0;
 
-  if ($file_1 =~ /\.gz$/){
-      open (IN1,"$decompression_path -d -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
-  }
-  else{
-      open (IN1, "$output_dir$file_1") or die "Couldn't read from file $file_1: $!\n";
-  }
 
-  if ($file_2 =~ /\.gz$/){
-      open (IN2,"$decompression_path -d -c $output_dir$file_2 |") or die "Couldn't read from file $file_2: $!\n";
-  }
-  else{
-      open (IN2, "$output_dir$file_2") or die "Couldn't read from file $file_2: $!\n";
-  }
+    if ($file_1 =~ /\.gz$/){
+        open (IN1,"$decompression_path -d -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
+    }
+    else{
+        open (IN1, "$output_dir$file_1") or die "Couldn't read from file $file_1: $!\n";
+    }
 
-  warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
+    if ($file_2 =~ /\.gz$/){
+        open (IN2,"$decompression_path -d -c $output_dir$file_2 |") or die "Couldn't read from file $file_2: $!\n";
+    }
+    else{
+        open (IN2, "$output_dir$file_2") or die "Couldn't read from file $file_2: $!\n";
+    }
+
+
+    warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
 
     my $out_1 = $file_1;
     my $out_2 = $file_2;
@@ -1776,249 +1791,293 @@ sub validate_paired_end_files{
         # warn "ORIGINAL FILE 2: >>$out_2<<\n";
     }
 
-  if ($gzip){
-      if ($dont_gzip){
-      open (R1,'>',$output_dir.$out_1) or die "Couldn't write to $out_1 $!\n";
-      }
-      else{
-      $out_1 .= '.gz';
-      open (R1,"| $compression_path -c - > ${output_dir}${out_1}") or die "Can't write to $out_1: $!\n";
-      }
-  }
-  else{
-      open (R1,'>',$output_dir.$out_1) or die "Couldn't write to $out_1 $!\n";
-  }
-
-  if ($gzip){
-      if ($dont_gzip){
-      open (R2,'>',$output_dir.$out_2) or die "Couldn't write to $out_2 $!\n";
+    if ($gzip){
+        if ($dont_gzip){
+            open (R1,'>',$output_dir.$out_1) or die "Couldn't write to $out_1 $!\n";
+        }
+        else{
+            $out_1 .= '.gz';
+            open (R1,"| $compression_path -c - > ${output_dir}${out_1}") or die "Can't write to $out_1: $!\n";
+        }
     }
-      else{
-      $out_2 .= '.gz';
-      open (R2,"| $compression_path -c - > ${output_dir}${out_2}") or die "Can't write to $out_2: $!\n";
-      }
-  }
-  else{
-      open (R2,'>',$output_dir.$out_2) or die "Couldn't write to $out_2 $!\n";
-  }
+    else{
+        open (R1,'>',$output_dir.$out_1) or die "Couldn't write to $out_1 $!\n";
+    }
 
-  warn "Writing validated paired-end Read 1 reads to $out_1\n";
-  warn "Writing validated paired-end Read 2 reads to $out_2\n\n";
+    if ($gzip){
+        if ($dont_gzip){
+            open (R2,'>',$output_dir.$out_2) or die "Couldn't write to $out_2 $!\n";
+        }
+        else{
+            $out_2 .= '.gz';
+            open (R2,"| $compression_path -c - > ${output_dir}${out_2}") or die "Can't write to $out_2: $!\n";
+        }
+    }
+    else{
+        open (R2,'>',$output_dir.$out_2) or die "Couldn't write to $out_2 $!\n";
+    }
 
-  my $unpaired_1;
-  my $unpaired_2;
+    warn "Writing validated paired-end Read 1 reads to $out_1\n";
+    warn "Writing validated paired-end Read 2 reads to $out_2\n\n";
 
-  if ($retain){
+    my $unpaired_1;
+    my $unpaired_2;
 
-      $unpaired_1 = $file_1;
-      $unpaired_2 = $file_2;
+    if ($retain){
 
-      if ($unpaired_1 =~ /gz$/){
-      $unpaired_1 =~ s/trimmed\.fq\.gz$/unpaired_1.fq/;
-      }
-      else{
-      $unpaired_1 =~ s/trimmed\.fq$/unpaired_1.fq/;
-      }
+        $unpaired_1 = $file_1;
+        $unpaired_2 = $file_2;
 
-      if ($unpaired_2 =~ /gz$/){
-      $unpaired_2 =~ s/trimmed\.fq\.gz$/unpaired_2.fq/;
-      }
-      else{
-      $unpaired_2 =~ s/trimmed\.fq$/unpaired_2.fq/;
-      }
+        if ($unpaired_1 =~ /gz$/){
+            $unpaired_1 =~ s/trimmed\.fq\.gz$/unpaired_1.fq/;
+        }
+        else{
+            $unpaired_1 =~ s/trimmed\.fq$/unpaired_1.fq/;
+        }
 
-      if ($gzip){
-      if ($dont_gzip){
-          open (UNPAIRED1,'>',$output_dir.$unpaired_1) or die "Couldn't write to $unpaired_1: $!\n";
-      }
-      else{
-          $unpaired_1 .= '.gz';
-          open (UNPAIRED1,"| $compression_path -c - > ${output_dir}${unpaired_1}") or die "Can't write to $unpaired_1: $!\n";
-      }
-      }
-      else{
-      open (UNPAIRED1,'>',$output_dir.$unpaired_1) or die "Couldn't write to $unpaired_1: $!\n";
-      }
+        if ($unpaired_2 =~ /gz$/){
+            $unpaired_2 =~ s/trimmed\.fq\.gz$/unpaired_2.fq/;
+        }
+        else{
+            $unpaired_2 =~ s/trimmed\.fq$/unpaired_2.fq/;
+        }
 
-      if ($gzip){
-      if ($dont_gzip){
-          open (UNPAIRED2,'>',$output_dir.$unpaired_2) or die "Couldn't write to $unpaired_2: $!\n";
-      }
-      else{
-          $unpaired_2 .= '.gz';
-          open (UNPAIRED2,"| $compression_path -c - > ${output_dir}${unpaired_2}") or die "Can't write to $unpaired_2: $!\n";
-      }
-      }
-      else{
-      open (UNPAIRED2,'>',$output_dir.$unpaired_2) or die "Couldn't write to $unpaired_2: $!\n";
-      }
+        if ($gzip){
+            if ($dont_gzip){
+                open (UNPAIRED1,'>',$output_dir.$unpaired_1) or die "Couldn't write to $unpaired_1: $!\n";
+            }
+            else{
+                $unpaired_1 .= '.gz';
+                open (UNPAIRED1,"| $compression_path -c - > ${output_dir}${unpaired_1}") or die "Can't write to $unpaired_1: $!\n";
+            }
+        }
+        else{
+            open (UNPAIRED1,'>',$output_dir.$unpaired_1) or die "Couldn't write to $unpaired_1: $!\n";
+        }
 
-      warn "Writing unpaired read 1 reads to $unpaired_1\n";
-      warn "Writing unpaired read 2 reads to $unpaired_2\n\n";
-  }
+        if ($gzip){
+            if ($dont_gzip){
+                open (UNPAIRED2,'>',$output_dir.$unpaired_2) or die "Couldn't write to $unpaired_2: $!\n";
+            }
+            else{
+                $unpaired_2 .= '.gz';
+                open (UNPAIRED2,"| $compression_path -c - > ${output_dir}${unpaired_2}") or die "Can't write to $unpaired_2: $!\n";
+            }
+        }
+        else{
+            open (UNPAIRED2,'>',$output_dir.$unpaired_2) or die "Couldn't write to $unpaired_2: $!\n";
+        }
 
-  my $sequence_pairs_removed = 0;
-  my $too_many_N_pairs = 0;
-  my $read_1_printed = 0;
-  my $read_2_printed = 0;
+        warn "Writing unpaired read 1 reads to $unpaired_1\n";
+        warn "Writing unpaired read 2 reads to $unpaired_2\n\n";
+    }
 
-  my $count = 0;
+    my $sequence_pairs_removed = 0;
+    my $too_many_N_pairs = 0;
+    my $read_1_printed = 0;
+    my $read_2_printed = 0;
 
-  while (1){
-      my $id_1   = <IN1>;
-      my $seq_1  = <IN1>;
-      my $l3_1   = <IN1>;
-      my $qual_1 = <IN1>;
+    my $count = 0;
 
-      my $id_2   = <IN2>;
-      my $seq_2  = <IN2>;
-      my $l3_2   = <IN2>;
-      my $qual_2 = <IN2>;
+    while (1){
+        my $id_1   = <IN1>;
+        my $seq_1  = <IN1>;
+        my $l3_1   = <IN1>;
+        my $qual_1 = <IN1>;
 
-      if ($id_1 and $seq_1 and $l3_1 and $qual_1 and $id_2 and $seq_2 and $l3_2 and $qual_2){
-      # all good, got a read from both files
-      }
-      elsif( !($id_1 and $seq_1 and $l3_1 and $qual_1) and ($id_2 and $seq_2 and $l3_2 and $qual_2)){
-      die "Read 1 output is truncated at sequence count: $count, please check your paired-end input files! Terminating...\n\n";
-      }
-      elsif( !($id_2 and $seq_2 and $l3_2 and $qual_2) and ($id_1 and $seq_1 and $l3_1 and $qual_1)){
-      die "Read 2 output is truncated at sequence count: $count, please check your paired-end input files! Terminating...\n\n";
-      }
-      else{
-      last unless ($id_1 and $seq_1 and $l3_1 and $qual_1);
-      last unless ($id_2 and $seq_2 and $l3_2 and $qual_2);
-      }
-      ++$count;
+        my $id_2   = <IN2>;
+        my $seq_2  = <IN2>;
+        my $l3_2   = <IN2>;
+        my $qual_2 = <IN2>;
 
-      ## small check if the sequence files appear to be FastQ files
-      if ($count == 1){ # performed just once
-      if ($id_1 !~ /^\@/ or $l3_1 !~ /^\+/){
-          die "Input file doesn't seem to be in FastQ format at sequence $count\n";
-      }
-      if ($id_2 !~ /^\@/ or $l3_2 !~ /^\+/){
-          die "Input file doesn't seem to be in FastQ format at sequence $count\n";
-      }
-      }
+        if ($id_1 and $seq_1 and $l3_1 and $qual_1 and $id_2 and $seq_2 and $l3_2 and $qual_2){
+            # all good, got a read from both files
+        }
+        elsif( !($id_1 and $seq_1 and $l3_1 and $qual_1) and ($id_2 and $seq_2 and $l3_2 and $qual_2)){
+            die "Read 1 output is truncated at sequence count: $count, please check your paired-end input files! Terminating...\n\n";
+        }
+        elsif( !($id_2 and $seq_2 and $l3_2 and $qual_2) and ($id_1 and $seq_1 and $l3_1 and $qual_1)){
+            die "Read 2 output is truncated at sequence count: $count, please check your paired-end input files! Terminating...\n\n";
+        }
+        else{
+            last unless ($id_1 and $seq_1 and $l3_1 and $qual_1);
+            last unless ($id_2 and $seq_2 and $l3_2 and $qual_2);
+        }
+        ++$count;
 
-      chomp $seq_1;
-      chomp $seq_2;
-      chomp $qual_1;
-      chomp $qual_2;
+        ## small check if the sequence files appear to be FastQ files
+        if ($count == 1){ # performed just once
+            if ($id_1 !~ /^\@/ or $l3_1 !~ /^\+/){
+                die "Input file doesn't seem to be in FastQ format at sequence $count\n";
+            }
+            if ($id_2 !~ /^\@/ or $l3_2 !~ /^\+/){
+                die "Input file doesn't seem to be in FastQ format at sequence $count\n";
+            }
+        }
 
-      if ($clip_r1){
-      if (length $seq_1 > $clip_r1){ # sequences that are already too short won't be trimmed again
-          $seq_1 = substr($seq_1,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
-          $qual_1 = substr($qual_1,$clip_r1);
-      }
-      }
-      if ($clip_r2){
-      if (length $seq_2 > $clip_r2){ # sequences that are already too short won't be trimmed again
-          $seq_2 = substr($seq_2,$clip_r2); # starting after the sequences to be trimmed until the end of the sequence
-          $qual_2 = substr($qual_2,$clip_r2);
-      }
-      }
+        chomp $seq_1;
+        chomp $seq_2;
+        chomp $qual_1;
+        chomp $qual_2;
 
-      if ($three_prime_clip_r1){
-      if (length $seq_1 > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
-          $seq_1 = substr($seq_1,0,(length($seq_1) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
-          $qual_1 = substr($qual_1,0,(length($qual_1) - $three_prime_clip_r1));
-      }
-      }
-      if ($three_prime_clip_r2){
-      if (length $seq_2 > $three_prime_clip_r2){  # sequences that are already too short won't be clipped again
-          $seq_2 = substr($seq_2,0,(length($seq_2) - $three_prime_clip_r2)); # starting after the sequences to be trimmed until the end of the sequence
-          $qual_2 = substr($qual_2,0,(length($qual_2) - $three_prime_clip_r2));
-      }
-      }
+        if ($clip_r1){
+            if (length $seq_1 > $clip_r1){ # sequences that are already too short won't be trimmed again
+                $seq_1 = substr($seq_1,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
+                $qual_1 = substr($qual_1,$clip_r1);
+            }
+        }
+        if ($clip_r2){
+            if (length $seq_2 > $clip_r2){ # sequences that are already too short won't be trimmed again
+                $seq_2 = substr($seq_2,$clip_r2); # starting after the sequences to be trimmed until the end of the sequence
+                $qual_2 = substr($qual_2,$clip_r2);
+            }
+        }
 
-      if (defined $maxn){
+        if ($three_prime_clip_r1){
+            if (length $seq_1 > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
+                $seq_1 = substr($seq_1,0,(length($seq_1) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
+                $qual_1 = substr($qual_1,0,(length($qual_1) - $three_prime_clip_r1));
+            }
+        }
+        if ($three_prime_clip_r2){
+            if (length $seq_2 > $three_prime_clip_r2){  # sequences that are already too short won't be clipped again
+                $seq_2 = substr($seq_2,0,(length($seq_2) - $three_prime_clip_r2)); # starting after the sequences to be trimmed until the end of the sequence
+                $qual_2 = substr($qual_2,0,(length($qual_2) - $three_prime_clip_r2));
+            }
+        }
 
-      # Read 1
-      my $n_count = Ncounter($seq_1);
-      # warn "Checking Read 1 for Ns: Found $n_count\n";
-      if ($n_count > $maxn){
-          ++$too_many_N_pairs;
-          ++$sequence_pairs_removed;
-          next; # bailing straight away
-      }
+        if (defined $maxn){
 
-      # Read 2
-      $n_count = Ncounter($seq_2);
-      # warn "Checking Read 2 for Ns: Found $n_count\n";
-      if ($n_count > $maxn){
-          ++$too_many_N_pairs;
-          ++$sequence_pairs_removed;
-          next;
-      }
-      }
+            # Read 1
+            my $n_count = Ncounter($seq_1);
+            # warn "Checking Read 1 for Ns: Found $n_count\n";
 
-      ### making sure that the reads do have a sensible length
-      if ( (length($seq_1) < $length_cutoff) or (length($seq_2) < $length_cutoff) ){
-      ++$sequence_pairs_removed;
-      if ($retain){ # writing out single-end reads if they are longer than the cutoff
+            # consider Ns as fraction of the read length
+            if (defined $maxn_fraction){
+                # skipping the fraction calculation is the sequence is already 0 bp
+                if (length$seq_1 == 0){
+                    next; 
+                }
+                my $fractN = $n_count/(length$seq_1);
+                if ($fractN > $maxn_fraction){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next;
+                }
+            }
+            else{   
+                if ($n_count > $maxn){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next; # bailing straight away
+                }
+            }
 
-          if ( length($seq_1) >= $length_read_1){ # read 1 is long enough
-          print UNPAIRED1 $id_1;
-          print UNPAIRED1 "$seq_1\n";
-          print UNPAIRED1 $l3_1;
-          print UNPAIRED1 "$qual_1\n";
-          ++$read_1_printed;
-          }
+            # Read 2
+            $n_count = Ncounter($seq_2);
+            # warn "Checking Read 2 for Ns: Found $n_count\n";
 
-          if ( length($seq_2) >= $length_read_2){ # read 2 is long enough
-          print UNPAIRED2 $id_2;
-          print UNPAIRED2 "$seq_2\n";
-          print UNPAIRED2 $l3_2;
-          print UNPAIRED2 "$qual_2\n";
-          ++$read_2_printed;
-          }
+            if (defined $maxn_fraction){
+                # skipping the fraction calculation is the sequence is already 0 bp
+                if (length$seq_2 == 0){
+                    next; 
+                }
+                my $fractN = $n_count/(length$seq_2);
+                if ($fractN > $maxn_fraction){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next;
+                }
+            }
+            else{   
+                if ($n_count > $maxn){
+                    ++$too_many_N_pairs;
+                    ++$sequence_pairs_removed;
+                    next;
+                }
+            }
+        }
 
-      }
-      }
-      else{
-      print R1 $id_1;
-      print R1 "$seq_1\n";
-      print R1 $l3_1;
-      print R1 "$qual_1\n";
+        ### making sure that the reads do have a sensible length
+        if ( (length($seq_1) < $length_cutoff) or (length($seq_2) < $length_cutoff) ){
+            ++$sequence_pairs_removed;
+            if ($retain){ # writing out single-end reads if they are longer than the cutoff
 
-      print R2 $id_2;
-      print R2 "$seq_2\n";
-      print R2 $l3_2;
-      print R2 "$qual_2\n";
-      }
+                if ( length($seq_1) >= $length_read_1){ # read 1 is long enough
+                    print UNPAIRED1 $id_1;
+                    print UNPAIRED1 "$seq_1\n";
+                    print UNPAIRED1 $l3_1;
+                    print UNPAIRED1 "$qual_1\n";
+                    ++$read_1_printed;
+                }
 
-  }
+                if ( length($seq_2) >= $length_read_2){ # read 2 is long enough
+                    print UNPAIRED2 $id_2;
+                    print UNPAIRED2 "$seq_2\n";
+                    print UNPAIRED2 $l3_2;
+                    print UNPAIRED2 "$qual_2\n";
+                    ++$read_2_printed;
+                }
+
+            }
+        }
+        elsif( ($max_length and length$seq_1 > $max_length) or ($max_length and length$seq_2 > $max_length) )   {
+		    ++$one_seq_too_long;
+            # warn "At least one sequence was too long:\n$seq_1\n$seq_2\n"; sleep(1);
+            next; # sequence is too long
+		}
+        else{
+            print R1 $id_1;
+            print R1 "$seq_1\n";
+            print R1 $l3_1;
+            print R1 "$qual_1\n";
+
+            print R2 $id_2;
+            print R2 "$seq_2\n";
+            print R2 $l3_2;
+            print R2 "$qual_2\n";
+        }
+    }
 
 
-  my $percentage;
-  my $percentage_Ns;
+    my $percentage;
+    my $percentage_Ns;
+    my $percentage_too_long;
 
-  if ($count){
-    $percentage = sprintf("%.2f",$sequence_pairs_removed/$count*100);
-    $percentage_Ns = sprintf("%.2f",$too_many_N_pairs/$count*100);
-  }
-  else{
-      $percentage = 'N/A';
-      $percentage_Ns = 'N/A';
-  }
+    if ($count){
+        $percentage = sprintf("%.2f",$sequence_pairs_removed/$count*100);
+        $percentage_Ns = sprintf("%.2f",$too_many_N_pairs/$count*100);
+        $percentage_too_long = sprintf("%.2f",$one_seq_too_long/$count*100);
+    }
+    else{
+        $percentage = 'N/A';
+        $percentage_Ns = 'N/A';
+        $percentage_too_long = 'N/A';
+    }
 
-  warn "Total number of sequences analysed: $count\n\n";
-  warn "Number of sequence pairs removed because at least one read was shorter than the length cutoff ($length_cutoff bp): $sequence_pairs_removed ($percentage%)\n";
-  if (defined $maxn){
-      warn "Number of sequence pairs removed because at least one read contained more N(s) than the specified limit of $maxn: $too_many_N_pairs ($percentage_Ns%)\n";
-      print REPORT "Number of sequence pairs removed because at least one read contained more N(s) than the specified limit of $maxn: $too_many_N_pairs ($percentage_Ns%)\n";
-  }
 
-  print REPORT "Total number of sequences analysed for the sequence pair length validation: $count\n\n";
-  print REPORT "Number of sequence pairs removed because at least one read was shorter than the length cutoff ($length_cutoff bp): $sequence_pairs_removed ($percentage%)\n";
 
-  if ($keep){
-      warn "Number of unpaired read 1 reads printed: $read_1_printed\n";
-      warn "Number of unpaired read 2 reads printed: $read_2_printed\n";
-  }
+    warn "Total number of sequences analysed: $count\n\n";
+    warn "Number of sequence pairs removed because at least one read was shorter than the length cutoff ($length_cutoff bp): $sequence_pairs_removed ($percentage%)\n";
+    if (defined $maxn){
+        warn "Number of sequence pairs removed because at least one read contained more N(s) than the specified limit of $maxn: $too_many_N_pairs ($percentage_Ns%)\n";
+        print REPORT "Number of sequence pairs removed because at least one read contained more N(s) than the specified limit of $maxn: $too_many_N_pairs ($percentage_Ns%)\n";
+    }
+    if ($max_length){
+        warn "Sequence pairs removed as after trimming at least one read was longer than the maximum length cutoff of $max_length bp:\t$one_seq_too_long ($percentage_too_long%)\n";
+        print REPORT "Sequence pairs removed as after trimming at least one read was longer than the maximum length cutoff of $max_length bp:\t$one_seq_too_long ($percentage_too_long%)\n";
+    }
 
-  close R1 or die $!;
-  close R2 or die $!;
+    print REPORT "Total number of sequences analysed for the sequence pair length validation: $count\n\n";
+    print REPORT "Number of sequence pairs removed because at least one read was shorter than the length cutoff ($length_cutoff bp): $sequence_pairs_removed ($percentage%)\n";
+
+    if ($retain){
+        warn "Number of unpaired read 1 reads printed: $read_1_printed\n";
+        warn "Number of unpaired read 2 reads printed: $read_2_printed\n";
+    }
+
+    close R1 or die $!;
+    close R2 or die $!;
 
   if ($retain){
       close UNPAIRED1 or die $!;
@@ -2348,7 +2407,6 @@ sub process_commandline{
   my $phred33;
   my $phred64;
   my $fastqc_args;
-  my $trim;
   my $gzip;
   my $validate;
   my $retain;
@@ -2397,7 +2455,6 @@ sub process_commandline{
                  'phred33' => \$phred33,
                  'phred64' => \$phred64,
                  'fastqc_args=s' => \$fastqc_args,
-                 'trim1' => \$trim,
                  'gzip' => \$gzip,
                  'paired_end' => \$validate,
                  'retain_unpaired' => \$retain,
@@ -2418,7 +2475,7 @@ sub process_commandline{
                  'small_rna' => \$small_rna,
                  'path_to_cutadapt=s' => \$path_to_cutadapt,
                  'max_length=i' => \$max_length,
-                 'max_n=i'      => \$maxn,
+                 'max_n=s'      => \$maxn,
                  'trim-n'      => \$trimn,
                  'hardtrim5=i'      => \$hardtrim5,
                  'hardtrim3=i'      => \$hardtrim3,
@@ -2453,7 +2510,7 @@ sub process_commandline{
                                 [powered by Cutadapt]
                                   version $trimmer_version
 
-                               Last update: 15 01 2022
+                               Last update: $last_modified
 
 VERSION
     exit;
@@ -2779,26 +2836,26 @@ VERSION
         
     }
 
-  ### LENGTH CUTOFF
-  # this gets set right at the start after the adapter auto-detection has been concluded
+    ### LENGTH CUTOFF
+    # this gets set right at the start after the adapter auto-detection has been concluded
 
-  ### MAXIMUM LENGTH CUTOFF - this is intended for smallRNA-libraries to remove sequences that are longer than a certain cutoff and thus problably not small RNA species
-  if (defined $max_length){
-    if ($validate){
-      die "Maximum length filtering works currently only in single-end mode (which is more sensible for smallRNA-sequencing anyway...)\n\n";
+    ### MAXIMUM LENGTH CUTOFF - this is intended for smallRNA-libraries to remove sequences that are longer than a certain cutoff and thus problably not small RNA species
+    if (defined $max_length){
+        if ($validate){
+            warn "Maximum length filtering is currently only recommended in single-end mode (which is more sensible for smallRNA-sequencing anyway...), but it should be workinging in paired-end mode as well.\n\n";
+        }
+        warn "Maximum length cutoff set to >> $max_length bp <<; sequences longer than this threshold will be removed (only advised for smallRNA-trimming!)\n\n";
     }
-    warn "Maximum length cutoff set to >> $max_length bp <<; sequences longer than this threshold will be removed (only advised for smallRNA-trimming!)\n\n";
-  }
-  else{
-    $max_length = 0;
-  }
+    else{
+        $max_length = 0;
+    }
 
   ### files are supposed to be paired-end files
   if ($validate){
 
     # making sure that an even number of reads has been supplied
     unless ((scalar@ARGV)%2 == 0){
-      die "Please provide an even number of input files for paired-end FastQ trimming! Aborting ...\n";
+        die "Please provide an even number of input files for paired-end FastQ trimming! Aborting ...\n";
     }
 
     ### Ensuring pairs of R1 and R2 are not the very same file
@@ -2838,11 +2895,11 @@ VERSION
       }
     }
 
-    if ($retain){
-      $length_read_1 = 35 unless (defined $length_read_1);
-      $length_read_2 = 35 unless (defined $length_read_2);
+        if ($retain){
+        $length_read_1 = 35 unless (defined $length_read_1);
+        $length_read_2 = 35 unless (defined $length_read_2);
+        }
     }
-  }
 
 
     unless ($no_report_file){
@@ -2922,20 +2979,29 @@ VERSION
       }
   }
 
+    my $maxn_fraction;
 
-  if (defined $maxn){
-      unless ($maxn >= 0 and $maxn <= 100){
-      die "--max_n needs to be an integer between 0 and 100\nPlease respecify...\n\n";
-      }
-  }
+    if (defined $maxn){
+        if ($maxn > 0 and $maxn < 1){
+            warn "--max_n will be interpreted as a fraction of the read length ($maxn)";
+            $maxn_fraction = $maxn;
+        }
+        else{
+            # Converting number to integer
+            $maxn = int($maxn);
+            unless ($maxn >= 0 and $maxn <= 100){
+                die "--max_n needs to be an integer between 0 and 100.\nPlease respecify...\n\n";
+            }
+        }
+    }
 
-  my $trim_n;
-  if ($trimn){
-      $trim_n = '--trim-n';
-  }
-  else{
-      $trim_n = '';
-  }
+    my $trim_n;
+    if ($trimn){
+        $trim_n = '--trim-n';
+    }
+    else{
+        $trim_n = '';
+    }
 
 	### RRBS
 	if ($rrbs){
@@ -2963,15 +3029,15 @@ VERSION
       }
   }
 
-  ### Epigenetic Clock pre-processing
-  if ($clock){
-      if ($validate){ # already selected as paired-end mode
-      # Fine. Currently, the Clock protocol requires paired-end reads with dual UMIs
-      }
-      else{
-      die "\nOption --clock selected, but the processing is still set to single-end mode. The current clock protocol requires paired-end sequencing with dual unique molecular identifiers (UMIs) though. Please respecify...\n\n";
-      }
-  }
+    ### Epigenetic Clock pre-processing
+    if ($clock){
+        if ($validate){ # already selected as paired-end mode
+        # Fine. Currently, the Clock protocol requires paired-end reads with dual UMIs
+        }
+        else{
+        die "\nOption --clock selected, but the processing is still set to single-end mode. The current clock protocol requires paired-end sequencing with dual unique molecular identifiers (UMIs) though. Please respecify...\n\n";
+        }
+    }
 
     if (defined $basename){
         warn "Using user-specified basename (>>$basename<<) instead of deriving the filename from the input file(s)\n";
@@ -3093,6 +3159,15 @@ trim_galore [options] <filename(s)>
                         options, else '--nextera' is the default). A single base
                         may also be given as e.g. -a A{10}, to be expanded to -a AAAAAAAAAA.
 
+                        At a special request, multiple adapters can also be specified like so:
+                        -a  " AGCTCCCG -a TTTCATTATAT -a TTTATTCGGATTTAT"
+                        -a2 " AGCTAGCG -a TCTCTTATAT -a TTTCGGATTTAT", or so:
+                        -a "file:../multiple_adapters.fa"
+                        -a2 "file:../different_adapters.fa"
+                        Potentially in conjucntion with the parameter "-n 3" to trim all adapters. Please note
+                        that this is NOT needed for standard trimming! 
+                        More Information here: https://github.com/FelixKrueger/TrimGalore/issues/86
+
 -a2/--adapter2 <STRING> Optional adapter sequence to be trimmed off read 2 of paired-end files. This
                         option requires '--paired' to be specified as well. If the libraries to be trimmed
                         are smallRNA then a2 will be set to the Illumina small RNA 5' adapter automatically
@@ -3150,9 +3225,10 @@ trim_galore [options] <filename(s)>
                         If only one read became too short there is the possibility of keeping such
                         unpaired single-end reads (see --retain_unpaired). Default pair-cutoff: 20 bp.
 
---max_n COUNT           The total number of Ns (as integer) a read may contain before it will be removed altogether.
+--max_n COUNT           The total number of Ns a read may contain before it will be removed altogether.
                         In a paired-end setting, either read exceeding this limit will result in the entire
-                        pair being removed from the trimmed output files.
+                        pair being removed from the trimmed output files. If COUNT is a number between 0 and 1,
+                        it is interpreted as a fraction of the read length.
 
 --trim-n                Removes Ns from either side of the read. This option does currently not work in RRBS mode.
 
@@ -3381,15 +3457,6 @@ Paired-end specific options:
                         Trim Galore! expects paired-end files to be supplied in a pairwise fashion, e.g.
                         file1_1.fq file1_2.fq SRR2_1.fq.gz SRR2_2.fq.gz ... .
 
--t/--trim1              Trims 1 bp off every read from its 3' end. This may be needed for FastQ files that
-                        are to be aligned as paired-end data with Bowtie. This is because Bowtie (1) regards
-                        alignments like this:
-
-                          R1 --------------------------->     or this:    ----------------------->  R1
-                          R2 <---------------------------                       <-----------------  R2
-
-                        as invalid (whenever a start/end coordinate is contained within the other read).
-                        NOTE: If you are planning to use Bowtie2, BWA etc. you don't need to specify this option.
 
 --retain_unpaired       If only one of the two paired-end reads became too short, the longer
                         read will be written to either '.unpaired_1.fq' or '.unpaired_2.fq'
@@ -3404,7 +3471,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 15 January 2022.
+Last modified on 28 Jan 2023.
 
 HELP
   exit;
