@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-22, Felix Krueger (fkrueger@altoslabs.com)
+## This program is Copyright (C) 2012-23, Felix Krueger (fkrueger@altoslabs.com)
 ## Edited by Frankie James (github.com/fjames003) for multi-core support
 
 ## This program is free software: you can redistribute it and/or modify
@@ -27,13 +27,13 @@ use Cwd;
 ## This script is taking in FastQ sequences and trims them using Cutadapt
 
 ## modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT)
-## last modified on 12 Aug 2022 to allow --max_n to be a fraction
+## modified on 12 Aug 2022 to allow --max_n to be a fraction
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.8dev';
-my $last_modified = "03 10 2022";
+my $trimmer_version = '0.6.8';
+my $last_modified = "28 01 2023";
 
 my $cutadapt_version;
 my $python_version;
