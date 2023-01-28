@@ -17,14 +17,19 @@ cutadapt --version
 # Check that FastQC is installed
 fastqc -v
 # Install Trim Galore
-curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.6.6.tar.gz -o trim_galore.tar.gz
+curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.6.7.tar.gz -o trim_galore.tar.gz
 tar xvzf trim_galore.tar.gz
 # Run Trim Galore
-~/TrimGalore-0.6.6/trim_galore
+~/TrimGalore-0.6.7/trim_galore
+```
+
+If you are using Bioconda:
+```
+conda install trim-galore
 ```
 
 ## Documentation
 For instructions on how to use _Trim Galore_, please see the [User Guide](Docs/Trim_Galore_User_Guide.md).
 
 ## Credits
-_Trim Galore_ was developed at The Babraham Institute by [@FelixKrueger](https://github.com/FelixKrueger/). You can find it's project page here: [bioinformatics.babraham.ac.uk](http://www.bioinformatics.babraham.ac.uk/projects/trim_galore/)
+_Trim Galore_ was developed at The Babraham Institute by [@FelixKrueger](https://github.com/FelixKrueger/), now part of [Altos Labs](https://altoslabs.com/).

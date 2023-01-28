@@ -38,7 +38,9 @@ my $last_modified = "03 10 2022";
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+
+my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+
 my $report_message; # stores result of adapter auto-detection
 
 my @filenames = @ARGV;
@@ -110,13 +112,13 @@ sub implicon_umi{
     ### INPUT FILES
     my ($in1,$in2,$umi_length) = @_;
     if ($in1 =~ /\.gz$/){
-		open ($in1_fh,"$compression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
+		open ($in1_fh,"$decompression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
     }
     else{
 		open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
     }
     if ($in2 =~ /\.gz$/){
-		open ($in2_fh,"$compression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
+		open ($in2_fh,"$decompression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
     }
     else{
 		open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
@@ -262,13 +264,13 @@ sub clockwork{
     ### INPUT FILES
     my ($in1,$in2) = @_;
     if ($in1 =~ /\.gz$/){
-		open ($in1_fh,"$compression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
+		open ($in1_fh,"$decompression_path -d -c $in1 |") or die "Failed to read from file $in1: $!";
     }
     else{
 		open ($in1_fh,$in1) or die "Failed to read from file $in1: $!";
     }
     if ($in2 =~ /\.gz$/){
-		open ($in2_fh,"$compression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
+		open ($in2_fh,"$decompression_path -d -c $in2 |") or die "Failed to read from file $in2: $!";
     }
     else{
 		open ($in2_fh,$in2) or die "Failed to read from file $in2: $!";
@@ -947,7 +949,7 @@ sub trim{
 		open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
       
 		if ($filename =~ /\.gz$/){
-			open (IN,"gunzip -c $filename |") or die $!; # original, untrimmed file
+			open (IN,"$decompression_path -d -c $filename |") or die $!; # original, untrimmed file
 		}
 		else{
 			open (IN,$filename) or die $!; # original, untrimmed file
@@ -1157,7 +1159,7 @@ sub trim{
 
 		# This is the Illumina adapter trimmed file
 		if ($temp =~ /\.gz$/){
-			open (QUAL,"gunzip -c $output_dir$temp |") or die $!; # quality trimmed file
+			open (QUAL,"$decompression_path -d -c $output_dir$temp |") or die $!; # quality trimmed file
 		}
 		else{
 			open (QUAL,"$output_dir$temp") or die $!; # quality trimmed file
@@ -1585,10 +1587,10 @@ sub hardtrim_to_5prime_end{
     my $hardtrim_5; # filehandle
 
     if ($filename =~ /gz$/){
-        open ($in,"$compression_path -d -c $filename |") or die "Couldn't read from file $!";
+      open ($in,"$decompression_path -d -c $filename |") or die "Couldn't read from file $!";
     }
     else{
-        open ($in,$filename) or die "Couldn't read from file $!";
+      open ($in,$filename) or die "Couldn't read from file $!";
     }
 
     ### OUTPUT FILE
@@ -1663,7 +1665,7 @@ sub hardtrim_to_3prime_end{
     my $hardtrim_3; # filehandle
 
     if ($filename =~ /gz$/){
-    open ($in,"$compression_path -d -c $filename |") or die "Couldn't read from file $!";
+    open ($in,"$decompression_path -d -c $filename |") or die "Couldn't read from file $!";
     }
     else{
     open ($in,$filename) or die "Couldn't read from file $!";
@@ -1742,19 +1744,21 @@ sub validate_paired_end_files{
     
     my $one_seq_too_long = 0;
 
+
     if ($file_1 =~ /\.gz$/){
-        open (IN1,"$compression_path -d -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
+        open (IN1,"$decompression_path -d -c $output_dir$file_1 |") or die "Couldn't read from file $file_1: $!\n";
     }
     else{
         open (IN1, "$output_dir$file_1") or die "Couldn't read from file $file_1: $!\n";
     }
 
     if ($file_2 =~ /\.gz$/){
-        open (IN2,"$compression_path -d -c $output_dir$file_2 |") or die "Couldn't read from file $file_2: $!\n";
+        open (IN2,"$decompression_path -d -c $output_dir$file_2 |") or die "Couldn't read from file $file_2: $!\n";
     }
     else{
         open (IN2, "$output_dir$file_2") or die "Couldn't read from file $file_2: $!\n";
     }
+
 
     warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
 
@@ -2094,7 +2098,7 @@ sub file_sanity_check{
 
   my $file = shift;
   if ($file =~ /gz$/){
-      open (SANITY,"$compression_path -d -c $file |") or die "Failed to read from file '$file' to perform sanity check: $!\n";
+      open (SANITY,"$decompression_path -d -c $file |") or die "Failed to read from file '$file' to perform sanity check: $!\n";
   }
   else{
       open (SANITY,$file) or die "Failed to read from file '$file' to perform sanity check: $!\n";
@@ -2130,7 +2134,7 @@ sub autodetect_adapter_type{
   warn "Attempting to auto-detect adapter type from the first 1 million sequences of the first file (>> $ARGV[0] <<)\n\n";
 
   if ($ARGV[0] =~ /gz$/){
-    open (AUTODETECT,"$compression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
+    open (AUTODETECT,"$decompression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
   }
   else{
     open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
@@ -2302,7 +2306,7 @@ sub autodetect_polyA_type{
     warn "Attempting to auto-detect PolyA type from the first 1 million sequences of the first file (>> $ARGV[0] <<)\n\n";
 
     if ($ARGV[0] =~ /gz$/){
-    open (AUTODETECT,"$compression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
+    open (AUTODETECT,"$decompression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
     }
     else{
     open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
@@ -2528,7 +2532,7 @@ VERSION
 		elsif($cores == 1){
 			warn "Proceeding with single-core trimming (user-defined)\n";
 		}
-		elsif($cores >= 8){
+		elsif($cores > 8){
 			warn "Using an excessive number of cores has a diminishing return! It is recommended not to exceed 8 cores per trimming process (you asked for $cores cores). Please consider re-specifying\n"; sleep(2);
 		}
 	}
@@ -2631,6 +2635,16 @@ VERSION
 			if ($pigz_return == 0) {
 				warn "Parallel gzip (pigz) detected. Proceeding with multicore (de)compression using $cores cores\n\n";
 				$compression_path = "pigz -p $cores";
+
+				if ($cores > 4) {
+					# Parallel gzip (pigz) always uses a single thread (the main thread) for decompression,
+					# but will create three other threads for reading, writing, and check calculation,
+					# which can speed up decompression under some circumstances.
+					$decompression_path = "pigz -p 4";
+				}
+				else {
+                                    $decompression_path = "pigz -p $cores";
+                                }
 			} 
 			else {
 				warn "Proceeding with 'gzip' for compression. PLEASE NOTE: Using multi-cores for trimming with 'gzip' only has only very limited effect! (see here: https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103)\n";
@@ -2645,6 +2659,19 @@ VERSION
 	unless (defined $compression_path){
 		$compression_path = "gzip"; # fall-back option
 	}
+
+	### Test if igzip is installed
+	my $igzip_return = system ("igzip --version 2> /dev/null");
+	# warn "IGZIP returned: $igzip_return\n";
+	if ($igzip_return == 0) {
+		warn "igzip detected. Using igzip for decompressing\n\n";
+		$decompression_path = "igzip";
+	}
+	else {
+		warn "Proceeding with '$decompression_path' for decompression.";
+		warn "To decrease CPU usage of decompression, please install 'igzip' and run again\n\n";
+	}
+
 
 	### SUPRESS WARNINGS
 	if (defined $suppress_warn){
@@ -3062,7 +3089,7 @@ VERSION
         $umi_from_r2 = 8;
     }
 
-    return ($compression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
+    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
 }
 
 sub Ncounter{
@@ -3381,8 +3408,8 @@ RRBS-specific options (MspI digested material):
                         libraries will in addition have the first 2 bp removed from the 5' end (by setting
                         '--clip_r2 2'). This is to avoid using artificial methylation calls from the filled-in
                         cytosine positions close to the 3' MspI site in sequenced fragments.
-                        This option is not recommended for users of the NuGEN ovation RRBS System 1-16
-                        kit (see below).
+                        This option is not recommended for users of the Tecan Ovation RRBS Methyl-Seq with TrueMethyl
+                        oxBS 1-16 kit (see below).
 
 --non_directional       Selecting this option for non-directional RRBS libraries will screen
                         quality-trimmed sequences for 'CAA' or 'CGA' at the start of the read
@@ -3398,9 +3425,9 @@ RRBS-specific options (MspI digested material):
                         for poor qualities separately.
 
 
-Note for RRBS using the NuGEN Ovation RRBS System 1-16 kit:
+Note for RRBS using the Tecan Ovation RRBS Methyl-Seq with TrueMethyl oxBS 1-16 kit:
 
-Owing to the fact that the NuGEN Ovation kit attaches a varying number of nucleotides (0-3) after each MspI
+Owing to the fact that the Tecan Ovation RRBS kit attaches a varying number of nucleotides (0-3) after each MspI
 site Trim Galore should be run WITHOUT the option --rrbs. This trimming is accomplished in a subsequent
 diversity trimming step afterwards (see their manual).
 
@@ -3444,7 +3471,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 12 Aug 2022.
+Last modified on 28 Jan 2023.
 
 HELP
   exit;
