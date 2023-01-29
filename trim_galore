@@ -32,14 +32,14 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.8';
-my $last_modified = "28 01 2023";
+my $trimmer_version = '0.6.9';
+my $last_modified = "29 01 2023";
 
 my $cutadapt_version;
 my $python_version;
 
 
-my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
 
 my $report_message; # stores result of adapter auto-detection
 
@@ -3089,7 +3089,7 @@ VERSION
         $umi_from_r2 = 8;
     }
 
-    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
+    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
 }
 
 sub Ncounter{
@@ -3471,7 +3471,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 28 Jan 2023.
+Last modified on 29 Jan 2023.
 
 HELP
   exit;
