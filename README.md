@@ -17,10 +17,10 @@ cutadapt --version
 # Check that FastQC is installed
 fastqc -v
 # Install Trim Galore
-curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.6.7.tar.gz -o trim_galore.tar.gz
+curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.6.9.tar.gz -o trim_galore.tar.gz
 tar xvzf trim_galore.tar.gz
 # Run Trim Galore
-~/TrimGalore-0.6.7/trim_galore
+~/TrimGalore-0.6.9/trim_galore
 ```
 
 If you are using Bioconda:
