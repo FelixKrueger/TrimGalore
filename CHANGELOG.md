@@ -1,8 +1,8 @@
 # Trim Galore Changelog
-### Version 0.6.8dev
+
+### Version 0.6.8 (Release on 28 Jan 2023)
 
 - Added new option `--stranded_illumina` to allow trimming of the adapter sequence `ACTGTCTCTTATA` (whick looks like the Nextera sequence but with an additional A from A-tailing). See also here: https://github.com/FelixKrueger/TrimGalore/issues/127.
-
 
 - Trim Galore will now preferentially use `igzip` for decompression, if installed. [More info here](https://github.com/FelixKrueger/TrimGalore/pull/149)
 
