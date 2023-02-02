@@ -32,14 +32,15 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.9';
-my $last_modified = "29 01 2023";
+my $trimmer_version = '0.6.10';
+my $last_modified = "02 02 2023";
 
 my $cutadapt_version;
 my $python_version;
 
 
 my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+
 
 my $report_message; # stores result of adapter auto-detection
 
@@ -2306,10 +2307,10 @@ sub autodetect_polyA_type{
     warn "Attempting to auto-detect PolyA type from the first 1 million sequences of the first file (>> $ARGV[0] <<)\n\n";
 
     if ($ARGV[0] =~ /gz$/){
-    open (AUTODETECT,"$decompression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
+        open (AUTODETECT,"$decompression_path -d -c $ARGV[0] |") or die "Failed to read from file $ARGV[0]\n";
     }
     else{
-    open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
+        open (AUTODETECT,$ARGV[0]) or die "Failed to read from file $ARGV[0]\n";
     }
 
   my %adapters;
@@ -2392,42 +2393,42 @@ sub autodetect_polyA_type{
 ###########################################################################
 
 sub process_commandline{
-  my $help;
-  my $quality;
-  my $adapter;
-  my $adapter2;
-  my $stringency;
-  my $report;
-  my $version;
-  my $rrbs;
-  my $length_cutoff;
-  my $keep;
-  my $fastqc;
-  my $non_directional;
-  my $phred33;
-  my $phred64;
-  my $fastqc_args;
-  my $gzip;
-  my $validate;
-  my $retain;
-  my $length_read_1;
-  my $length_read_2;
-  my $error_rate;
-  my $output_dir;
-  my $no_report_file;
-  my $suppress_warn;
-  my $dont_gzip;
-  my $clip_r1;
-  my $clip_r2;
-  my $three_prime_clip_r1;
-  my $three_prime_clip_r2;
-  my $nextera;
-  my $stranded_illumina; # added on 15 Jan 2022; https://support.illumina.com/bulletins/2020/06/trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo.html
-  my $small_rna;
-  my $illumina;
-  my $path_to_cutadapt;
-  my $max_length;
-  my $maxn;
+    my $help;
+    my $quality;
+    my $adapter;
+    my $adapter2;
+    my $stringency;
+    my $report;
+    my $version;
+    my $rrbs;
+    my $length_cutoff;
+    my $keep;
+    my $fastqc;
+    my $non_directional;
+    my $phred33;
+    my $phred64;
+    my $fastqc_args;
+    my $gzip;
+    my $validate;
+    my $retain;
+    my $length_read_1;
+    my $length_read_2;
+    my $error_rate;
+    my $output_dir;
+    my $no_report_file;
+    my $suppress_warn;
+    my $dont_gzip;
+    my $clip_r1;
+    my $clip_r2;
+    my $three_prime_clip_r1;
+    my $three_prime_clip_r2;
+    my $nextera;
+    my $stranded_illumina; # added on 15 Jan 2022; https://support.illumina.com/bulletins/2020/06/trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo.html
+    my $small_rna;
+    my $illumina;
+    my $path_to_cutadapt;
+    my $max_length;
+    my $maxn;
     my $trimn;
     my $hardtrim5;
     my $hardtrim3;
@@ -2437,6 +2438,7 @@ sub process_commandline{
     my $basename;
     my $cores;
     my $compression_path;
+    my $decompression_path = 'gzip'; # default
     my $consider_already_trimmed;
     my $implicon;
 
@@ -2643,8 +2645,8 @@ VERSION
 					$decompression_path = "pigz -p 4";
 				}
 				else {
-                                    $decompression_path = "pigz -p $cores";
-                                }
+                    $decompression_path = "pigz -p $cores";
+                }
 			} 
 			else {
 				warn "Proceeding with 'gzip' for compression. PLEASE NOTE: Using multi-cores for trimming with 'gzip' only has only very limited effect! (see here: https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103)\n";
@@ -2668,7 +2670,7 @@ VERSION
 		$decompression_path = "igzip";
 	}
 	else {
-		warn "Proceeding with '$decompression_path' for decompression.";
+		warn "Proceeding with '$decompression_path' for decompression\n";
 		warn "To decrease CPU usage of decompression, please install 'igzip' and run again\n\n";
 	}
 
@@ -3471,7 +3473,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 29 Jan 2023.
+Last modified on 02 02 2023.
 
 HELP
   exit;
