@@ -1,5 +1,13 @@
 # Trim Galore Changelog
 
+### Version 0.6.10 (Release on 02 Feb 2023)
+
+- Fixed a missing default value of `gzip` as the default decompression path (see [here](https://github.com/FelixKrueger/TrimGalore/commit/a3c6a64ae71657f1a282e01134293e424177a7d5)).
+
+### Version 0.6.9 (Release on 29 Jan 2023)
+
+- Fixed a decalaration bug for `maxn_fraction` which had crept in during merging of different branches (see [here](https://github.com/FelixKrueger/TrimGalore/commit/cf9a9d97b723d3829dd902f1229d9c9b7cff8ba0)).
+
 ### Version 0.6.8 (Release on 28 Jan 2023)
 
 - Added new option `--stranded_illumina` to allow trimming of the adapter sequence `ACTGTCTCTTATA` (whick looks like the Nextera sequence but with an additional A from A-tailing). See also here: https://github.com/FelixKrueger/TrimGalore/issues/127.
