@@ -32,14 +32,14 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.10';
+my $trimmer_version = '0.6.10dev';
 my $last_modified = "02 02 2023";
 
 my $cutadapt_version;
 my $python_version;
 
 
-my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2) = process_commandline();
+my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename) = process_commandline();
 
 
 my $report_message; # stores result of adapter auto-detection
@@ -919,6 +919,7 @@ sub trim{
 	my $rrbs_trimmed_start = 0;
 	my $CAA = 0;
 	my $CGA = 0;
+    my $clipped_sequence; # this will be used to store the 5' or 3' clipped sequence trimmed sequence for option --rename
   
 	my $pid;
   
@@ -1057,20 +1058,37 @@ sub trim{
 				print OUT "$l1$seq\n$l3$qual\n";
 			}
 			else{ # single end
-	      
+
 				if ($clip_r1){
 					if (length $seq > $clip_r1){  # sequences that are already too short won't be clipped again
-						$seq = substr($seq,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
+						
+                        if ($rename) {
+                            $clipped_sequence = substr($seq,0,$clip_r1); # storing the clipped sequence
+                            $l1 =~ s/\r|\n//g; # cross-platform line ending trimming
+                            $l1 .= ":clip5:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                            # print "$l1$seq\n$l3$qual\n";
+                        }
+					    
+                        $seq = substr($seq,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
 						$qual = substr($qual,$clip_r1);
-					}
+                        # print "$l1$seq\n$l3$qual\n"; sleep(1);
+                    }    
+                        
 				}
 	      
 				if ($three_prime_clip_r1){
 					if (length $seq > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
-					# warn	 "seq/qual before/after trimming:\n$seq\n$qual\n";
+					    # warn	 "seq/qual before/after trimming:\n$l1$seq\n$qual\n";
+                        if ($rename) {
+                            $clipped_sequence = substr($seq,-$three_prime_clip_r1,$three_prime_clip_r1); # storing the clipped sequence
+                            $l1 =~ s/\r|\n//g;                     # cross-platform line ending trimming
+                            $l1 .= ":clip3:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                            # warn"$l1$seq\n$l3$qual\n";
+                        }
+
 						$seq = substr($seq,0,(length($seq) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
 						$qual = substr($qual,0,(length($qual) - $three_prime_clip_r1 ));
-						# warn "$seq\n$qual\n";
+						# warn "$l1$seq\n$l3$qual\n"; sleep(1);
 					}
 				}
 	      
@@ -1630,6 +1648,10 @@ sub hardtrim_to_5prime_end{
 
     my $count = 0;
 
+    my $trimmed_sequence;
+    my $clipped_sequence; # storing removed sequence to add to readID (with --rename)
+    my $trimmed_quality_score; 
+
     while (1){
         my $identifier = <$in>;
         my $sequence = <$in>;
@@ -1644,9 +1666,15 @@ sub hardtrim_to_5prime_end{
         $identifier    =~ s/\r|\n//g;
         $identifier2   =~ s/\r|\n//g;
 
-        my $trimmed_sequence = substr($sequence,0,$hardtrim5);           # from the start to the $hardtrim5
-        my $trimmed_quality_score = substr($quality_score,0,$hardtrim5); # from the start to the $hardtrim5
-
+        $trimmed_sequence = substr($sequence,0,$hardtrim5);           # from the start to the $hardtrim5
+        # print join ("\n",$identifier,$sequence,$identifier2,$quality_score),"\n";
+        if ($rename) {
+            $clipped_sequence = substr($sequence,$hardtrim5); # from the $hardtrim5 to the end
+            $identifier .= ":clip5:$clipped_sequence";  # adding the clipped sequence to the readID
+        }
+        $trimmed_quality_score = substr($quality_score,0,$hardtrim5); # from the start to the $hardtrim5
+        # print join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n"; sleep(1);
+        
         print {$hardtrim_5} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
 
     }
@@ -1666,10 +1694,10 @@ sub hardtrim_to_3prime_end{
     my $hardtrim_3; # filehandle
 
     if ($filename =~ /gz$/){
-    open ($in,"$decompression_path -d -c $filename |") or die "Couldn't read from file $!";
+        open ($in,"$decompression_path -d -c $filename |") or die "Couldn't read from file $!";
     }
     else{
-    open ($in,$filename) or die "Couldn't read from file $!";
+        open ($in,$filename) or die "Couldn't read from file $!";
     }
 
     ### OUTPUT FILE
@@ -1693,39 +1721,50 @@ sub hardtrim_to_3prime_end{
     }
 
     if ($gzip or $filename =~ /\.gz$/){
-    if ($dont_gzip){
-        open ($hardtrim_3,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+        if ($dont_gzip){
+            open ($hardtrim_3,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n"; # don't need to gzip intermediate file
+        }
+        else{
+            $output_filename .= '.gz';
+            open ($hardtrim_3,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
+        }
     }
     else{
-        $output_filename .= '.gz';
-        open ($hardtrim_3,"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't write to '$output_filename': $!\n";
-    }
-    }
-    else{
-    open ($hardtrim_3,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
+        open ($hardtrim_3,'>',$output_dir.$output_filename) or die "Can't open '$output_filename': $!\n";
     }
     warn "Writing trimmed version (using the last $hardtrim3 bp only) of the input file '$filename' to '$output_filename'\n";
 
     my $count = 0;
 
     while (1){
-    my $identifier = <$in>;
-    my $sequence = <$in>;
-    my $identifier2 = <$in>;
-    my $quality_score = <$in>;
+        my $identifier = <$in>;
+        my $sequence = <$in>;
+        my $identifier2 = <$in>;
+        my $quality_score = <$in>;
 
-    last unless ($identifier and $sequence and $identifier2 and $quality_score);
-    ++$count;
+        last unless ($identifier and $sequence and $identifier2 and $quality_score);
+        ++$count;
 
-    $sequence      =~ s/\r|\n//g; # cross-platform line ending trimming
-    $quality_score =~ s/\r|\n//g;
-    $identifier    =~ s/\r|\n//g;
-    $identifier2   =~ s/\r|\n//g;
+        $sequence      =~ s/\r|\n//g; # cross-platform line ending trimming
+        $quality_score =~ s/\r|\n//g;
+        $identifier    =~ s/\r|\n//g;
+        $identifier2   =~ s/\r|\n//g;
 
-    my $trimmed_sequence = substr($sequence,-$hardtrim3,$hardtrim3);           # $hardtrim3 bp from the end
-    my $trimmed_quality_score = substr($quality_score,-$hardtrim3,$hardtrim3); # $hardtrim3 bp from the end
+        my $trimmed_sequence;
+        my $clipped_sequence; # storing removed sequence to add to readID (with --rename)
+        my $trimmed_quality_score;
+        
+        $trimmed_sequence = substr($sequence,-$hardtrim3,$hardtrim3);           # $hardtrim3 bp from the end
+        $trimmed_quality_score = substr($quality_score,-$hardtrim3,$hardtrim3); # $hardtrim3 bp from the end
 
-    print {$hardtrim_3} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
+        # print join ("\n",$identifier,$sequence,$identifier2,$quality_score),"\n";
+        if ($rename) {
+            $clipped_sequence = substr($sequence,0,length($sequence)-$hardtrim3); # from the start to beginning of $hardtrim3
+            $identifier .= ":clip3:$clipped_sequence";  # adding the clipped sequence to the readID
+        }
+        # print join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n"; sleep(1);
+            
+        print {$hardtrim_3} join ("\n",$identifier,$trimmed_sequence,$identifier2,$trimmed_quality_score),"\n";
 
     }
     close $in or warn "Failed to close filehandle for $filename";
@@ -2441,6 +2480,7 @@ sub process_commandline{
     my $decompression_path = 'gzip'; # default
     my $consider_already_trimmed;
     my $implicon;
+    my $rename;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2488,6 +2528,7 @@ sub process_commandline{
                  'j|cores=i' => \$cores,
                  'consider_already_trimmed=i' => \$consider_already_trimmed,
                  'implicon'  => \$implicon,
+                 'rename'  => \$rename,
       );
 
 	### EXIT ON ERROR if there were errors with any of the supplied options
@@ -2951,35 +2992,35 @@ VERSION
     chdir $parent_dir or die "Failed to move to $parent_dir\n";
 
 
-  ### Trimming at the 5' end
-  if (defined $clip_r2){ # trimming 5' bases of read 2
-      die "Clipping the 5' end of read 2 is only allowed for paired-end files (--paired)\n" unless ($validate);
-  }
+    ### Trimming at the 5' end
+    if (defined $clip_r2){ # trimming 5' bases of read 2
+        die "Clipping the 5' end of read 2 is only allowed for paired-end files (--paired)\n" unless ($validate);
+    }
 
-  if (defined $clip_r1){ # trimming 5' bases of read 1
-      unless ($clip_r1 > 0 and $clip_r1 < 100){
-      die "The 5' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
-      }
-  }
+    if (defined $clip_r1){ # trimming 5' bases of read 1
+        unless ($clip_r1 > 0 and $clip_r1 < 100){
+            die "The 5' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
+        }
+    }
 
-  if (defined $clip_r2){ # trimming 5' bases of read 2
-      unless ($clip_r2 > 0 and $clip_r2 < 100){
-      die "The 5' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
-      }
-  }
+    if (defined $clip_r2){ # trimming 5' bases of read 2
+        unless ($clip_r2 > 0 and $clip_r2 < 100){
+            die "The 5' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
+        }
+    }
 
-  ### Trimming at the 3' end
-  if (defined $three_prime_clip_r1){ # trimming 3' bases of read 1
-      unless ($three_prime_clip_r1 > 0 and $three_prime_clip_r1 < 100){
-      die "The 3' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
-      }
-  }
+    ### Trimming at the 3' end
+    if (defined $three_prime_clip_r1){ # trimming 3' bases of read 1
+        unless ($three_prime_clip_r1 > 0 and $three_prime_clip_r1 < 100){
+        die "The 3' clipping value for read 1 should have a sensible value (> 0 and < read length)\n\n";
+        }
+    }
 
-  if (defined $three_prime_clip_r2){ # trimming 3' bases of read 2
-      unless ($three_prime_clip_r2 > 0 and $three_prime_clip_r2 < 100){
-      die "The 3' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
-      }
-  }
+    if (defined $three_prime_clip_r2){ # trimming 3' bases of read 2
+        unless ($three_prime_clip_r2 > 0 and $three_prime_clip_r2 < 100){
+        die "The 3' clipping value for read 2 should have a sensible value (> 0 and < read length)\n\n";
+        }
+    }
 
     my $maxn_fraction;
 
@@ -3091,7 +3132,37 @@ VERSION
         $umi_from_r2 = 8;
     }
 
-    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2);
+    if ($rename){
+        # Making sure using this option makes sense
+        my $is_sensible;
+        if ($validate){
+            # Paired-end mode
+            if ( ($clip_r1 && $clip_r1 > 0) or ($clip_r2 && $clip_r2 > 0) or ($three_prime_clip_r1 && $three_prime_clip_r1 > 0) or ($three_prime_clip_r2 && $three_prime_clip_r2 > 0) or ($hardtrim5 && $hardtrim5 > 0) or ($hardtrim3 && $hardtrim3 > 0) ){
+                $is_sensible = 1;
+            }
+            else{
+                $is_sensible = 0;
+            }
+        }
+        else{
+            # Single-end mode
+            if ( ($clip_r1 && $clip_r1 > 0) or ($three_prime_clip_r1 && $three_prime_clip_r1 > 0) or ($hardtrim5 && $hardtrim5 > 0) or ($hardtrim3 && $hardtrim3 > 0) ){
+                $is_sensible = 1;
+            }
+            else{
+                $is_sensible = 0;
+            }
+        }
+        if ($is_sensible){
+            warn "Renaming reads selected. Read names will be changed to the following format: >> readname:clip5:GATC:clip3:TAAATC << (or a suitable variation thereof)\n";
+        }
+        else{
+            warn "\nOption --rename selected, but no appropriate trimming selected (clip, three-prime-clip, or hardtrim). Please change if desirable...\n\n";
+            sleep(3);
+        }
+    }
+
+    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename);
 }
 
 sub Ncounter{
@@ -3136,7 +3207,7 @@ trim_galore [options] <filename(s)>
                         trimmed in a single pass. The algorithm is the same as the one used by BWA
                         (Subtract INT from all qualities; compute partial sums from all indices
                         to the end of the sequence; cut sequence at the index at which the sum is
-                        minimal). Default Phred score: 20.
+                        minimal). Default Phred score: 20
 
 --phred33               Instructs Cutadapt to use ASCII+33 quality scores as Phred scores
                         (Sanger/Illumina 1.9+ encoding) for quality trimming. Default: ON.
@@ -3220,7 +3291,7 @@ trim_galore [options] <filename(s)>
 
 --length <INT>          Discard reads that became shorter than length INT because of either
                         quality or adapter trimming. A value of '0' effectively disables
-                        this behaviour. Default: 20 bp.
+                        this behaviour. Default: 20 bp
 
                         For paired-end files, both reads of a read-pair need to be longer than
                         <INT> bp to be printed out to validated paired-end files (see option --paired).
@@ -3243,24 +3314,27 @@ trim_galore [options] <filename(s)>
 
 --clip_R1 <int>         Instructs Trim Galore to remove <int> bp from the 5' end of read 1 (or single-end
                         reads). This may be useful if the qualities were very poor, or if there is some
-                        sort of unwanted bias at the 5' end. Default: OFF.
+                        sort of unwanted bias at the 5' end. Default: OFF
 
 --clip_R2 <int>         Instructs Trim Galore to remove <int> bp from the 5' end of read 2 (paired-end reads
                         only). This may be useful if the qualities were very poor, or if there is some sort
                         of unwanted bias at the 5' end. For paired-end BS-Seq, it is recommended to remove
                         the first few bp because the end-repair reaction may introduce a bias towards low
                         methylation. Please refer to the M-bias plot section in the Bismark User Guide for
-                        some examples. Default: OFF.
+                        some examples. Default: OFF
 
 --three_prime_clip_R1 <int>     Instructs Trim Galore to remove <int> bp from the 3' end of read 1 (or single-end
                         reads) AFTER adapter/quality trimming has been performed. This may remove some unwanted
                         bias from the 3' end that is not directly related to adapter sequence or basecall quality.
-                        Default: OFF.
+                        Default: OFF
 
 --three_prime_clip_R2 <int>     Instructs Trim Galore to remove <int> bp from the 3' end of read 2 AFTER
                         adapter/quality trimming has been performed. This may remove some unwanted bias from
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
+
+--rename                This option adds the bases clipped via the options `--clip` and `--three_prime_clip` to the
+                        read ID. This can be useful for UMI handling etc. Default: OFF
 
 --2colour/--nextseq INT This enables the option '--nextseq-trim=3'CUTOFF' within Cutadapt, which will set a quality
                         cutoff (that is normally given with -q instead), but qualities of G bases are ignored.
@@ -3463,15 +3537,15 @@ Paired-end specific options:
 --retain_unpaired       If only one of the two paired-end reads became too short, the longer
                         read will be written to either '.unpaired_1.fq' or '.unpaired_2.fq'
                         output files. The length cutoff for unpaired single-end reads is
-                        governed by the parameters -r1/--length_1 and -r2/--length_2. Default: OFF.
+                        governed by the parameters -r1/--length_1 and -r2/--length_2. Default: OFF
 
 -r1/--length_1 <INT>    Unpaired single-end read length cutoff needed for read 1 to be written to
                         '.unpaired_1.fq' output file. These reads may be mapped in single-end mode.
-                        Default: 35 bp.
+                        Default: 35 bp
 
 -r2/--length_2 <INT>    Unpaired single-end read length cutoff needed for read 2 to be written to
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
-                        Default: 35 bp.
+                        Default: 35 bp
 
 Last modified on 02 02 2023.
 
