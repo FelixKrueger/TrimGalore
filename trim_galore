@@ -33,7 +33,7 @@ my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.10dev';
-my $last_modified = "02 02 2023";
+my $last_modified = "03 07 2023";
 
 my $cutadapt_version;
 my $python_version;
@@ -1244,17 +1244,33 @@ sub trim{
 			
 				if ($clip_r1){
 					if (length $seq > $clip_r1){  # sequences that are already too short won't be clipped again
+
+                        # warn "$l1$seq\n$l3$qual\n";
+                         if ($rename) {
+                            $clipped_sequence = substr($seq,0,$clip_r1); # storing the clipped sequence
+                            $l1 =~ s/\r|\n//g; # cross-platform line ending trimming
+                            $l1 .= ":clip5:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                            # warn "$l1$seq\n$l3$qual\n";
+                        }                    
+
 						$seq = substr($seq,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
 						$qual = substr($qual,$clip_r1);
+                        # warn "$l1$seq\n$l3$qual\n"; sleep(1);
 					}
 				}
 				
 				if ($three_prime_clip_r1){
 					if (length $seq > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
-						# warn "seq/qual before/after trimming:\n$seq\n$qual\n";
+						# warn "$l1$seq\n$l3$qual\n";
+                        if ($rename) {
+                            $clipped_sequence = substr($seq,-$three_prime_clip_r1,$three_prime_clip_r1); # storing the clipped sequence
+                            $l1 =~ s/\r|\n//g;                     # cross-platform line ending trimming
+                            $l1 .= ":clip3:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                            # warn"$l1$seq\n$l3$qual\n";
+                        }
 						$seq = substr($seq,0,(length($seq) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
 						$qual = substr($qual,0,(length($qual) - $three_prime_clip_r1 ));
-						# warn "$seq\n$qual\n";
+						# warn "$l1$seq\n$l3$qual\n"; sleep(1);
 					}
 				}
 			
@@ -1346,14 +1362,28 @@ sub trim{
 			  
 				if ($clip_r1){
 					if (length $seq > $clip_r1){ # sequences that are already too short won't be clipped again
-						$seq = substr($seq,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
+						# warn "$l1$seq\n$l3$qual\n";
+                        if ($rename) {
+                            $clipped_sequence = substr($seq,0,$clip_r1); # storing the clipped sequence
+                            $l1 =~ s/\r|\n//g; # cross-platform line ending trimming
+                            $l1 .= ":clip5:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                            # warn "$l1$seq\n$l3$qual\n";
+                        }
+                        $seq = substr($seq,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
 						$qual = substr($qual,$clip_r1);
+                        # warn "$l1$seq\n$l3$qual\n"; sleep(1);
 					}
 				}
 			  
 				if ($three_prime_clip_r1){
 					if (length $seq > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
-						# warn "seq/qual before/after trimming:\n$seq\n$qual\n";
+						# warn	 "seq/qual before/after trimming:\n$l1$seq\n$qual\n";
+                        if ($rename) {
+                            $clipped_sequence = substr($seq,-$three_prime_clip_r1,$three_prime_clip_r1); # storing the clipped sequence
+                            $l1 =~ s/\r|\n//g;                     # cross-platform line ending trimming
+                            $l1 .= ":clip3:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                            # warn"$l1$seq\n$l3$qual\n";
+                        }
 						$seq = substr($seq,0,(length($seq) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
 						$qual = substr($qual,0,(length($qual) - $three_prime_clip_r1));
 						# warn "$seq\n$qual\n";sleep(1);
@@ -1916,6 +1946,7 @@ sub validate_paired_end_files{
     my $too_many_N_pairs = 0;
     my $read_1_printed = 0;
     my $read_2_printed = 0;
+    my $clipped_sequence; # storing removed sequence to add to readID (with --rename)
 
     my $count = 0;
 
@@ -1962,28 +1993,71 @@ sub validate_paired_end_files{
 
         if ($clip_r1){
             if (length $seq_1 > $clip_r1){ # sequences that are already too short won't be trimmed again
+
+                # warn "$id_1$seq_1\n$l3_1$qual_1\n";
+
+                if ($rename) {
+                    $clipped_sequence = substr($seq_1,0,$clip_r1); # storing the clipped sequence
+                    $id_1 =~ s/\r|\n//g; # cross-platform line ending trimming
+                    $id_1 .= ":clip5:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                    # warn "$id_1$seq_1\n$l3_1$qual_1\n";
+                }
+                
                 $seq_1 = substr($seq_1,$clip_r1); # starting after the sequences to be trimmed until the end of the sequence
                 $qual_1 = substr($qual_1,$clip_r1);
+                # warn "$id_1$seq_1\n$l3_1$qual_1\n"; sleep(1);
+                
             }
         }
         if ($clip_r2){
             if (length $seq_2 > $clip_r2){ # sequences that are already too short won't be trimmed again
+
+                # warn "$id_2$seq_2\n$l3_2$qual_2\n";
+                if ($rename) {
+                    $clipped_sequence = substr($seq_2,0,$clip_r2); # storing the clipped sequence
+                    $id_2 =~ s/\r|\n//g; # cross-platform line ending trimming
+                    $id_2 .= ":clip5:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                    # warn "$id_2$seq_2\n$l3_2$qual_2\n";
+                }
+
                 $seq_2 = substr($seq_2,$clip_r2); # starting after the sequences to be trimmed until the end of the sequence
                 $qual_2 = substr($qual_2,$clip_r2);
+                # warn "$id_2$seq_2\n$l3_2$qual_2\n"; sleep(1);
             }
         }
 
         if ($three_prime_clip_r1){
             if (length $seq_1 > $three_prime_clip_r1){  # sequences that are already too short won't be clipped again
-                $seq_1 = substr($seq_1,0,(length($seq_1) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
+                # warn "seq_1/qual_1 before/after trimming:\n$id_1$seq_1\n$qual_1\n";
+
+                if ($rename) {
+                    $clipped_sequence = substr($seq_1,-$three_prime_clip_r1,$three_prime_clip_r1); # storing the clipped sequence
+                    $id_1 =~ s/\r|\n//g;                     # cross-platform line ending trimming
+                    $id_1 .= ":clip3:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                    # warn "$id_1$seq_1\n$l3_1$qual_1\n";
+                }
+
+				$seq_1 = substr($seq_1,0,(length($seq_1) - $three_prime_clip_r1)); # starting after the sequences to be trimmed until the end of the sequence
                 $qual_1 = substr($qual_1,0,(length($qual_1) - $three_prime_clip_r1));
+                # warn "$id_1$seq_1\n$l3_1$qual_1\n"; sleep(1);
+
             }
         }
         if ($three_prime_clip_r2){
             if (length $seq_2 > $three_prime_clip_r2){  # sequences that are already too short won't be clipped again
+                # warn "seq_2/qual_2 before/after trimming:\n$id_2$seq_2\n$qual_2\n";
+
+                if ($rename) {
+                    $clipped_sequence = substr($seq_2,-$three_prime_clip_r2,$three_prime_clip_r2); # storing the clipped sequence
+                    $id_2 =~ s/\r|\n//g;                     # cross-platform line ending trimming
+                    $id_2 .= ":clip3:$clipped_sequence\n";   # adding the clipped sequence to the readID
+                    # warn "$id_2$seq_2\n$l3_2$qual_2\n";
+                }
                 $seq_2 = substr($seq_2,0,(length($seq_2) - $three_prime_clip_r2)); # starting after the sequences to be trimmed until the end of the sequence
                 $qual_2 = substr($qual_2,0,(length($qual_2) - $three_prime_clip_r2));
+                # warn "$id_2$seq_2\n$l3_2$qual_2\n"; sleep(1);
             }
+
         }
 
         if (defined $maxn){
@@ -3333,8 +3407,10 @@ trim_galore [options] <filename(s)>
                         the 3' end that is not directly related to adapter sequence or basecall quality.
                         Default: OFF.
 
---rename                This option adds the bases clipped via the options `--clip` and `--three_prime_clip` to the
-                        read ID. This can be useful for UMI handling etc. Default: OFF
+--rename                This option adds the bases clipped via the options `--clip_(r1/r2)` and `--three_prime_clip_(r1/r2)`
+                        to the read ID. Also works with `--hardtrim5` and `--hardtrim3`. This can be useful for UMI handling.
+                        The format is :clip5:[BASES], :clip3:[BASES], or :clip5:[BASES]:clip3:]BASES].
+                        Default: OFF
 
 --2colour/--nextseq INT This enables the option '--nextseq-trim=3'CUTOFF' within Cutadapt, which will set a quality
                         cutoff (that is normally given with -q instead), but qualities of G bases are ignored.
@@ -3547,7 +3623,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp
 
-Last modified on 02 02 2023.
+Last modified on 03 07 2023.
 
 HELP
   exit;
