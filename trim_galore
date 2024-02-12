@@ -392,22 +392,27 @@ sub clockwork{
 
 		### BOTH READ1 AND READ2 should look like this:
 
-		# 0        8    12 13                                    INDEX position
-		# UUUUUUUU CAGT A  FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF   SEQUENCE
+		# Read 1
+        # 0        8    12 13                                    INDEX position
+		# UUUUUUUU CAGT A  BBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF   SEQUENCE
+        # Read 2
+        # 0        8    12   15                                  INDEX position
+		# UUUUUUUU CAGT A  BBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF   SEQUENCE
 
 		# where:
 		#    U = UMI base
 		# CAGT = fixed sequence
 		#    A = A-tail
+        #   BB = biased filled-in base (only for R2)
 		# FFFF = RRBS-fragment to be aligned
 
 		### Capturing the sequence after the A from A-tailing (FFFFFFFFFFFFFF...)
 
 		my $seq1 = substr($one2,13); # truncated sequence without UMIs or fixed sequence
-		my $seq2 = substr($two2,13);
+		my $seq2 = substr($two2,15); # truncated sequence without UMIs, fixed sequence and 2 bp of filled-in positions (unmethylation bias in M-bias plot)
 
 		my $qual1 = substr($one4,13); # truncated quality string without barcode or fixed sequence
-		my $qual2 = substr($two4,13);
+		my $qual2 = substr($two4,15);
 
 		# warn "$one1\n";
 		$one1 .= ":R1:${r1_barcode}:R2:${r2_barcode}:F1:${r1_fix}:F2:${r2_fix}";
@@ -3322,11 +3327,13 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         In it's current implementation, the dual-UMI RRBS reads come in the following format:
 
                         Read 1  5' UUUUUUUU CAGTA FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF TACTG UUUUUUUU 3'
-                        Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ATGAC UUUUUUUU 5'
+                        Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBB ATGAC UUUUUUUU 5'
 
                         Where UUUUUUUU is a random 8-mer unique molecular identifier (UMI), CAGTA is a constant region,
-                        and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The UMIs for Read 1 (R1) and
-                        Read 2 (R2), as well as the fixed sequences (F1 or F2), are written into the read ID and
+                        and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The two bases marked 'BB' for 5' end of Read 2
+                        carry a filled-in artificial methylation state, and are removed in the process. The equivalent positions
+                        at the 3' ends of reads are getting removed by the additional trimming step below. The UMIs for Read 1 (R1)
+                        and Read 2 (R2), as well as the fixed sequences (F1 or F2), are written into the read ID and
                         removed from the actual sequence. Here is an example:
 
                         R1: \@HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT
@@ -3473,7 +3480,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp.
 
-Last modified on 02 02 2023.
+Last modified on 12 02 2024.
 
 HELP
   exit;
