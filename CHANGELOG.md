@@ -1,5 +1,10 @@
 # Trim Galore Changelog
 
+
+### Version 0.6.10dev
+
+- Added option `--rename` to write clipped bases to the read ID. Works in all modes with options `--clip_(r1/r2)` and `--three_prime_clip_(r1/r2)`, as well as `--hardtrim5` and `--hardtrim3`. Requested in [this issue](https://github.com/FelixKrueger/TrimGalore/issues/166).
+
 ### Version 0.6.10 (Release on 02 Feb 2023)
 
 - Fixed a missing default value of `gzip` as the default decompression path (see [here](https://github.com/FelixKrueger/TrimGalore/commit/a3c6a64ae71657f1a282e01134293e424177a7d5)).
