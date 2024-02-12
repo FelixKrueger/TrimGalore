@@ -3478,7 +3478,7 @@ SPECIFIC TRIMMING - without adapter/quality trimming
                         Read 2  3' UUUUUUUU GTCAT FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBB ATGAC UUUUUUUU 5'
 
                         Where UUUUUUUU is a random 8-mer unique molecular identifier (UMI), CAGTA is a constant region,
-                        and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The two bases marked 'BB' for 5' end of Read 2
+                        and FFFFFFF... is the actual RRBS-Fragment to be sequenced. The two bases marked 'BB' for the 5' end of Read 2
                         carry a filled-in artificial methylation state, and are removed in the process. The equivalent positions
                         at the 3' ends of reads are getting removed by the additional trimming step below. The UMIs for Read 1 (R1)
                         and Read 2 (R2), as well as the fixed sequences (F1 or F2), are written into the read ID and
@@ -3628,11 +3628,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp
 
-<<<<<<< HEAD
 Last modified on 12 02 2024.
-=======
-Last modified on 03 07 2023.
->>>>>>> 984413f141bd01a0f0cff4ebb0e0746a8abc1efa
 
 HELP
   exit;
