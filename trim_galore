@@ -38,7 +38,7 @@ my $last_modified = "03 07 2023";
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args) = process_commandline();
+my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu) = process_commandline();
 
 my $report_message; # stores result of adapter auto-detection
 
@@ -753,8 +753,8 @@ sub trim{
     }
 
     if ($clip_r1){
-    warn "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
-    print REPORT "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
+        warn "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
+        print REPORT "All Read 1 sequences will be trimmed by $clip_r1 bp from their 5' end to avoid poor qualities or biases\n";
     }
     if ($clip_r2){
 		warn "All Read 2 sequences will be trimmed by $clip_r2 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)\n";
@@ -1418,7 +1418,29 @@ sub trim{
 						++$too_many_n;
 						next;
 					}
-				}	
+				}
+                if ($hulu){
+					# my $n_count = Ncounter($seq);
+					warn "Checking for POLY-A!!!`n\n";
+                    sleep(5);
+
+                    # consider Ns as fraction of the read length
+                    # if (defined $maxn_fraction){
+                    #     # skipping the fraction calculation is the sequence is already 0 bp
+                    #     if (length$seq == 0){
+                    #         next; 
+                    #     }
+                    #     my $fractN = $n_count/(length$seq);
+                    #     if ($fractN > $maxn_fraction){
+                    #         ++$too_many_n;
+                    #         next;
+                    #     }
+                    # }
+					# if ($n_count > $maxn){
+					# 	++$too_many_n;
+					# 	next;
+					# }
+				}		
 	      
 				if (length $seq < $length_cutoff){
 					++$too_short;
@@ -2564,6 +2586,7 @@ sub process_commandline{
     my $implicon;
     my $rename;
     my $cutadapt_args;
+    my $hulu;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2613,7 +2636,8 @@ sub process_commandline{
                  'implicon'  => \$implicon,
                  'rename'  => \$rename,
                  'cutadapt_args=s' => \$cutadapt_args,
-      );
+                 'hulu' => \$hulu
+                 );
 
 	### EXIT ON ERROR if there were errors with any of the supplied options
 	unless ($command_line){
@@ -3253,7 +3277,11 @@ VERSION
         $cutadapt_args = '';
     }
 
-    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args);
+
+    if ($hulu){
+       warn "Re-implementing a poly-single-nucleotide trimming at the 3' end of the reads\n";
+    }
+    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu);
 }
 
 sub Ncounter{
@@ -3646,4 +3674,28 @@ Last modified on 12 02 2024.
 
 HELP
   exit;
+}
+
+sub poly_wildcard{
+    # my $wild = shift;
+    my $s = shift;
+    my $wild = 'A';
+    my $n = length($s);
+    my $best_index = $n;
+    my $best_score = my $score = my $errors = 0;
+    for my $i (reverse(0..$n-1)) {
+        my $nuc = substr($s, $i, 1);
+        if ($nuc eq $wild) {
+            $score++;
+        } else {
+            $score -= 2;
+            $errors++;
+        }
+        if ($score > $best_score && $errors <= 0.2 * ($n - $i)) {
+            $best_index = $i;
+            $best_score = $score;
+        }
+    }
+    $s = substr($s, 0, $best_index);
+
 }
