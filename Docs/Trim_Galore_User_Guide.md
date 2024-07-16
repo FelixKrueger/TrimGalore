@@ -186,6 +186,9 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 
 * `--illumina`
   * Adapter sequence to be trimmed is the first 13bp of the Illumina universal adapter `AGATCGGAAGAGC` instead of the default auto-detection of adapter sequence.
+ 
+* `--stranded_illumina`
+  * Adapter sequence to be trimmed is the first 13bp of the Illumina stranded mRNA or Total RNA adapter 'ACTGTCTCTTATA' instead of the default auto-detection of adapter sequence. Note that this sequence resembles the Nextera sequence with an additional A from A-tailing. Please also see [issue #127](https://github.com/FelixKrueger/TrimGalore/issues/127) or [trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo](https://support.illumina.com/bulletins/2020/06/trimming-t-overhang-options-for-the-illumina-rna-library-prep-wo.html) for further information. This sequence is currently *NOT* included in the adapter auto-detection.
 
 * `--nextera`
   * Adapter sequence to be trimmed is the first 12bp of the Nextera adapter `CTGTCTCTTATA` instead of the default auto-detection of adapter sequence.
