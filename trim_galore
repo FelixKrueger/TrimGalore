@@ -28,17 +28,18 @@ use Cwd;
 
 ## modified on 15 01 2022 to add Illumina directional mRNA kit adapter (ACTGTCTCTTATACACATCT)
 ## modified on 12 Aug 2022 to allow --max_n to be a fraction
+## modified on 17 Oct 2024 to add --bigseq option to allow for trimming BGI/MGI sequences
 
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.10dev';
-my $last_modified = "03 07 2023";
+my $last_modified = "18 10 2024";
 
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu) = process_commandline();
+my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu,$bgiseq) = process_commandline();
 
 my $report_message; # stores result of adapter auto-detection
 
@@ -499,6 +500,10 @@ unless (defined $adapter){
 		$adapter = 'ACTGTCTCTTATA';
 		$adapter_name = 'Illumina stranded mRNA and Total RNA; user defined (added for v0.6.8)';
     }
+    elsif($bgiseq){
+        $adapter = 'AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA'; # Read 1 adapter for BGISEQ-500
+        $adapter_name = 'BGISEQ/DNBSEQ/MGISEQ; user defined (added for v0.6.10)';
+    }
     else{ # default
 		### If other -a and/or -a2 were given
 		if ($polyA){ # specialised PolyA trimming
@@ -542,7 +547,7 @@ else{
 }
 
 ### For smallRNA adapters we are reducing the sequence length cutoff before a sequences gets thrown out entirely to 18bp. We are doing this because some 20-23bp long smallRNAs
-### may be removed if T, TG, or TGG etc gets trimmed off the end (changed b ack up from 16 to 18bp to remove noise from alignment files, 18 11 2015)
+### may be removed if T, TG, or TGG etc gets trimmed off the end (changed back up from 16 to 18bp to remove noise from alignment files, 18 11 2015)
 if ($adapter eq 'TGGAATTCTCGG'){
     unless (defined $length_cutoff){ # user defined length cutoff wins over auto-detection
 		$length_cutoff = 18;
@@ -555,6 +560,16 @@ if ($adapter eq 'TGGAATTCTCGG'){
 			$a2 = 'GATCGTCGGACT';
 			warn "Setting the Illumina smallRNA 5' adapter as adapter 2: 'GATCGTCGGACT'\n";
 		}
+    }
+}
+
+### For the BGISEQ/MGISEQ/DNBSEQ platforms we need to set a specific reverse (=Read 2) adapter sequence
+if($adapter eq 'AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA'){
+    if ($validate){
+        unless (defined $a2){
+            $a2 = 'AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG'; # Read 2 adapter for BGISEQ-500
+            warn "Setting the BGISEQ-500 Read 2 adapter as adapter 2: 'AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG'\n";
+        }
     }
 }
 
@@ -2587,6 +2602,7 @@ sub process_commandline{
     my $rename;
     my $cutadapt_args;
     my $hulu;
+    my $bgiseq;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2619,6 +2635,7 @@ sub process_commandline{
                  'three_prime_clip_R2=i' => \$three_prime_clip_r2,
                  'illumina' => \$illumina,
                  'nextera' => \$nextera,
+                 'bgiseq'  => \$bgiseq,
                  'stranded_illumina' => \$stranded_illumina,
                  'small_rna' => \$small_rna,
                  'path_to_cutadapt=s' => \$path_to_cutadapt,
@@ -2891,7 +2908,11 @@ VERSION
   }
 
  
-  if ($nextera and $small_rna or $nextera and $illumina or $illumina and $small_rna or $nextera and $stranded_illumina or $stranded_illumina and $illumina or $stranded_illumina and $small_rna){
+  if ($nextera and $small_rna or $nextera and $illumina
+    or $illumina and $small_rna or $nextera and $stranded_illumina
+    or $stranded_illumina and $illumina or $stranded_illumina and $small_rna
+    or $illumina and $bgiseq or $small_rna and $bgiseq or $nextera and $bgiseq
+    or $stranded_illumina and $bgiseq){
     die "You can't use several different adapter types at the same time. Make your choice or consider using -a and -a2\n\n";
   }
 
@@ -2951,6 +2972,12 @@ VERSION
       }
       if ($small_rna){
         die "You can't supply an adapter sequence AND use the Illumina small RNA adapter sequence. Make your choice.\n\n";
+      }
+      if ($stranded_illumina){
+        die "You can't supply an adapter sequence AND use the Illumina stranded adapter sequence. Make your choice.\n\n";
+      }
+      if ($bgiseq){
+        die "You can't supply an adapter sequence AND use the BGISEQ adapter sequence. Make your choice.\n\n";
       }
   }
 
@@ -3218,7 +3245,7 @@ VERSION
     	unless ($consider_already_trimmed >= 0 and $consider_already_trimmed <= 10000){
     		die "Please select a threshold for when a sample should not be adapter trimmed at all (--consider_already_trimmed) in the range of [0-1000] (inclusive)\n";
     	}
-    	if ($nextera or $small_rna or $illumina){
+    	if ($nextera or $small_rna or $illumina or $bgiseq){
     		die "The threshold for --consider_already_trimmed [INT] only works in conjunction with adapter auto-detection. Make your choice and try again\n\n";
   		}
   		warn "During the adapter auto-detection, any counts equal to or lower than >$consider_already_trimmed< will be considered as 'file was already adapter-trimmed'. Only quality trimming will be carried out (setting -a X)\n"; sleep(1);
@@ -3281,7 +3308,11 @@ VERSION
     if ($hulu){
        warn "Re-implementing a poly-single-nucleotide trimming at the 3' end of the reads\n";
     }
-    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu);
+    return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,
+    $phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,
+    $dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,
+    $illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,
+    $umi_from_r2,$rename,$cutadapt_args,$hulu,$bgiseq);
 }
 
 sub Ncounter{
@@ -3358,7 +3389,7 @@ trim_galore [options] <filename(s)>
                         -a2 "file:../different_adapters.fa"
                         Potentially in conjucntion with the parameter "-n 3" to trim all adapters. Please note
                         that this is NOT needed for standard trimming! 
-                        More Information here: https://github.com/FelixKrueger/TrimGalore/issues/86
+                        More information here: https://github.com/FelixKrueger/TrimGalore/issues/86
 
 -a2/--adapter2 <STRING> Optional adapter sequence to be trimmed off read 2 of paired-end files. This
                         option requires '--paired' to be specified as well. If the libraries to be trimmed
@@ -3384,6 +3415,11 @@ trim_galore [options] <filename(s)>
                         to trim smallRNA adapters will also lower the --length value to 18bp. If the smallRNA
                         libraries are paired-end then a2 will be set to the Illumina small RNA 5' adapter
                         automatically (GATCGTCGGACT) unless -a 2 had been defined explicitly.
+
+--bgiseq                Adapter sequence to be trimmed is BGISEQ/DNBSEQ/MGISEQ instead the default auto-detection.
+                        Uses sequences `AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA` for Read 1 (BGI/MGI forward), and
+                        `AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG` for Read 2 (BGI/MGI reverse). More information here:
+                        https://github.com/FelixKrueger/TrimGalore/issues/196
 
 --consider_already_trimmed <INT>     During adapter auto-detection, the limit set by <INT> allows the user to 
                         set a threshold up to which the file is considered already adapter-trimmed. If no adapter
@@ -3670,7 +3706,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp
 
-Last modified on 12 02 2024.
+Last modified on 18 10 2024.
 
 HELP
   exit;
