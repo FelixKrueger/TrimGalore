@@ -39,7 +39,10 @@ my $last_modified = "18 10 2024";
 my $cutadapt_version;
 my $python_version;
 
-my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu,$bgiseq) = process_commandline();
+my ($compression_path,$decompression_path,$cores,$cutoff,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,$phred_encoding,
+$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$a2,$error_rate,$output_dir,$no_report_file,$dont_gzip,$clip_r1,$clip_r2,
+$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,$illumina,$max_length,$maxn,$maxn_fraction,$trim_n,
+$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,$umi_from_r2,$rename,$cutadapt_args,$hulu,$bgiseq,$demux) = process_commandline();
 
 my $report_message; # stores result of adapter auto-detection
 
@@ -1670,7 +1673,135 @@ sub trim{
         }
     }
     close REPORT or warn "Failed to close filehandle REPORT: $!\n";
+    sleep(1);
+
+    if ($demux){
+        warn "Trimming complete, starting demultiplexing procedure (based on 3' barcodes supplied as per file >$demux<)\n";
+        demultiplex($output_dir,$output_filename,$demux);
+    }
+
 }
+
+sub demultiplex{
+
+    my ($output_dir,$trimmed_filename,$barcode_file) = @_;
+
+    my %barcodes = read_barcode_file($barcode_file);
+    my %barcode_fhs = open_barcode_filehandles($output_dir,$trimmed_filename,%barcodes); 
+
+    # Keep track of barcode counts    
+    my %barcode_counts;
+    # Setting barcode length
+    my $barcode_length = length((keys %barcodes)[0]);
+
+    foreach my $barcode (keys %barcodes){
+        $barcode_counts{$barcode} = 0;
+    }
+
+    my $best_match = 0;
+    my $count = 0;
+
+    # Reading trimmed file
+    open (my $in,"$decompression_path -d -c $output_dir$trimmed_filename |") or die "Couldn't read from file $!";
+    while (<$in>){
+        my $identifier = $_;
+        my $sequence = <$in>;
+        my $identifier2 = <$in>;
+        my $quality_score = <$in>;
+
+        last unless ($identifier and $sequence and $identifier2 and $quality_score);
+        $count++;
+
+        if ($count%10000000 == 0){
+            warn "$count sequences processed\n";
+        }
+        # warn "$identifier$sequence$identifier2$quality_score========\n";
+        chomp $sequence;
+        chomp $quality_score;
+        chomp $identifier;
+    
+        # warn "BEFORE: $identifier\n$sequence\n$quality_score\n";
+                   
+        # extracting the potential barcode sequence and shorten the read sequence and quality score
+        my $barcode_seq = substr($sequence,-$barcode_length,$barcode_length,"");
+        substr($quality_score,-$barcode_length,$barcode_length,"");
+
+        # Modifying readID to include barcode sequence
+        $identifier =~ s/\s+/_/g; # removing white spaces from readID
+        $identifier .= "_BC:$barcode_seq";
+
+        # warn "Barcode sequence: $barcode_seq\n";
+        # warn "AFTER : $identifier\n$sequence\n$quality_score\n     ====\n";
+        # sleep(1);
+
+        foreach my $bc (keys %barcodes){
+            if ($barcode_seq eq $bc){
+                $best_match = $bc;
+                # warn "$identifier\n$sequence\n$identifier2$quality_score\n";
+                print {$barcode_fhs{$bc}} "$identifier\n$sequence\n$identifier2$quality_score\n";
+                ++$barcode_counts{$bc};
+                last;
+            }  
+        }
+        if ($best_match eq 0){
+            print {$barcode_fhs{'NoCode'}} "$identifier\n$sequence\n$identifier2$quality_score\n";
+            ++$barcode_counts{'NoCode'};
+        }
+    }
+    
+    warn "Processed sequences from file >$trimmed_filename< in total: $count\n";
+    # Print summary of barcode counts
+    warn "\nDemultiplexing summary\n======================\n";
+    foreach my $barcode (sort {$barcode_counts{$b} <=> $barcode_counts{$a} } keys %barcode_counts){
+        warn "$barcode\t$barcode_counts{$barcode}\n";
+    }
+    warn "======================\n      ¯\\_(ツ)_/¯\n\nDemultiplexing complete. Enjoy!\n\n";
+}
+
+sub open_barcode_filehandles {
+    
+    my ($output_dir,$trimmed_filename,%barcodes) = @_;
+    
+    my %barcode_fhs;
+    my $new_basename = $trimmed_filename;
+    $new_basename =~ s/\.gz$//;
+    $new_basename =~ s/\.fq$//;
+
+    foreach my $barcode (keys %barcodes){
+        # warn "Barcode is '$barcode' and sample is '$barcodes{$barcode}'\n";
+        my $output_filename = "${new_basename}_$barcodes{$barcode}.fq";
+        # warn "Output file name: $output_filename\n";
+        if ($gzip){
+            $output_filename .= '.gz';
+            open ($barcode_fhs{$barcode},"| $compression_path -c - > ${output_dir}${output_filename}") or die "Can't open >$output_filename<: $!\n";
+        }   
+        else{
+            open ($barcode_fhs{$barcode},'>',"$output_dir$output_filename") or die "Can't open >$output_filename<: $!\n";
+        }
+    }   
+    return  %barcode_fhs;
+}
+
+sub read_barcode_file {
+    my $barcode_file = shift;
+    my %barcodes;
+    open (my $barcodes,'<',$barcode_file) or die "Couldn't open barcode file $barcode_file: $!\n";
+    while (<$barcodes>){
+        chomp;
+        my ($sample,$barcode) = split (/\t/);
+        $barcodes{$barcode} = $sample;
+    }
+    # Add entry for 'NoCode' barcode
+    $barcodes{'NoCode'} = 'NoCode';
+
+    # foreach my $barcode (keys %barcodes){
+    #     warn "Barcode: $barcode\tSample: $barcodes{$barcode}\n";
+    # }
+
+    close $barcodes or die "Couldn't close barcode file $barcode_file: $!\n";
+    return %barcodes;
+}
+
 
 sub hardtrim_to_5prime_end{
 
@@ -2603,6 +2734,7 @@ sub process_commandline{
     my $cutadapt_args;
     my $hulu;
     my $bgiseq;
+    my $demux;
 
     my $command_line = GetOptions ('help|man' => \$help,
                  'q|quality=i' => \$quality,
@@ -2653,7 +2785,8 @@ sub process_commandline{
                  'implicon'  => \$implicon,
                  'rename'  => \$rename,
                  'cutadapt_args=s' => \$cutadapt_args,
-                 'hulu' => \$hulu
+                 'hulu' => \$hulu,
+                 'demux=s' => \$demux
                  );
 
 	### EXIT ON ERROR if there were errors with any of the supplied options
@@ -2661,7 +2794,7 @@ sub process_commandline{
 		die "Please respecify command line options\n";
 	}
 
-	### HELPFILE
+	### HELP
 	if ($help){
 		print_helpfile();
 		exit;
@@ -3308,12 +3441,45 @@ VERSION
     if ($hulu){
        warn "Re-implementing a poly-single-nucleotide trimming at the 3' end of the reads\n";
     }
+
+    if (defined $demux){
+        warn "Demultiplexing selected. After adapter trimming, reads will be demultiplexed via barcodes specified in file >>$demux<<\n";
+        
+        if ($validate){
+            die "Demultiplexing is only allowed for single-end files (see help text for option --demux <barcode file>\n";
+        }
+        test_demux_file($demux);
+    }
+
     return ($compression_path,$decompression_path,$cores,$quality,$adapter,$stringency,$rrbs,$length_cutoff,$keep,$fastqc,$non_directional,
     $phred_encoding,$fastqc_args,$trim,$gzip,$validate,$retain,$length_read_1,$length_read_2,$adapter2,$error_rate,$output_dir,$no_report_file,
     $dont_gzip,$clip_r1,$clip_r2,$three_prime_clip_r1,$three_prime_clip_r2,$nextera,$stranded_illumina,$small_rna,$path_to_cutadapt,
     $illumina,$max_length,$maxn,$maxn_fraction,$trim_n,$hardtrim5,$clock,$polyA,$hardtrim3,$nextseq,$basename,$consider_already_trimmed,
-    $umi_from_r2,$rename,$cutadapt_args,$hulu,$bgiseq);
+    $umi_from_r2,$rename,$cutadapt_args,$hulu,$bgiseq,$demux);
 }
+
+sub test_demux_file{
+    my $demux = shift;
+    open (DEMUX,$demux) or die "Failed to open demultiplexing file $demux: $!\n";
+   
+    while (my $line = <DEMUX>){
+        chomp $line;
+        
+        unless ($line =~ /\t/){
+            die "Demultiplexing file $demux does not seem to be in the correct format. Please make sure it is in the format: >barcode_name<\t>barcode_sequence<\n";
+        }
+
+        my ($description,$barcode) = split(/\t/,$line);
+        warn "Testing:\t$description\t$barcode\n";
+        # Making sure the barcode is DNA letters only
+        unless ($barcode =~ /^[ACTGN]+$/){
+            warn "Barcode sequence in $demux must contain DNA characters only (A,C,T,G or N)!\n";
+            die "This was the current line:\t$description\t$barcode\n";
+        }
+    }
+    warn "Demultiplexing file $demux seems to be in the correct format. Proceeding...\n";
+    close DEMUX;
+} 
 
 sub Ncounter{
   my $seq = shift;
@@ -3527,7 +3693,15 @@ trim_galore [options] <filename(s)>
 
                         It seems that --cores 4 could be a sweet spot, anything above has diminishing returns.
 			
-
+--demux <barcode_file>  Some of our Ribo-seq runs contain an additional in-line sample barcode at the 3'-end of the read, e.g.:
+                        ribosome protected sequence - UUUUU - BBBB - AGATC.....................
+                        UUUUU = UMI
+                        BBBB = barcode
+                        AGATC... = adapter
+                        This demux option will do a standard trimming run first, and demultiplex subsequent reads based on the
+                        barcode file. The barcode sequence gets removed from the read and is added to the read ID. Output files
+                        are named after the sample name. This option is only available for single-end reads.
+                        The barcode file should be in the format: >sample_name<\t>barcode_sequence<
 
 SPECIFIC TRIMMING - without adapter/quality trimming
 
