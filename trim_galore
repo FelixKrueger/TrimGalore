@@ -1689,11 +1689,18 @@ sub demultiplex{
     my %barcodes = read_barcode_file($barcode_file);
     my %barcode_fhs = open_barcode_filehandles($output_dir,$trimmed_filename,%barcodes); 
 
-    # Keep track of barcode counts    
-    my %barcode_counts;
-    # Setting barcode length
-    my $barcode_length = length((keys %barcodes)[0]);
+    # Setting barcode length just once
+    my $barcode_length;
+    foreach my $barcode (keys %barcodes){
+        unless ($barcode eq 'NoCode'){
+            $barcode_length = length $barcode;
+            warn "Setting barcode length to $barcode_length\n";
+            last;
+        }
+    }
 
+    # Keep track of barcode counts  
+    my %barcode_counts;
     foreach my $barcode (keys %barcodes){
         $barcode_counts{$barcode} = 0;
     }
