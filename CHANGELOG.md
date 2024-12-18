@@ -8,6 +8,8 @@
 - Added option `--bgiseq` to trim BGISEQ/DNBSEQ/MGISEQ adapters instead the default auto-detection. Uses `AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA` for Read 1 (BGI/MGI forward), and
  `AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG` for Read 2 (BGI/MGI reverse). Requested in [issue#196](https://github.com/FelixKrueger/TrimGalore/issues/196)
 
+- Added option  `--demux <barcode_file> to demultiplex files from a 3'-end barcode after trimming is completed. Requested in [#199](https://github.com/FelixKrueger/TrimGalore/issues/199)
+
 ### Version 0.6.10 (Release on 02 Feb 2023)
 
 - Fixed a missing default value of `gzip` as the default decompression path (see [here](https://github.com/FelixKrueger/TrimGalore/commit/a3c6a64ae71657f1a282e01134293e424177a7d5)).
