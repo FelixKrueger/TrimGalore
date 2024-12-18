@@ -1754,6 +1754,7 @@ sub demultiplex{
             print {$barcode_fhs{'NoCode'}} "$identifier\n$sequence\n$identifier2$quality_score\n";
             ++$barcode_counts{'NoCode'};
         }
+        $best_match = 0; # reset best match
     }
     
     warn "Processed sequences from file >$trimmed_filename< in total: $count\n";
