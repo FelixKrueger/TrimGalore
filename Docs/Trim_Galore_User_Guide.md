@@ -417,7 +417,7 @@ For **single-end files**, the last step in the process is length-based or N-cont
 
 For **paired-end runs**, Read 1 and Read 2 files are processed consecutively in single-end mode for quality- and adapter trimming, but no **filtering** is applied in the first instance. Once both files have finished trimming, additional processing and length-based/N-content filtering is applied in a _validation process_ that works with the trimmed versions of Read 1 and Read 2 at the same time (to keep both files in sync).
 
-The following trimming summary comes straight from Cutadapt, and gets written out straight after an entire files is processed. 
+The following trimming summary comes straight from Cutadapt, and gets written out straight after an entire file is processed. 
 
 ```
 This is cutadapt 3.4 with Python 3.9.6
@@ -492,6 +492,7 @@ RUN STATISTICS FOR INPUT FILE: SLX_R1.fastq.gz
 **Read 2:**
 
 ```
+...
 148     49      17.4    1       38 11
 149     41      17.4    1       32 9
 150     113     17.4    1       98 15
@@ -505,4 +506,4 @@ Total number of sequences analysed for the sequence pair length validation: 1166
 Number of sequence pairs removed because at least one read was shorter than the length cutoff (20 bp): 3357967 (0.29%)
 ```
 
-It is this number `3357967 (0.29%)` at the end or the Read 2 trimming report that contains the total number of read pairs that had been removed from both Read 1 and Read 2 files because of filtering. 
+It is this number, `3,357,967 (0.29%)`, at the end of the Read 2 trimming report that contains the total number of read pairs that were removed from both Read 1 and Read 2 files because of filtering. 
