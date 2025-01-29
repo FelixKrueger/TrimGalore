@@ -197,6 +197,10 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 * `--small_rna`
   * Adapter sequence to be trimmed is the first 12bp of the _Illumina Small RNA 3' Adapter_ `TGGAATTCTCGG` instead of the default auto-detection of adapter sequence. 
   * Selecting to trim smallRNA adapters will also lower the `--length` value to 18bp. If the smallRNA libraries are paired-end then `-a2` will be set to the Illumina small RNA 5' adapter automatically (`GATCGTCGGACT`) unless `-a 2` had been defined explicitly.
+ 
+* `--bgiseq`
+  * Adapter sequence to be trimmed is BGISEQ/DNBSEQ/MGISEQ instead the default auto-detection. Uses sequences `AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA` for Read 1 (BGI/MGI forward), and `AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG` for Read 2 (BGI/MGI reverse). More information [here](https://github.com/FelixKrueger/TrimGalore/issues/196)
+  
     
 * `--max_length <INT>`
   Discard reads that are longer than <INT> bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences.
@@ -368,20 +372,28 @@ R2       <-----------------
   
 ## Understanding the trimming reports
 
+The trimming reports contain output from both Trim Galore and Cutadapt, which can lead to confusion about the number of short sequences remaining in trimmed files (see [#200](
+https://github.com/FelixKrueger/TrimGalore/issues/200)). This sections aims to provide some clarity on the different sections, using a paired-end EM-seq sample as example (which requires additional trimming from both 5' and 3' ends (see [here for more details](https://felixkrueger.github.io/Bismark/bismark/library_types/#em-seq-neb)).
 
+Trimming reports consist of three sections:
 
-### Paired-end report
+1. The parameter summary
+2. The trimming summary
+3. Run statistics summary
+   
+### 1. Parameter summary
 
+This section is meant for record keeping and gets written out right at the start of the run (after some sanity checks). It can look like so:
 
 ```
 SUMMARISING RUN PARAMETERS
 ==========================
 Input filename: SLX_R1.fastq.gz
 Trimming mode: paired-end
-Trim Galore version: 0.6.7
-Cutadapt version: 3.4
+Trim Galore version: 0.6.10
+Cutadapt version: 4.9
 Python version: could not detect
-Number of cores used for trimming: 8
+Number of cores used for trimming: 4
 Quality Phred score cutoff: 20
 Quality encoding type selected: ASCII+33
 Using Illumina adapter for trimming (count: 18772). Second best hit was smallRNA (count: 0)
@@ -397,6 +409,13 @@ Running FastQC on the data once trimming has completed
 Output file will be GZIP compressed
 ```
 
+### 2. Trimming summary
+
+This step carries out quality- and adapter trimming first, and applies additional processing (such as 5'- or 3'-clipping, N-clipping etc) after that. For **single-end files**, as last step in the process length- or N-content-based filtering is applied.
+**Please note:** For **paired-end runs**, Read 1 and Read 2 files are processed consecutively in single-end mode for quality- and adapter trimming, but no **filtering** is applied in the first istance.
+
+
+The following trimming summary comes straight from Cutadapt, and gets written out straight after an entire files is processed. 
 ```
 This is cutadapt 3.4 with Python 3.9.6
 Command line parameters: -j 8 -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC SLX_R1.fastq.gz
@@ -412,6 +431,12 @@ Reads written (passing filters): 1,166,076,593 (100.0%)
 Total basepairs processed: 174,911,488,950 bp
 Quality-trimmed:             674,749,563 bp (0.4%)
 Total written (filtered):  172,939,327,763 bp (98.9%)
+```
+
+Please note that the value reported by Cutadapt for `Reads written (passing filters)` is always 100% as filtering is applied at a later stage!
+
+```
+ctd...
 
 === Adapter 1 ===
 
@@ -436,7 +461,22 @@ length  count   expect  max.err error counts
 148     127     17.4    1       41 86
 149     156     17.4    1       32 124
 150     3937    17.4    1       102 3835
+```
 
+### 3. Run statistics summary
+
+#### Single-end
+
+```
+RUN STATISTICS FOR INPUT FILE: SE.fastq.gz
+=============================================
+1000000 sequences processed in total
+Sequences removed because they became shorter than the length cutoff of 20 bp:  552 (0.1%)
+```
+
+#### Paired-end
+
+```
 RUN STATISTICS FOR INPUT FILE: SLX_R1.fastq.gz
 =============================================
 1166076593 sequences processed in total
