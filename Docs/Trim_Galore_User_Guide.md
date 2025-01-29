@@ -1,12 +1,12 @@
-# Taking appropriate QC measures for RRBS-type or other -Seq applications with Trim Galore!
+# Taking appropriate QC measures for RRBS-type or other -seq applications with Trim Galore!
 
 [<img title="Babraham Bioinformatics" style="float:right;margin:20px 20 20 600px" id="Babraham Bioinformatics" src="Images/logo.png" height="88" >](http://www.bioinformatics.babraham.ac.uk/index.html)
 
 
-Last update: 02/07/2019
+Last update: 29/01/2025
 
 #### Table of Contents
-* [Introduction](#version-064)
+* [Introduction](#version-0610)
 * [Methodology](#adaptive-quality-and-adapter-trimming-with-trim-galore)
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
@@ -17,8 +17,9 @@ Last update: 02/07/2019
 * [Full list of options for Trim Galore!](#full-list-of-options-for-trim-galore)
   * [RRBS-specific options](#rrbs-specific-options-mspi-digested-material)
   * [Paired-end specific options](#paired-end-specific-options)
+* [Appendix: Understanding the trimming report](#understanding-the-trimming-reports) 
 
-## Version 0.6.4
+## Version 0.6.10
 
 For all high throughput sequencing applications, we would recommend performing some quality control on the data, as it can often straight away point you towards the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). Thorough quality control and taking appropriate steps to remove problems is vital for the analysis of almost all sequencing applications. This is even more critical for the proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In our [brief guide to RRBS](https://github.com/FelixKrueger/TrimGalore/blob/master/Docs/RRBS_Guide.pdf) we discuss the following points:
 
@@ -196,16 +197,16 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 * `--small_rna`
   * Adapter sequence to be trimmed is the first 12bp of the _Illumina Small RNA 3' Adapter_ `TGGAATTCTCGG` instead of the default auto-detection of adapter sequence. 
   * Selecting to trim smallRNA adapters will also lower the `--length` value to 18bp. If the smallRNA libraries are paired-end then `-a2` will be set to the Illumina small RNA 5' adapter automatically (`GATCGTCGGACT`) unless `-a 2` had been defined explicitly.
+    
 * `--max_length <INT>`
-  * Discard reads that are longer than <INT> bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences.
+  Discard reads that are longer than <INT> bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences.
 
 * `--stringency <INT>`
   * Overlap with adapter sequence required to trim a sequence.
   * Defaults to a very stringent setting of `1`, _i.e._ even a single base pair of overlapping sequence will be trimmed of the 3' end of any read.
 
 * `-e <ERROR RATE>`
-  * Maximum allowed error rate (no. of errors divided by the length of the matching region)
-  * Default: `0.1`
+  * Maximum allowed error rate (no. of errors divided by the length of the matching region). Default: `0.1`
 
 * `--gzip`
   * Compress the output file with `gzip`.
@@ -215,10 +216,9 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
   * Output files won't be compressed with gzip. This overrides `--gzip`.
   
 * `--length <INT>`
-  * Discard reads that became shorter than length INT because of either quality or adapter trimming. A value of `0` effectively disables this behaviour.
-  * Default: `20 bp`.
-  * For paired-end files, both reads of a read-pair need to be longer than <INT> bp to be printed out to validated paired-end files (see option `--paired`). If only one read became too short there is the possibility of keeping such unpaired single-end reads (see `--retain_unpaired`).
-  * Default pair-cutoff: `20 bp`.
+  
+  * Discard reads that became shorter than length INT because of either quality or adapter trimming. A value of `0` effectively disables this behaviour. Default: `20 bp`.
+  * For paired-end files, both reads of a read-pair need to be longer than <INT> bp to be printed out to validated paired-end files (see option `--paired`). If only one read became too short there is the possibility of keeping such unpaired single-end reads (see `--retain_unpaired`). Default pair-cutoff: `20 bp`.
 
 * `--max_n COUNT`
   * The total number of `Ns` (as integer) a read may contain before it will be removed altogether.
@@ -275,6 +275,15 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 
   * It seems that `--cores 4` could be a sweet spot, anything above has diminishing returns.
 
+* `--demux <barcode_file>`
+
+   Some of our Ribo-seq runs contain an additional in-line sample barcode at the 3'-end of the read, e.g.:
+                        ribosome protected sequence - UUUUU - BBBB - AGATC.....................
+                        UUUUU = UMI
+                        BBBB = barcode
+                        AGATC... = adapter
+   This demux option will do a standard trimming run first, and demultiplex subsequent reads based on the barcode file. The barcode sequence gets removed from the read and is added to the read ID. 
+   Output files are named after the sample name. This option is only available for single-end reads. The barcode file should be in the format: `sample_name`	`barcode_sequence` (tab-delimited).
 
 
 ### SPECIFIC TRIMMING - without adapter/quality trimming
@@ -357,3 +366,94 @@ R2       <-----------------
   * Unpaired single-end read length cutoff needed for read 2 to be written to `.unpaired_2.fq` output file. These reads may be mapped in single-end mode.
   * Default: `35 bp`
   
+## Understanding the trimming reports
+
+
+
+### Paired-end report
+
+
+```
+SUMMARISING RUN PARAMETERS
+==========================
+Input filename: SLX_R1.fastq.gz
+Trimming mode: paired-end
+Trim Galore version: 0.6.7
+Cutadapt version: 3.4
+Python version: could not detect
+Number of cores used for trimming: 8
+Quality Phred score cutoff: 20
+Quality encoding type selected: ASCII+33
+Using Illumina adapter for trimming (count: 18772). Second best hit was smallRNA (count: 0)
+Adapter sequence: 'AGATCGGAAGAGC' (Illumina TruSeq, Sanger iPCR; auto-detected)
+Maximum trimming error rate: 0.1 (default)
+Minimum required adapter overlap (stringency): 1 bp
+Minimum required sequence length for both reads before a sequence pair gets removed: 20 bp
+All Read 1 sequences will be trimmed by 10 bp from their 5' end to avoid poor qualities or biases
+All Read 2 sequences will be trimmed by 10 bp from their 5' end to avoid poor qualities or biases (e.g. M-bias for BS-Seq applications)
+All Read 1 sequences will be trimmed by 10 bp from their 3' end to avoid poor qualities or biases
+All Read 2 sequences will be trimmed by 10 bp from their 3' end to avoid poor qualities or biases
+Running FastQC on the data once trimming has completed
+Output file will be GZIP compressed
+```
+
+```
+This is cutadapt 3.4 with Python 3.9.6
+Command line parameters: -j 8 -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC SLX_R1.fastq.gz
+Processing reads on 8 cores in single-end mode ...
+Finished in 6247.23 s (5 µs/read; 11.20 M reads/minute).
+
+=== Summary ===
+
+Total reads processed:           1,166,076,593
+Reads with adapters:               467,751,243 (40.1%)
+Reads written (passing filters): 1,166,076,593 (100.0%)
+
+Total basepairs processed: 174,911,488,950 bp
+Quality-trimmed:             674,749,563 bp (0.4%)
+Total written (filtered):  172,939,327,763 bp (98.9%)
+
+=== Adapter 1 ===
+
+Sequence: AGATCGGAAGAGC; Type: regular 3'; Length: 13; Trimmed: 467751243 times
+
+No. of allowed errors:
+1-9 bp: 0; 10-13 bp: 1
+
+Bases preceding removed adapters:
+  A: 35.9%
+  C: 0.7%
+  G: 17.1%
+  T: 46.3%
+  none/other: 0.0%
+
+Overview of removed sequences
+length  count   expect  max.err error counts
+1       316729650       291519148.2     0       316729650
+2       81494061        72879787.1      0       81494061
+3       27821736        18219946.8      0       27821736
+...
+148     127     17.4    1       41 86
+149     156     17.4    1       32 124
+150     3937    17.4    1       102 3835
+
+RUN STATISTICS FOR INPUT FILE: SLX_R1.fastq.gz
+=============================================
+1166076593 sequences processed in total
+```
+
+End of Read 2 trimming report:
+
+```
+148     49      17.4    1       38 11
+149     41      17.4    1       32 9
+150     113     17.4    1       98 15
+
+RUN STATISTICS FOR INPUT FILE: SLX_R2.fastq.gz
+=============================================
+1166076593 sequences processed in total
+
+Total number of sequences analysed for the sequence pair length validation: 1166076593
+
+Number of sequence pairs removed because at least one read was shorter than the length cutoff (20 bp): 3357967 (0.29%)
+```
