@@ -373,12 +373,12 @@ R2       <-----------------
 ## Understanding the trimming reports
 
 The trimming reports contain output from both Trim Galore and Cutadapt, which can lead to confusion about the number of short sequences remaining in trimmed files (see [#200](
-https://github.com/FelixKrueger/TrimGalore/issues/200)). This sections aims to provide some clarity on the different sections, using a paired-end EM-seq sample as example (which requires additional trimming from both 5' and 3' ends (see [here for more details](https://felixkrueger.github.io/Bismark/bismark/library_types/#em-seq-neb)).
+https://github.com/FelixKrueger/TrimGalore/issues/200)). This paragraph aims to provide some clarity on the different sections, using a paired-end EM-seq sample as example (which requires additional trimming from both 5' and 3' ends (see [here for more details](https://felixkrueger.github.io/Bismark/bismark/library_types/#em-seq-neb))).
 
 Trimming reports consist of three sections:
 
-1. The parameter summary
-2. The trimming summary
+1. Parameter summary
+2. Trimming summary
 3. Run statistics summary
    
 ### 1. Parameter summary
@@ -411,11 +411,14 @@ Output file will be GZIP compressed
 
 ### 2. Trimming summary
 
-This step carries out quality- and adapter trimming first, and applies additional processing (such as 5'- or 3'-clipping, N-clipping etc) after that. For **single-end files**, as last step in the process length- or N-content-based filtering is applied.
-**Please note:** For **paired-end runs**, Read 1 and Read 2 files are processed consecutively in single-end mode for quality- and adapter trimming, but no **filtering** is applied in the first istance.
+This step carries out quality- and adapter trimming first, and applies additional processing (such as 5'- or 3'-clipping, N-clipping etc) after that. 
 
+For **single-end files**, the last step in the process is length-based or N-content filtering.
+
+For **paired-end runs**, Read 1 and Read 2 files are processed consecutively in single-end mode for quality- and adapter trimming, but no **filtering** is applied in the first instance. Once both files have finished trimming, additional processing and length-based/N-content filtering is applied in a _validation process_ that works with the trimmed versions of Read 1 and Read 2 at the same time (to keep both files in sync).
 
 The following trimming summary comes straight from Cutadapt, and gets written out straight after an entire files is processed. 
+
 ```
 This is cutadapt 3.4 with Python 3.9.6
 Command line parameters: -j 8 -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC SLX_R1.fastq.gz
@@ -433,7 +436,7 @@ Quality-trimmed:             674,749,563 bp (0.4%)
 Total written (filtered):  172,939,327,763 bp (98.9%)
 ```
 
-Please note that the value reported by Cutadapt for `Reads written (passing filters)` is always 100% as filtering is applied at a later stage!
+**Please note** that the value reported by Cutadapt for `Reads written (passing filters)` is always 100% as filtering is applied at a later stage!
 
 ```
 ctd...
@@ -465,7 +468,9 @@ length  count   expect  max.err error counts
 
 ### 3. Run statistics summary
 
-#### Single-end
+As the last step, the number of sequences removed by filtering is printed to the trimming report.
+
+#### Single-end example
 
 ```
 RUN STATISTICS FOR INPUT FILE: SE.fastq.gz
@@ -474,7 +479,9 @@ RUN STATISTICS FOR INPUT FILE: SE.fastq.gz
 Sequences removed because they became shorter than the length cutoff of 20 bp:  552 (0.1%)
 ```
 
-#### Paired-end
+#### Paired-end example
+
+**Read 1:**
 
 ```
 RUN STATISTICS FOR INPUT FILE: SLX_R1.fastq.gz
@@ -482,7 +489,7 @@ RUN STATISTICS FOR INPUT FILE: SLX_R1.fastq.gz
 1166076593 sequences processed in total
 ```
 
-End of Read 2 trimming report:
+**Read 2:**
 
 ```
 148     49      17.4    1       38 11
@@ -497,3 +504,5 @@ Total number of sequences analysed for the sequence pair length validation: 1166
 
 Number of sequence pairs removed because at least one read was shorter than the length cutoff (20 bp): 3357967 (0.29%)
 ```
+
+It is this number `3357967 (0.29%)` at the end or the Read 2 trimming report that contains the total number of read pairs that had been removed from both Read 1 and Read 2 files because of filtering. 
