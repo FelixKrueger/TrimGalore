@@ -506,4 +506,4 @@ Total number of sequences analysed for the sequence pair length validation: 1166
 Number of sequence pairs removed because at least one read was shorter than the length cutoff (20 bp): 3357967 (0.29%)
 ```
 
-It is this number, `3,357,967 (0.29%)`, at the end of the Read 2 trimming report that contains the total number of read pairs that were removed from both Read 1 and Read 2 files because of filtering. 
+It is this number, `3,357,967 (0.29%)`, at the end of the Read 2 trimming report that contains the total number of read pairs that were removed from both Read 1 and Read 2 files because of filtering (min length, max length or max N). 
