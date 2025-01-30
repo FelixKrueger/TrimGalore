@@ -417,6 +417,8 @@ For **single-end files**, the last step in the process is length-based or N-cont
 
 For **paired-end runs**, Read 1 and Read 2 files are processed consecutively in single-end mode for quality- and adapter trimming, but no **filtering** is applied in the first instance. Once both files have finished trimming, additional processing and length-based/N-content filtering is applied in a _validation process_ that works with the trimmed versions of Read 1 and Read 2 at the same time (to keep both files in sync).
 
+**NOTE**: The trimming report for Read 1 is written out prior to the _validation process_, and thus only the trimming report for Read 2 contain the validation step's final statistics (including length filtering).
+
 The following trimming summary comes straight from Cutadapt, and gets written out straight after an entire file is processed. 
 
 ```
