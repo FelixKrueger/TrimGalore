@@ -1762,7 +1762,7 @@ sub demultiplex{
     # Print summary of barcode counts
     warn "\nDemultiplexing summary\n======================\n";
     foreach my $barcode (sort {$barcode_counts{$b} <=> $barcode_counts{$a} } keys %barcode_counts){
-        warn "$barcode\t$barcode_counts{$barcode}\n";
+        warn "$barcode\t$barcodes{$barcode}\t$barcode_counts{$barcode}\n";
     }
     warn "======================\n      ¯\\_(ツ)_/¯\n\nDemultiplexing complete. Enjoy!\n\n";
 
@@ -1775,7 +1775,7 @@ sub demultiplex{
     open (my $summary, '>', "$summary_file") or die "Couldn't open demultiplexing summary file: $!\n";
     print $summary "Demultiplexing summary\n======================\n";
     foreach my $barcode (sort {$barcode_counts{$b} <=> $barcode_counts{$a} } keys %barcode_counts){
-        print $summary "$barcode\t$barcode_counts{$barcode}\n";
+        print $summary "$barcode\t$barcodes{$barcode}\t$barcode_counts{$barcode}\n";
     }
     print $summary "======================\n      ¯\\_(ツ)_/¯\n";
     close $summary; 
