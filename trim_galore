@@ -34,7 +34,7 @@ my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.10dev';
-my $last_modified = "18 10 2024";
+my $last_modified = "11 13 2025";
 
 my $cutadapt_version;
 my $python_version;
@@ -1702,6 +1702,7 @@ sub demultiplex{
     # Keep track of barcode counts  
     my %barcode_counts;
     foreach my $barcode (keys %barcodes){
+        # warn "Barcode: $barcode. Setting count to 0\n";
         $barcode_counts{$barcode} = 0;
     }
 
@@ -1764,6 +1765,20 @@ sub demultiplex{
         warn "$barcode\t$barcode_counts{$barcode}\n";
     }
     warn "======================\n      ¯\\_(ツ)_/¯\n\nDemultiplexing complete. Enjoy!\n\n";
+
+    # Print demultiplexing summary to a file
+    my $summary_file = "$output_dir$trimmed_filename";
+    $summary_file =~ s/\.gz$//;
+    $summary_file =~ s/\.fq$//;
+    $summary_file .= "_demultiplexing_summary.txt"; 
+
+    open (my $summary, '>', "$summary_file") or die "Couldn't open demultiplexing summary file: $!\n";
+    print $summary "Demultiplexing summary\n======================\n";
+    foreach my $barcode (sort {$barcode_counts{$b} <=> $barcode_counts{$a} } keys %barcode_counts){
+        print $summary "$barcode\t$barcode_counts{$barcode}\n";
+    }
+    print $summary "======================\n      ¯\\_(ツ)_/¯\n";
+    close $summary; 
 }
 
 sub open_barcode_filehandles {
@@ -1796,6 +1811,9 @@ sub read_barcode_file {
     open (my $barcodes,'<',$barcode_file) or die "Couldn't open barcode file $barcode_file: $!\n";
     while (<$barcodes>){
         chomp;
+        # also carriage return characters
+        $_ =~ s/\r//g;
+
         my ($sample,$barcode) = split (/\t/);
         $barcodes{$barcode} = $sample;
     }
@@ -3472,6 +3490,8 @@ sub test_demux_file{
    
     while (my $line = <DEMUX>){
         chomp $line;
+        # also trim line feed characters
+        $line =~ s/\r//g;
         
         unless ($line =~ /\t/){
             die "Demultiplexing file $demux does not seem to be in the correct format. Please make sure it is in the format: >barcode_name<\t>barcode_sequence<\n";
@@ -3482,7 +3502,7 @@ sub test_demux_file{
         # Making sure the barcode is DNA letters only
         unless ($barcode =~ /^[ACTGN]+$/){
             warn "Barcode sequence in $demux must contain DNA characters only (A,C,T,G or N)!\n";
-            die "This was the current line:\t$description\t$barcode\n";
+            die "This was the current line:\t>$description\t$barcode<\n";
         }
     }
     warn "Demultiplexing file $demux seems to be in the correct format. Proceeding...\n";
