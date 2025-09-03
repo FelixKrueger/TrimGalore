@@ -1761,7 +1761,7 @@ sub validate_paired_end_files{
     }
 
 
-    warn "\n>>>>> Now validing the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
+    warn "\n>>>>> Now validating the length of the 2 paired-end infiles: $file_1 and $file_2 <<<<<\n";
 
     my $out_1 = $file_1;
     my $out_2 = $file_2;
