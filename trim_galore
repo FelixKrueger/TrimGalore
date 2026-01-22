@@ -7,7 +7,7 @@ use File::Spec;
 use File::Basename;
 use Cwd;
 
-## This program is Copyright (C) 2012-24, Felix Krueger (fkrueger@altoslabs.com)
+## This program is Copyright (C) 2012-26, Felix Krueger (fkrueger@altoslabs.com)
 ## Edited by Frankie James (github.com/fjames003) for multi-core support
 
 ## This program is free software: you can redistribute it and/or modify
@@ -34,7 +34,7 @@ my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.10dev';
-my $last_modified = "11 13 2025";
+my $last_modified = "22 01 2026";
 
 my $cutadapt_version;
 my $python_version;
@@ -3908,7 +3908,7 @@ Paired-end specific options:
                         '.unpaired_2.fq' output file. These reads may be mapped in single-end mode.
                         Default: 35 bp
 
-Last modified on 18 10 2024.
+Last modified on 22 01 2026.
 
 HELP
   exit;
