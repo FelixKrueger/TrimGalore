@@ -10,6 +10,8 @@
 
 - Added option  `--demux <barcode_file>` to demultiplex files from a 3'-end barcode after trimming is completed. Requested in [#199](https://github.com/FelixKrueger/TrimGalore/issues/199)
 
+- Fixed RRBS-specific trimming being silently bypassed when `--nextseq` and `--rrbs` are used together ([#210](https://github.com/FelixKrueger/TrimGalore/issues/210)).
+
 ### Version 0.6.10 (Release on 02 Feb 2023)
 
 - Fixed a missing default value of `gzip` as the default decompression path (see [here](https://github.com/FelixKrueger/TrimGalore/commit/a3c6a64ae71657f1a282e01134293e424177a7d5)).

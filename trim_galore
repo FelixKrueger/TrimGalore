@@ -34,7 +34,7 @@ my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
 my $trimmer_version = '0.6.10dev';
-my $last_modified = "22 01 2026";
+my $last_modified = "21 02 2026";
 
 my $cutadapt_version;
 my $python_version;
@@ -862,8 +862,8 @@ sub trim{
     ### Proceeding differently for RRBS and other type of libraries
     if ($rrbs){
       
-		### Skipping quality filtering for RRBS libraries if a quality cutoff of 0 was specified
-		if ($cutoff == 0){
+		### Skipping quality filtering for RRBS libraries if a quality cutoff of 0 was explicitly specified (and --nextseq not used)
+		if (($cutoff == 0 || !defined $cutoff) && !$nextseq){
 			warn "Quality cutoff selected was 0    -    Skipping quality trimming altogether\n\n";
 			# sleep (3);
 		}
@@ -874,10 +874,14 @@ sub trim{
 			$temp =~ s/$/_qual_trimmed.fastq/;
 			open (TEMP,'>',$output_dir.$temp) or die "Can't write to '$temp': $!";
 	  
-			warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
-			# sleep (1);
-		  
-			open (QUAL,"$path_to_cutadapt  $cores -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
+			if ($nextseq){
+				warn "  >>> Now performing 2-colour (NextSeq/NovaSeq) quality trimming with: $nextseq <<<\n\n";
+				open (QUAL,"$path_to_cutadapt  $cores -e $error_rate $nextseq -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
+			}
+			else{
+				warn "  >>> Now performing adaptive quality trimming with a Phred-score cutoff of: $cutoff <<<\n\n";
+				open (QUAL,"$path_to_cutadapt  $cores -e $error_rate -q $cutoff -a X $filename |") or die "Can't open pipe to Cutadapt: $!";
+			}
 
 			my $qual_count = 0;
 		  
@@ -949,7 +953,7 @@ sub trim{
   
 	my $pid;
   
-	if ($rrbs and $cutoff != 0){
+	if ($rrbs and ($nextseq or (defined $cutoff and $cutoff != 0))){
      
 		### optionally using 2 different adapters for read 1 and read 2
 		if ($validate and $a2){
@@ -1522,8 +1526,9 @@ sub trim{
 		my $percentage_shortened;
 		if ($count){
 			$percentage_shortened = sprintf ("%.1f",$quality_trimmed/$count*100);
-			warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
-			print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $cutoff):\t$quality_trimmed ($percentage_shortened%)\n";
+			my $quality_report = $nextseq ? $nextseq : $cutoff;
+			warn "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $quality_report):\t$quality_trimmed ($percentage_shortened%)\n";
+			print REPORT "Sequences were truncated to a varying degree because of deteriorating qualities (Phred score quality cutoff: $quality_report):\t$quality_trimmed ($percentage_shortened%)\n";
 		}
 		else{
 			warn "Unable to determine percentage of reads that were shortened because 0 lines were processed\n\n";
