@@ -3,10 +3,10 @@
 [<img title="Babraham Bioinformatics" style="float:right;margin:20px 20 20 600px" id="Babraham Bioinformatics" src="Images/logo.png" height="88" >](http://www.bioinformatics.babraham.ac.uk/index.html)
 
 
-Last update: 29/01/2025
+Last update: 24/02/2026
 
 #### Table of Contents
-* [Introduction](#version-0610)
+* [Introduction](#version-0611)
 * [Methodology](#adaptive-quality-and-adapter-trimming-with-trim-galore)
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
@@ -19,7 +19,7 @@ Last update: 29/01/2025
   * [Paired-end specific options](#paired-end-specific-options)
 * [Appendix: Understanding the trimming report](#understanding-the-trimming-reports) 
 
-## Version 0.6.10
+## Version 0.6.11
 
 For all high throughput sequencing applications, we would recommend performing some quality control on the data, as it can often straight away point you towards the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). Thorough quality control and taking appropriate steps to remove problems is vital for the analysis of almost all sequencing applications. This is even more critical for the proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In our [brief guide to RRBS](https://github.com/FelixKrueger/TrimGalore/blob/master/Docs/RRBS_Guide.pdf) we discuss the following points:
 

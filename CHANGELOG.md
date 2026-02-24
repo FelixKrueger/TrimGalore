@@ -1,14 +1,20 @@
 # Trim Galore Changelog
 
 
-### Version 0.6.10dev
+### Version 0.6.11 (Release on 24 Feb 2026)
 
 - Added option `--rename` to write clipped bases to the read ID. Works in all modes with options `--clip_(r1/r2)` and `--three_prime_clip_(r1/r2)`, as well as `--hardtrim5` and `--hardtrim3`. Requested in [this issue](https://github.com/FelixKrueger/TrimGalore/issues/166).
 
-- Added option `--bgiseq` to trim BGISEQ/DNBSEQ/MGISEQ adapters instead the default auto-detection. Uses `AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA` for Read 1 (BGI/MGI forward), and
+- Added option `--bgiseq` to trim BGISEQ/DNBSEQ/MGISEQ adapters instead of the default auto-detection. Uses `AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA` for Read 1 (BGI/MGI forward), and
  `AAGTCGGATCGTAGCCATGTCGTTCTGTGAGCCAAGGAGTTG` for Read 2 (BGI/MGI reverse). Requested in [issue#196](https://github.com/FelixKrueger/TrimGalore/issues/196)
 
 - Added option  `--demux <barcode_file>` to demultiplex files from a 3'-end barcode after trimming is completed. Requested in [#199](https://github.com/FelixKrueger/TrimGalore/issues/199)
+
+- Added option `--cutadapt_args "<ARGS>"` to pass extra arguments to Cutadapt, enabling use of advanced Cutadapt options without modifying Trim Galore.
+
+- Changed `--clock` Epigenetic Clock processing behaviour for the 5' end of Read 2.
+
+- Fixed `--demux` handling of CR (carriage return) characters in barcode files; fixed barcode length issue with NoCode; added barcode description to demux summary output.
 
 - Fixed RRBS-specific trimming being silently bypassed when `--nextseq` and `--rrbs` are used together ([#210](https://github.com/FelixKrueger/TrimGalore/issues/210)).
 

@@ -33,8 +33,8 @@ use Cwd;
 my $DOWARN = 1; # print on screen warning and text by default
 BEGIN { $SIG{'__WARN__'} = sub { warn $_[0] if $DOWARN } };
 
-my $trimmer_version = '0.6.10dev';
-my $last_modified = "21 02 2026";
+my $trimmer_version = '0.6.11';
+my $last_modified = "24 02 2026";
 
 my $cutadapt_version;
 my $python_version;
