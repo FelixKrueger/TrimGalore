@@ -60,6 +60,8 @@ pub struct DetectionResult {
     pub reads_scanned: usize,
     /// Human-readable report message
     pub message: String,
+    /// Whether adapter trimming was suppressed (--consider_already_trimmed)
+    pub suppressed: bool,
 }
 
 /// Maximum number of reads to scan for auto-detection.
@@ -73,7 +75,10 @@ const MAX_SCAN_READS: usize = 1_000_000;
 ///
 /// This matches TrimGalore's `autodetect_adapter_type()` behavior, which
 /// only scans `$ARGV[0]` (the first file, i.e., R1 for paired-end).
-pub fn autodetect_adapter<P: AsRef<Path>>(path: P) -> Result<DetectionResult> {
+pub fn autodetect_adapter<P: AsRef<Path>>(
+    path: P,
+    consider_already_trimmed: Option<usize>,
+) -> Result<DetectionResult> {
     let mut reader = FastqReader::open(path)?;
 
     let adapters = [
@@ -136,7 +141,21 @@ pub fn autodetect_adapter<P: AsRef<Path>>(path: P) -> Result<DetectionResult> {
         .collect();
     sorted_counts.sort_by(|a, b| b.2.cmp(&a.2));
 
-    let message = if winner_count == 0 {
+    // Check if adapter trimming should be suppressed
+    let suppressed = if let Some(threshold) = consider_already_trimmed {
+        winner_count <= threshold
+    } else {
+        false
+    };
+
+    let message = if suppressed {
+        format!(
+            "No auto-detected adapter sequence exceeded the user-specified \
+             'already adapter-trimmed' limit of {} counts. \
+             Only quality trimming will be carried out.",
+            consider_already_trimmed.unwrap()
+        )
+    } else if winner_count == 0 {
         format!(
             "No adapters detected in the first {} reads. Defaulting to Illumina adapter.",
             reads_scanned
@@ -152,11 +171,23 @@ pub fn autodetect_adapter<P: AsRef<Path>>(path: P) -> Result<DetectionResult> {
         )
     };
 
+    // If suppressed, return an empty adapter to skip adapter trimming
+    let final_preset = if suppressed {
+        AdapterPreset {
+            name: "already trimmed (adapter trimming suppressed)",
+            seq: "",
+            seq_r2: None,
+        }
+    } else {
+        preset
+    };
+
     Ok(DetectionResult {
-        adapter: preset,
+        adapter: final_preset,
         counts: counts_vec,
         reads_scanned,
         message,
+        suppressed,
     })
 }
 

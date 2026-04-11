@@ -53,6 +53,22 @@ fn main() -> Result<()> {
         }
     });
 
+    // RRBS: auto-set --clip_r2 2 for directional paired-end mode
+    // (removes filled-in C bases from Read 2 5' end at MspI sites)
+    let clip_r2 = if cli.rrbs && !cli.non_directional && cli.paired && cli.clip_r2.is_none() {
+        eprintln!("Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)");
+        Some(2)
+    } else {
+        cli.clip_r2
+    };
+
+    if cli.rrbs {
+        eprintln!("File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction");
+    }
+    if cli.non_directional {
+        eprintln!("File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction");
+    }
+
     // Build trim config
     let config = trimmer::TrimConfig {
         adapter: adapter_seq.as_bytes().to_vec(),
@@ -66,10 +82,15 @@ fn main() -> Result<()> {
         max_n,
         trim_n: cli.trim_n,
         clip_r1: cli.clip_r1,
-        clip_r2: cli.clip_r2,
+        clip_r2,
         three_prime_clip_r1: cli.three_prime_clip_r1,
         three_prime_clip_r2: cli.three_prime_clip_r2,
         rename: cli.rename,
+        nextseq: cli.nextseq.is_some(),
+        rrbs: cli.rrbs,
+        non_directional: cli.non_directional,
+        is_paired: cli.paired,
+        poly_a: cli.poly_a,
     };
 
     let gzip = !cli.dont_gzip;
@@ -122,7 +143,7 @@ fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>)> {
 
     // Auto-detect
     eprintln!("Auto-detecting adapter type...");
-    let detection = adapter::autodetect_adapter(&cli.input[0])?;
+    let detection = adapter::autodetect_adapter(&cli.input[0], cli.consider_already_trimmed)?;
     eprintln!("{}", detection.message);
 
     let r2 = detection.adapter.seq_r2.map(|s| s.to_string());
@@ -153,6 +174,7 @@ fn run_single(
 
     let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
     writer.flush()?;
+    drop(writer); // Finalize gzip stream (writes EOF trailer) before any downstream processing
 
     // Print summary
     eprintln!("\n=== Summary ===\n");
@@ -164,6 +186,19 @@ fn run_single(
         stats.too_short, pct(stats.too_short, stats.total_reads));
     eprintln!("Reads written (passing filters): {:>10} ({:.1}%)",
         stats.reads_written, pct(stats.reads_written, stats.total_reads));
+    if stats.rrbs_trimmed_3prime > 0 {
+        eprintln!("RRBS trimmed (3' end, adapter): {:>10} ({:.1}%)",
+            stats.rrbs_trimmed_3prime, pct(stats.rrbs_trimmed_3prime, stats.total_reads));
+    }
+    if stats.rrbs_trimmed_5prime > 0 {
+        eprintln!("RRBS trimmed (5' end, CAA/CGA): {:>10} ({:.1}%)",
+            stats.rrbs_trimmed_5prime, pct(stats.rrbs_trimmed_5prime, stats.total_reads));
+    }
+    if stats.poly_a_trimmed > 0 {
+        eprintln!("Reads with poly-A/T trimmed:     {:>10} ({:.1}%)",
+            stats.poly_a_trimmed, pct(stats.poly_a_trimmed, stats.total_reads));
+        eprintln!("  Poly-A/T bases removed:        {:>10}", stats.poly_a_bases_trimmed);
+    }
 
     // Write report
     if !cli.no_report_file {
@@ -179,7 +214,11 @@ fn run_single(
             paired: false,
             gzip,
             trim_n: cli.trim_n,
+            nextseq: cli.nextseq.is_some(),
+            rrbs: cli.rrbs,
+            non_directional: cli.non_directional,
             phred_encoding: cli.phred_offset(),
+            poly_a: cli.poly_a,
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
         };
 
@@ -188,6 +227,11 @@ fn run_single(
         report::write_report_header(&mut w, &report_cfg)?;
         report::write_run_stats(&mut w, &stats)?;
         eprintln!("\nReport: {}", report_path.display());
+    }
+
+    // Run FastQC if requested
+    if cli.fastqc || cli.fastqc_args.is_some() {
+        run_fastqc(&output_path, cli.fastqc_args.as_deref(), output_dir)?;
     }
 
     Ok(())
@@ -251,6 +295,10 @@ fn run_paired(
     writer_r2.flush()?;
     if let Some(ref mut w) = unpaired_w1 { w.flush()?; }
     if let Some(ref mut w) = unpaired_w2 { w.flush()?; }
+    drop(writer_r1); // Finalize gzip streams before downstream processing
+    drop(writer_r2);
+    drop(unpaired_w1);
+    drop(unpaired_w2);
 
     // Print summary
     eprintln!("\n=== Summary (Read 1) ===\n");
@@ -264,6 +312,15 @@ fn run_paired(
     eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
         stats_r2.reads_with_adapter,
         pct(stats_r2.reads_with_adapter, stats_r2.total_reads));
+
+    if stats_r1.poly_a_trimmed > 0 {
+        eprintln!("R1 reads with poly-A trimmed:    {:>10} ({:.1}%)",
+            stats_r1.poly_a_trimmed, pct(stats_r1.poly_a_trimmed, stats_r1.total_reads));
+    }
+    if stats_r2.poly_a_trimmed > 0 {
+        eprintln!("R2 reads with poly-T trimmed:    {:>10} ({:.1}%)",
+            stats_r2.poly_a_trimmed, pct(stats_r2.poly_a_trimmed, stats_r2.total_reads));
+    }
 
     eprintln!("\n=== Paired-end validation ===\n");
     eprintln!("Pairs analyzed:                  {:>10}", pair_stats.pairs_analyzed);
@@ -291,7 +348,11 @@ fn run_paired(
                 paired: true,
                 gzip,
                 trim_n: cli.trim_n,
+                nextseq: cli.nextseq.is_some(),
+                rrbs: cli.rrbs,
+                non_directional: cli.non_directional,
                 phred_encoding: cli.phred_offset(),
+                poly_a: cli.poly_a,
                 command_line: std::env::args().collect::<Vec<_>>().join(" "),
             };
 
@@ -304,7 +365,38 @@ fn run_paired(
         }
     }
 
+    // Run FastQC if requested
+    if cli.fastqc || cli.fastqc_args.is_some() {
+        run_fastqc(&output_r1, cli.fastqc_args.as_deref(), output_dir)?;
+        run_fastqc(&output_r2, cli.fastqc_args.as_deref(), output_dir)?;
+    }
+
     Ok(())
+}
+
+fn run_fastqc(output_path: &Path, fastqc_args: Option<&str>, output_dir: Option<&Path>) -> Result<()> {
+    let mut cmd = std::process::Command::new("fastqc");
+    if let Some(args) = fastqc_args {
+        for arg in args.split_whitespace() {
+            cmd.arg(arg);
+        }
+    }
+    if let Some(dir) = output_dir {
+        cmd.arg("-o").arg(dir);
+    }
+    cmd.arg(output_path);
+    eprintln!("\nRunning FastQC on {}", output_path.display());
+    let status = cmd.status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => {
+            eprintln!("Warning: FastQC exited with status {}", s);
+            Ok(())
+        }
+        Err(e) => {
+            anyhow::bail!("Failed to run FastQC: {}. Is it installed and in PATH?", e);
+        }
+    }
 }
 
 fn pct(part: usize, total: usize) -> f64 {

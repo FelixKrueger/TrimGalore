@@ -23,6 +23,14 @@ pub struct TrimStats {
     pub reads_written: usize,
     /// Per-length adapter match counts (for the length distribution table)
     pub adapter_length_counts: Vec<usize>,
+    /// RRBS: reads trimmed 2bp from 3' end (adapter contamination at MspI site)
+    pub rrbs_trimmed_3prime: usize,
+    /// RRBS non-directional: reads trimmed 2bp from 5' end (CAA/CGA)
+    pub rrbs_trimmed_5prime: usize,
+    /// Reads with poly-A/poly-T tails trimmed
+    pub poly_a_trimmed: usize,
+    /// Total bases removed by poly-A/poly-T trimming
+    pub poly_a_bases_trimmed: usize,
 }
 
 /// Statistics for paired-end validation.
@@ -56,7 +64,11 @@ pub struct TrimConfig {
     pub paired: bool,
     pub gzip: bool,
     pub trim_n: bool,
+    pub nextseq: bool,
+    pub rrbs: bool,
+    pub non_directional: bool,
     pub phred_encoding: u8,
+    pub poly_a: bool,
     pub command_line: String,
 }
 
@@ -67,7 +79,11 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     writeln!(w, "Input filename: (from command line)")?;
     writeln!(w, "Trimming mode: {}", if config.paired { "paired-end" } else { "single-end" })?;
     writeln!(w, "Trim Galore version: {} (Optimus Prime)", config.version)?;
-    writeln!(w, "Quality Phred score cutoff: {}", config.quality_cutoff)?;
+    if config.nextseq {
+        writeln!(w, "2-colour high quality G-trimming enabled, with quality cutoff: --nextseq-trim={}", config.quality_cutoff)?;
+    } else {
+        writeln!(w, "Quality Phred score cutoff: {}", config.quality_cutoff)?;
+    }
     writeln!(w, "Quality encoding type selected: ASCII+{}", config.phred_encoding)?;
     writeln!(w, "Adapter sequence: '{}' (user-specified or auto-detected)", config.adapter)?;
     if let Some(ref a2) = config.adapter_r2 {
@@ -80,6 +96,15 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
         config.length_cutoff)?;
     if config.trim_n {
         writeln!(w, "Removing Ns from the end of reads")?;
+    }
+    if config.rrbs {
+        writeln!(w, "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction")?;
+    }
+    if config.non_directional {
+        writeln!(w, "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction")?;
+    }
+    if config.poly_a {
+        writeln!(w, "Poly-A trimming enabled: removing poly-A tails from 3' end of R1/SE reads, and poly-T heads from 5' end of R2 reads")?;
     }
     if config.gzip {
         writeln!(w, "Output file will be GZIP compressed")?;
@@ -115,6 +140,24 @@ pub fn write_run_stats<W: Write>(w: &mut W, stats: &TrimStats) -> std::io::Resul
         format_number(stats.reads_written),
         percentage(stats.reads_written, stats.total_reads))?;
     writeln!(w)?;
+
+    if stats.rrbs_trimmed_3prime > 0 {
+        writeln!(w, "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t{} ({:.1}%)",
+            stats.rrbs_trimmed_3prime,
+            percentage(stats.rrbs_trimmed_3prime, stats.total_reads))?;
+    }
+    if stats.rrbs_trimmed_5prime > 0 {
+        writeln!(w, "RRBS reads trimmed by 2 bp at the start when read started with CAA or CGA in total:\t{} ({:.1}%)",
+            stats.rrbs_trimmed_5prime,
+            percentage(stats.rrbs_trimmed_5prime, stats.total_reads))?;
+    }
+    if stats.poly_a_trimmed > 0 {
+        writeln!(w, "Reads with poly-A/T trimmed:    {:>10} ({:.1}%)",
+            format_number(stats.poly_a_trimmed),
+            percentage(stats.poly_a_trimmed, stats.total_reads))?;
+        writeln!(w, "  Poly-A/T bases removed:       {:>10}",
+            format_number(stats.poly_a_bases_trimmed))?;
+    }
 
     Ok(())
 }

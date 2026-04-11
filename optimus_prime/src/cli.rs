@@ -93,6 +93,12 @@ pub struct Cli {
     #[clap(long = "three_prime_clip_R2")]
     pub three_prime_clip_r2: Option<usize>,
 
+    /// NextSeq/NovaSeq 2-colour quality trimming. Trailing high-quality G bases
+    /// are treated as no-signal artifacts and quality-trimmed. The value is the
+    /// quality cutoff (replaces -q). Mutually exclusive with --quality.
+    #[clap(long = "nextseq", alias = "2colour")]
+    pub nextseq: Option<u8>,
+
     /// Use Phred+64 quality encoding (Illumina 1.5). Default is Phred+33.
     #[clap(long = "phred64")]
     pub phred64: bool,
@@ -132,6 +138,39 @@ pub struct Cli {
     /// Add clipped sequences to read IDs (format: :clip5:SEQ:clip3:SEQ).
     #[clap(long = "rename")]
     pub rename: bool,
+
+    /// If auto-detected adapter count is at or below this threshold,
+    /// skip adapter trimming (only quality trimming proceeds).
+    /// Incompatible with explicit adapter presets.
+    #[clap(long = "consider_already_trimmed",
+           conflicts_with_all = &["illumina", "nextera", "small_rna", "stranded_illumina", "bgiseq"])]
+    pub consider_already_trimmed: Option<usize>,
+
+    /// RRBS mode for MspI-digested samples. Removes 2bp end-repair artifacts
+    /// at MspI cut sites after adapter trimming. In paired-end directional mode,
+    /// automatically sets --clip_R2 2 unless the user provides their own value.
+    #[clap(long = "rrbs")]
+    pub rrbs: bool,
+
+    /// Non-directional RRBS libraries. Reads starting with CAA or CGA get 2bp
+    /// trimmed from the 5' end. Requires --rrbs.
+    #[clap(long = "non_directional", requires = "rrbs")]
+    pub non_directional: bool,
+
+    /// Run FastQC on the trimmed output files.
+    #[clap(long = "fastqc")]
+    pub fastqc: bool,
+
+    /// Additional arguments to pass to FastQC. Implies --fastqc.
+    #[clap(long = "fastqc_args")]
+    pub fastqc_args: Option<String>,
+
+    /// Trim poly-A tails from the 3' end of Read 1 (and single-end reads),
+    /// and poly-T heads from the 5' end of Read 2. Runs after adapter trimming,
+    /// so poly-A tails hidden behind adapters are also removed.
+    /// Matches Cutadapt's --poly-a behavior.
+    #[clap(long = "poly_a", alias = "poly-a", alias = "polyA")]
+    pub poly_a: bool,
 }
 
 impl Cli {
@@ -159,6 +198,31 @@ impl Cli {
             anyhow::bail!("Stringency (minimum overlap) must be at least 1");
         }
 
+        if self.nextseq.is_some() && self.quality != 20 {
+            anyhow::bail!(
+                "--nextseq/--2colour and -q/--quality are mutually exclusive. \
+                 The nextseq value replaces the quality cutoff."
+            );
+        }
+
+        if let Some(val) = self.nextseq {
+            if val == 0 || val >= 200 {
+                anyhow::bail!(
+                    "NextSeq quality cutoff must be between 1 and 199, got {}",
+                    val
+                );
+            }
+        }
+
+        if let Some(threshold) = self.consider_already_trimmed {
+            if threshold > 10000 {
+                anyhow::bail!(
+                    "consider_already_trimmed value must be between 0 and 10000, got {}",
+                    threshold
+                );
+            }
+        }
+
         // Check input files exist
         for path in &self.input {
             if !path.exists() {
@@ -176,12 +240,9 @@ impl Cli {
 
     /// Get the effective quality cutoff value.
     ///
-    /// For Phred64, TrimGalore adds +31 to the cutoff value itself
-    /// (because Cutadapt always operates in Phred33 space internally).
-    /// Since we handle the offset directly in our quality trimmer,
-    /// we just return the raw cutoff — the phred_offset parameter
-    /// handles the encoding difference.
+    /// If `--nextseq` is set, uses that value as the cutoff.
+    /// Otherwise uses the standard `--quality` value.
     pub fn effective_quality_cutoff(&self) -> u8 {
-        self.quality
+        self.nextseq.unwrap_or(self.quality)
     }
 }

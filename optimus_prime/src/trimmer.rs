@@ -27,6 +27,19 @@ pub struct TrimConfig {
     pub three_prime_clip_r1: Option<usize>,
     pub three_prime_clip_r2: Option<usize>,
     pub rename: bool,
+    pub nextseq: bool,
+    pub rrbs: bool,
+    pub non_directional: bool,
+    pub is_paired: bool,
+    pub poly_a: bool,
+}
+
+/// Result of trimming a single read (carries per-read stats).
+pub struct TrimResult {
+    pub had_adapter: bool,
+    pub rrbs_trimmed_3prime: bool,
+    pub rrbs_trimmed_5prime: bool,
+    pub poly_a_trimmed: usize, // number of bases trimmed (0 = no poly-A found)
 }
 
 /// Trim a single read in-place according to the configured pipeline.
@@ -34,18 +47,28 @@ pub struct TrimConfig {
 /// Processing order (matches TrimGalore behavior):
 /// 1. Quality trim (3' BWA algorithm)
 /// 2. Adapter trim (semi-global alignment)
+/// 2.5. RRBS trim (MspI 2bp artifact removal, if --rrbs)
 /// 3. Trim Ns (if --trim-n)
 /// 4. 5'/3' fixed clipping
 ///
-/// Returns whether an adapter was found.
-pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> bool {
-    // 1. Quality trimming
+/// Returns a TrimResult with adapter and RRBS status.
+pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> TrimResult {
+    // 1. Quality trimming (NextSeq mode overrides G-base quality to 0)
     if config.quality_cutoff > 0 {
-        let trim_pos = quality::quality_trim_3prime(
-            record.qual.as_bytes(),
-            config.quality_cutoff,
-            config.phred_offset,
-        );
+        let trim_pos = if config.nextseq {
+            quality::quality_trim_3prime_nextseq(
+                record.seq.as_bytes(),
+                record.qual.as_bytes(),
+                config.quality_cutoff,
+                config.phred_offset,
+            )
+        } else {
+            quality::quality_trim_3prime(
+                record.qual.as_bytes(),
+                config.quality_cutoff,
+                config.phred_offset,
+            )
+        };
         record.truncate(trim_pos);
     }
 
@@ -71,6 +94,60 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
     } else {
         false
     };
+
+    // 2.5. RRBS trimming (MspI 2bp end-repair artifact removal)
+    let mut rrbs_trimmed_3prime = false;
+    let mut rrbs_trimmed_5prime = false;
+
+    if config.rrbs {
+        if config.non_directional {
+            // Non-directional: check all reads (R1 and R2)
+            if record.seq.len() > 2 {
+                let seq_bytes = record.seq.as_bytes();
+                if seq_bytes.len() >= 3
+                    && (seq_bytes[..3] == *b"CAA" || seq_bytes[..3] == *b"CGA")
+                {
+                    // Non-directional artifact: trim 2bp from 5' end
+                    record.clip_5prime(2);
+                    rrbs_trimmed_5prime = true;
+                } else if had_adapter {
+                    // Standard directional-style 3' trim
+                    record.truncate(record.seq.len() - 2);
+                    rrbs_trimmed_3prime = true;
+                }
+            }
+        } else {
+            // Directional RRBS: only R1/SE get 3' trimmed; R2 handled by auto-set clip_r2=2
+            if !(config.is_paired && is_r2) {
+                if record.seq.len() >= 2 && had_adapter {
+                    record.truncate(record.seq.len() - 2);
+                    rrbs_trimmed_3prime = true;
+                }
+            }
+        }
+    }
+
+    // 2.7. Poly-A / Poly-T trimming (after adapter + RRBS, before N-trimming)
+    // R1/SE: trim poly-A from 3' end. R2: trim poly-T from 5' end.
+    let mut poly_a_trimmed: usize = 0;
+    if config.poly_a && !record.is_empty() {
+        let revcomp = is_r2; // R2 gets poly-T (5' end) trimming
+        let seq_len_before = record.seq.len();
+        let idx = quality::poly_a_trim_index(record.seq.as_bytes(), revcomp);
+        if revcomp {
+            // Poly-T head: clip idx bases from 5' end
+            if idx > 0 {
+                record.clip_5prime(idx);
+                poly_a_trimmed = idx;
+            }
+        } else {
+            // Poly-A tail: truncate at idx
+            if idx < seq_len_before {
+                record.truncate(idx);
+                poly_a_trimmed = seq_len_before - idx;
+            }
+        }
+    }
 
     // 3. Trim Ns from both ends
     if config.trim_n {
@@ -99,7 +176,12 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         }
     }
 
-    had_adapter
+    TrimResult {
+        had_adapter,
+        rrbs_trimmed_3prime,
+        rrbs_trimmed_5prime,
+        poly_a_trimmed,
+    }
 }
 
 /// Run the single-end trimming pipeline.
@@ -116,9 +198,15 @@ pub fn run_single_end(
     while let Some(mut record) = reader.next_record()? {
         stats.total_reads += 1;
 
-        let had_adapter = trim_read(&mut record, config, false);
-        if had_adapter {
+        let result = trim_read(&mut record, config, false);
+        if result.had_adapter {
             stats.reads_with_adapter += 1;
+        }
+        if result.rrbs_trimmed_3prime { stats.rrbs_trimmed_3prime += 1; }
+        if result.rrbs_trimmed_5prime { stats.rrbs_trimmed_5prime += 1; }
+        if result.poly_a_trimmed > 0 {
+            stats.poly_a_trimmed += 1;
+            stats.poly_a_bases_trimmed += result.poly_a_trimmed;
         }
 
         // Apply filters
@@ -171,11 +259,23 @@ pub fn run_paired_end(
                 pair_stats.pairs_analyzed += 1;
 
                 // Trim both reads
-                let adapter_r1 = trim_read(&mut r1, config, false);
-                let adapter_r2 = trim_read(&mut r2, config, true);
+                let result_r1 = trim_read(&mut r1, config, false);
+                let result_r2 = trim_read(&mut r2, config, true);
 
-                if adapter_r1 { stats_r1.reads_with_adapter += 1; }
-                if adapter_r2 { stats_r2.reads_with_adapter += 1; }
+                if result_r1.had_adapter { stats_r1.reads_with_adapter += 1; }
+                if result_r2.had_adapter { stats_r2.reads_with_adapter += 1; }
+                if result_r1.rrbs_trimmed_3prime { stats_r1.rrbs_trimmed_3prime += 1; }
+                if result_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
+                if result_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
+                if result_r2.rrbs_trimmed_5prime { stats_r2.rrbs_trimmed_5prime += 1; }
+                if result_r1.poly_a_trimmed > 0 {
+                    stats_r1.poly_a_trimmed += 1;
+                    stats_r1.poly_a_bases_trimmed += result_r1.poly_a_trimmed;
+                }
+                if result_r2.poly_a_trimmed > 0 {
+                    stats_r2.poly_a_trimmed += 1;
+                    stats_r2.poly_a_bases_trimmed += result_r2.poly_a_trimmed;
+                }
 
                 // Pair-aware filtering
                 match filters::filter_paired_end(
