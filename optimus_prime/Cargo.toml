@@ -8,6 +8,7 @@ license = "GPL-3.0"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+gzp = { version = "2", default-features = false, features = ["deflate_rust"] }
 anyhow = "1"
 memchr = "2"
 log = "0.4"

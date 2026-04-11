@@ -97,6 +97,10 @@ fn main() -> Result<()> {
     let output_dir = cli.output_dir.as_deref();
     let basename = cli.basename.as_deref();
 
+    if cli.cores > 1 && gzip {
+        eprintln!("Using {} compression threads (parallel gzip)", cli.cores);
+    }
+
     if cli.paired {
         run_paired(&cli, &config, gzip, output_dir, basename, &adapter_seq, &adapter_r2_seq)?;
     } else {
@@ -170,7 +174,7 @@ fn run_single(
     eprintln!("Output:   {}", output_path.display());
 
     let mut reader = FastqReader::open(input)?;
-    let mut writer = FastqWriter::create(&output_path, gzip)?;
+    let mut writer = FastqWriter::create(&output_path, gzip, cli.cores)?;
 
     let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
     writer.flush()?;
@@ -263,8 +267,8 @@ fn run_paired(
 
     let mut reader_r1 = FastqReader::open(input_r1)?;
     let mut reader_r2 = FastqReader::open(input_r2)?;
-    let mut writer_r1 = FastqWriter::create(&output_r1, gzip)?;
-    let mut writer_r2 = FastqWriter::create(&output_r2, gzip)?;
+    let mut writer_r1 = FastqWriter::create(&output_r1, gzip, cli.cores)?;
+    let mut writer_r2 = FastqWriter::create(&output_r2, gzip, cli.cores)?;
 
     // Optional unpaired writers
     let (mut unpaired_w1, mut unpaired_w2) = if cli.retain_unpaired {
@@ -272,8 +276,8 @@ fn run_paired(
         eprintln!("  Unpaired R1: {}", up1.display());
         eprintln!("  Unpaired R2: {}", up2.display());
         (
-            Some(FastqWriter::create(&up1, gzip)?),
-            Some(FastqWriter::create(&up2, gzip)?),
+            Some(FastqWriter::create(&up1, gzip, cli.cores)?),
+            Some(FastqWriter::create(&up2, gzip, cli.cores)?),
         )
     } else {
         (None, None)

@@ -7,6 +7,8 @@ use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use gzp::deflate::Gzip;
+use gzp::par::compress::ParCompressBuilder;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
@@ -217,12 +219,13 @@ impl FastqReader {
 
 /// A streaming FASTQ writer that handles both plain and gzipped output.
 pub struct FastqWriter {
-    writer: Box<dyn Write>,
+    writer: Box<dyn Write + Send>,
 }
 
 impl FastqWriter {
     /// Create a new FASTQ writer. Gzip-compresses if `gzip` is true.
-    pub fn create<P: AsRef<Path>>(path: P, gzip: bool) -> Result<Self> {
+    /// When `cores` > 1 and gzip is enabled, uses parallel gzip compression.
+    pub fn create<P: AsRef<Path>>(path: P, gzip: bool, cores: usize) -> Result<Self> {
         let path = path.as_ref();
 
         // Ensure parent directory exists
@@ -236,12 +239,23 @@ impl FastqWriter {
         let file = File::create(path)
             .with_context(|| format!("Failed to create output file: {}", path.display()))?;
 
-        let writer: Box<dyn Write> = if gzip {
-            // Compression level 6 matches system gzip default
-            Box::new(BufWriter::with_capacity(
-                BUF_SIZE,
-                GzEncoder::new(file, Compression::new(6)),
-            ))
+        let writer: Box<dyn Write + Send> = if gzip {
+            if cores > 1 {
+                // Parallel gzip: split output into independently-compressed blocks
+                Box::new(
+                    ParCompressBuilder::<Gzip>::new()
+                        .num_threads(cores)
+                        .with_context(|| format!("Failed to create parallel compressor with {} threads", cores))?
+                        .compression_level(Compression::new(6))
+                        .from_writer(file),
+                )
+            } else {
+                // Single-threaded gzip with zlib-rs SIMD backend
+                Box::new(BufWriter::with_capacity(
+                    BUF_SIZE,
+                    GzEncoder::new(file, Compression::new(6)),
+                ))
+            }
         } else {
             Box::new(BufWriter::with_capacity(BUF_SIZE, file))
         };
@@ -376,7 +390,7 @@ mod tests {
         ];
 
         {
-            let mut writer = FastqWriter::create(&out_path, false)?;
+            let mut writer = FastqWriter::create(&out_path, false, 1)?;
             for rec in &records {
                 writer.write_record(rec)?;
             }

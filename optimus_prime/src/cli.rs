@@ -165,6 +165,11 @@ pub struct Cli {
     #[clap(long = "fastqc_args")]
     pub fastqc_args: Option<String>,
 
+    /// Number of compression threads for gzip output (default: 1).
+    /// Values > 1 enable parallel gzip compression for faster I/O.
+    #[clap(short = 'j', long = "cores", default_value = "1")]
+    pub cores: usize,
+
     /// Trim poly-A tails from the 3' end of Read 1 (and single-end reads),
     /// and poly-T heads from the 5' end of Read 2. Runs after adapter trimming,
     /// so poly-A tails hidden behind adapters are also removed.
@@ -221,6 +226,10 @@ impl Cli {
                     threshold
                 );
             }
+        }
+
+        if self.cores == 0 {
+            anyhow::bail!("--cores must be at least 1");
         }
 
         // Check input files exist
