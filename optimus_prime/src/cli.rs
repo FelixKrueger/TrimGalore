@@ -200,6 +200,13 @@ pub struct Cli {
     /// Bypasses normal trimming (IMPLICON preprocessing).
     #[clap(long = "implicon", alias = "umi_from_r2")]
     pub implicon: Option<usize>,
+
+    /// Demultiplex reads after trimming based on 3' inline barcodes.
+    /// Takes a barcode file (TSV: sample_name\tbarcode_sequence).
+    /// Barcode is removed from the read and appended to the read ID.
+    /// Single-end only.
+    #[clap(long = "demux")]
+    pub demux: Option<PathBuf>,
 }
 
 impl Cli {
@@ -273,6 +280,14 @@ impl Cli {
         }
         if self.implicon.is_some() && self.input.len() != 2 {
             anyhow::bail!("--implicon requires exactly 2 paired-end input files");
+        }
+        if let Some(ref demux_file) = self.demux {
+            if self.paired {
+                anyhow::bail!("Demultiplexing is only allowed for single-end files");
+            }
+            if !demux_file.exists() {
+                anyhow::bail!("Barcode file not found: {}", demux_file.display());
+            }
         }
 
         // Check input files exist

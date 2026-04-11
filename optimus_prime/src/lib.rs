@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod alignment;
 pub mod cli;
+pub mod demux;
 pub mod fastq;
 pub mod filters;
 pub mod io;

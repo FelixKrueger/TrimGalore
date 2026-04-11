@@ -6,6 +6,7 @@ use std::path::Path;
 
 use optimus_prime::adapter;
 use optimus_prime::cli::Cli;
+use optimus_prime::demux;
 use optimus_prime::fastq::{FastqReader, FastqWriter};
 use optimus_prime::filters::MaxNFilter;
 use optimus_prime::io as naming;
@@ -264,6 +265,14 @@ fn run_single(
     // Run FastQC if requested
     if cli.fastqc || cli.fastqc_args.is_some() {
         run_fastqc(&output_path, cli.fastqc_args.as_deref(), output_dir)?;
+    }
+
+    // Demultiplex if requested
+    if let Some(ref barcode_file) = cli.demux {
+        eprintln!("\nTrimming complete, starting demultiplexing procedure (based on 3' barcodes supplied as per file >{}<)",
+            barcode_file.display());
+        let barcodes = demux::read_barcode_file(barcode_file)?;
+        demux::demultiplex(&output_path, &barcodes, gzip, output_dir, cli.cores)?;
     }
 
     Ok(())
