@@ -21,7 +21,7 @@ fn main() -> Result<()> {
     cli.validate()?;
 
     // Input sanity check on first file
-    eprintln!("\nOptimus Prime v{}", env!("CARGO_PKG_VERSION"));
+    eprintln!("\nTrim Galore v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("=========================================\n");
 
     FastqReader::sanity_check(&cli.input[0])?;

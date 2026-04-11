@@ -390,7 +390,7 @@ impl FastqReader {
                 if record.seq.bytes().any(|b| b.is_ascii_digit()) {
                     bail!(
                         "File seems to be in SOLiD colorspace format which is not supported \
-                         by Optimus Prime (sequence is: '{}'). Colorspace data requires \
+                         by Trim Galore (sequence is: '{}'). Colorspace data requires \
                          separate processing!",
                         record.seq
                     );

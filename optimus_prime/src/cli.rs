@@ -3,12 +3,12 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-/// Optimus Prime — A fast, single-pass NGS adapter and quality trimmer.
+/// Trim Galore — A fast, single-pass NGS adapter and quality trimmer.
 ///
-/// Rust reimplementation of Trim Galore with single-pass paired-end processing.
-/// Output is compatible with TrimGalore for use with MultiQC and existing pipelines.
+/// Rewritten in Rust for speed. Drop-in replacement producing byte-identical
+/// output, compatible with MultiQC and existing pipelines.
 #[derive(Parser, Debug)]
-#[clap(name = "optimus_prime", version, about)]
+#[clap(name = "trim_galore", version, about)]
 pub struct Cli {
     /// Input FASTQ file(s). For paired-end, provide two files.
     #[clap(required = true)]

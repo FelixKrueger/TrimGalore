@@ -130,7 +130,7 @@ jobs:
         run: |
           mkdir -p /tmp/tg /tmp/op
           ./trim_galore -o /tmp/tg test_files/illumina_10K.fastq.gz
-          ./optimus_prime/target/release/optimus_prime -o /tmp/op test_files/illumina_10K.fastq.gz
+          ./optimus_prime/target/release/trim_galore -o /tmp/op test_files/illumina_10K.fastq.gz
           TG_MD5=$(gzip -dc /tmp/tg/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
           OP_MD5=$(gzip -dc /tmp/op/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
           echo "TrimGalore: $TG_MD5"
@@ -141,7 +141,7 @@ jobs:
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
           ./trim_galore --paired -o /tmp/tg test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
-          ./optimus_prime/target/release/optimus_prime --paired -o /tmp/op test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          ./optimus_prime/target/release/trim_galore --paired -o /tmp/op test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
           for f in BS-seq_10K_R1_val_1.fq.gz BS-seq_10K_R2_val_2.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
@@ -153,7 +153,7 @@ jobs:
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
           ./trim_galore --hardtrim5 30 -o /tmp/tg test_files/illumina_10K.fastq.gz
-          ./optimus_prime/target/release/optimus_prime --hardtrim5 30 -o /tmp/op test_files/illumina_10K.fastq.gz
+          ./optimus_prime/target/release/trim_galore --hardtrim5 30 -o /tmp/op test_files/illumina_10K.fastq.gz
           TG_MD5=$(gzip -dc /tmp/tg/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
           OP_MD5=$(gzip -dc /tmp/op/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
           [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: hardtrim5 differs!"; exit 1; }
@@ -162,7 +162,7 @@ jobs:
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
           ./trim_galore --clock --paired -o /tmp/tg test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
-          ./optimus_prime/target/release/optimus_prime --clock -o /tmp/op test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
+          ./optimus_prime/target/release/trim_galore --clock -o /tmp/op test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
           for f in clock_10K_R1.clock_UMI.R1.fq.gz clock_10K_R2.clock_UMI.R2.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
@@ -173,7 +173,7 @@ jobs:
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
           ./trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/tg test_files/demux_test.fastq.gz
-          ./optimus_prime/target/release/optimus_prime --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
+          ./optimus_prime/target/release/trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
           for f in demux_test_trimmed_sample1.fq.gz demux_test_trimmed_sample2.fq.gz demux_test_trimmed_sample3.fq.gz demux_test_trimmed_NoCode.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)

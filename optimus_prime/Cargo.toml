@@ -12,6 +12,10 @@ keywords = ["bioinformatics", "ngs", "adapter-trimming", "fastq", "quality-trimm
 categories = ["command-line-utilities", "science"]
 readme = "../README.md"
 
+[[bin]]
+name = "trim_galore"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }

@@ -61,8 +61,8 @@ jobs:
 
       - name: Package binary
         run: |
-          BIN=optimus_prime/target/${{ matrix.target }}/release/optimus_prime
-          ARCHIVE=optimus_prime-${{ github.ref_name }}-${{ matrix.target }}
+          BIN=optimus_prime/target/${{ matrix.target }}/release/trim_galore
+          ARCHIVE=trim_galore-${{ github.ref_name }}-${{ matrix.target }}
           mkdir -p "$ARCHIVE"
           cp "$BIN" "$ARCHIVE/"
           cp README.md LICENSE "$ARCHIVE/" 2>/dev/null || true
@@ -109,4 +109,4 @@ jobs:
         run: cargo install --path optimus_prime
 
       - name: Verify binary
-        run: optimus_prime --help
+        run: trim_galore --help
