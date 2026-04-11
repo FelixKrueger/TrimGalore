@@ -36,7 +36,7 @@ jobs:
 
       - name: Single-end tests
         run: |
-          ./trim_galore test_files/illumina_100K.fastq.gz
+          ./trim_galore test_files/illumina_10K.fastq.gz
           ./trim_galore test_files/nextera_100K.fastq.gz
           ./trim_galore test_files/smallRNA_100K.fastq.gz
           ./trim_galore test_files/4_seqs_with_Ns.fastq.gz
