@@ -173,7 +173,11 @@ fn run_single(
     eprintln!("Trimming: {}", input.display());
     eprintln!("Output:   {}", output_path.display());
 
-    let mut reader = FastqReader::open(input)?;
+    let mut reader = if cli.cores > 1 {
+        FastqReader::open_threaded(input)?
+    } else {
+        FastqReader::open(input)?
+    };
     let mut writer = FastqWriter::create(&output_path, gzip, cli.cores)?;
 
     let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
@@ -265,8 +269,16 @@ fn run_paired(
     eprintln!("  Output R1: {}", output_r1.display());
     eprintln!("  Output R2: {}", output_r2.display());
 
-    let mut reader_r1 = FastqReader::open(input_r1)?;
-    let mut reader_r2 = FastqReader::open(input_r2)?;
+    let mut reader_r1 = if cli.cores > 1 {
+        FastqReader::open_threaded(input_r1)?
+    } else {
+        FastqReader::open(input_r1)?
+    };
+    let mut reader_r2 = if cli.cores > 1 {
+        FastqReader::open_threaded(input_r2)?
+    } else {
+        FastqReader::open(input_r2)?
+    };
     let mut writer_r1 = FastqWriter::create(&output_r1, gzip, cli.cores)?;
     let mut writer_r2 = FastqWriter::create(&output_r2, gzip, cli.cores)?;
 

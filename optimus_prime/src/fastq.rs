@@ -121,14 +121,42 @@ impl FastqRecord {
     }
 }
 
+/// Number of records per batch sent through the threaded reader channel.
+/// Larger batches reduce channel overhead; 4096 records ≈ 1.5MB.
+const READER_BATCH_SIZE: usize = 4096;
+
+/// Number of batches buffered ahead in the channel.
+/// 4 batches × 4096 records = ~16K records of lookahead.
+const READER_CHANNEL_BATCHES: usize = 4;
+
+/// Internal source for a FastqReader — either direct I/O or a channel
+/// fed by a background decompression thread.
+enum ReaderSource {
+    Direct {
+        reader: Box<dyn BufRead>,
+        line_buf: String,
+    },
+    Threaded {
+        rx: std::sync::mpsc::Receiver<Result<Vec<FastqRecord>>>,
+        buffer: Vec<FastqRecord>,
+        buf_pos: usize,
+        _handle: std::thread::JoinHandle<()>,
+    },
+}
+
 /// A streaming FASTQ reader that handles both plain and gzipped files.
+///
+/// Supports two modes:
+/// - **Direct** (`open`): reads synchronously on the calling thread.
+/// - **Threaded** (`open_threaded`): spawns a background thread for
+///   decompression, feeding records through a bounded channel. This
+///   overlaps I/O decompression with trimming/compression on the main thread.
 pub struct FastqReader {
-    reader: Box<dyn BufRead>,
-    line_buf: String,
+    source: ReaderSource,
 }
 
 impl FastqReader {
-    /// Open a FASTQ file, auto-detecting gzip from the `.gz` extension.
+    /// Open a FASTQ file for synchronous reading.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let file = File::open(path)
@@ -144,41 +172,198 @@ impl FastqReader {
         };
 
         Ok(FastqReader {
-            reader,
-            line_buf: String::with_capacity(512),
+            source: ReaderSource::Direct {
+                reader,
+                line_buf: String::with_capacity(512),
+            },
         })
     }
 
-    /// Read the next FASTQ record. Returns None at EOF.
-    pub fn next_record(&mut self) -> Result<Option<FastqRecord>> {
+    /// Open a FASTQ file with background decompression on a dedicated thread.
+    ///
+    /// Returns immediately. A background thread reads and decompresses
+    /// the file, sending records through a bounded channel. The main
+    /// thread calls `next_record()` which receives from the channel,
+    /// overlapping decompression with processing.
+    pub fn open_threaded<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+
+        // Validate the file exists before spawning the thread
+        if !path.exists() {
+            bail!("Input file not found: {}", path.display());
+        }
+
+        let (tx, rx) = std::sync::mpsc::sync_channel(READER_CHANNEL_BATCHES);
+
+        let handle = std::thread::spawn(move || {
+            let mut reader = match Self::open_direct(&path) {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
+            };
+            let mut batch = Vec::with_capacity(READER_BATCH_SIZE);
+            loop {
+                match Self::read_next_direct(&mut reader) {
+                    Ok(Some(record)) => {
+                        batch.push(record);
+                        if batch.len() >= READER_BATCH_SIZE {
+                            let full_batch = std::mem::replace(
+                                &mut batch,
+                                Vec::with_capacity(READER_BATCH_SIZE),
+                            );
+                            if tx.send(Ok(full_batch)).is_err() {
+                                break; // receiver dropped
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // Send remaining records
+                        if !batch.is_empty() {
+                            let _ = tx.send(Ok(batch));
+                        }
+                        // Signal EOF with an empty batch
+                        let _ = tx.send(Ok(Vec::new()));
+                        break;
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(FastqReader {
+            source: ReaderSource::Threaded {
+                rx,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                _handle: handle,
+            },
+        })
+    }
+
+    /// Internal: open a file and return the raw reader components (for use in threads).
+    fn open_direct(path: &Path) -> Result<(Box<dyn BufRead + Send>, String)> {
+        let file = File::open(path)
+            .with_context(|| format!("Failed to open input file: {}", path.display()))?;
+
+        let reader: Box<dyn BufRead + Send> = if path
+            .extension()
+            .is_some_and(|ext| ext == "gz")
+        {
+            Box::new(BufReader::with_capacity(BUF_SIZE, GzDecoder::new(file)))
+        } else {
+            Box::new(BufReader::with_capacity(BUF_SIZE, file))
+        };
+
+        Ok((reader, String::with_capacity(512)))
+    }
+
+    /// Internal: read one record from a direct reader (used by both Direct mode and threads).
+    fn read_next_direct(
+        state: &mut (Box<dyn BufRead + Send>, String),
+    ) -> Result<Option<FastqRecord>> {
+        let (reader, line_buf) = state;
+
         // Line 1: ID (starts with @)
-        self.line_buf.clear();
-        if self.reader.read_line(&mut self.line_buf)? == 0 {
+        line_buf.clear();
+        if reader.read_line(line_buf)? == 0 {
             return Ok(None); // EOF
         }
-        let id = self.line_buf.trim_end_matches(['\n', '\r']).to_string();
+        let id = line_buf.trim_end_matches(['\n', '\r']).to_string();
 
         // Line 2: Sequence
-        self.line_buf.clear();
-        if self.reader.read_line(&mut self.line_buf)? == 0 {
+        line_buf.clear();
+        if reader.read_line(line_buf)? == 0 {
             bail!("Truncated FASTQ: missing sequence line after {}", id);
         }
-        let seq = self.line_buf.trim_end_matches(['\n', '\r']).to_string();
+        let seq = line_buf.trim_end_matches(['\n', '\r']).to_string();
 
         // Line 3: Plus line (discard)
-        self.line_buf.clear();
-        if self.reader.read_line(&mut self.line_buf)? == 0 {
+        line_buf.clear();
+        if reader.read_line(line_buf)? == 0 {
             bail!("Truncated FASTQ: missing '+' line after {}", id);
         }
 
         // Line 4: Quality
-        self.line_buf.clear();
-        if self.reader.read_line(&mut self.line_buf)? == 0 {
+        line_buf.clear();
+        if reader.read_line(line_buf)? == 0 {
             bail!("Truncated FASTQ: missing quality line after {}", id);
         }
-        let qual = self.line_buf.trim_end_matches(['\n', '\r']).to_string();
+        let qual = line_buf.trim_end_matches(['\n', '\r']).to_string();
 
         Ok(Some(FastqRecord { id, seq, qual }))
+    }
+
+    /// Read the next FASTQ record. Returns None at EOF.
+    pub fn next_record(&mut self) -> Result<Option<FastqRecord>> {
+        match &mut self.source {
+            ReaderSource::Direct { reader, line_buf } => {
+                // Line 1: ID (starts with @)
+                line_buf.clear();
+                if reader.read_line(line_buf)? == 0 {
+                    return Ok(None); // EOF
+                }
+                let id = line_buf.trim_end_matches(['\n', '\r']).to_string();
+
+                // Line 2: Sequence
+                line_buf.clear();
+                if reader.read_line(line_buf)? == 0 {
+                    bail!("Truncated FASTQ: missing sequence line after {}", id);
+                }
+                let seq = line_buf.trim_end_matches(['\n', '\r']).to_string();
+
+                // Line 3: Plus line (discard)
+                line_buf.clear();
+                if reader.read_line(line_buf)? == 0 {
+                    bail!("Truncated FASTQ: missing '+' line after {}", id);
+                }
+
+                // Line 4: Quality
+                line_buf.clear();
+                if reader.read_line(line_buf)? == 0 {
+                    bail!("Truncated FASTQ: missing quality line after {}", id);
+                }
+                let qual = line_buf.trim_end_matches(['\n', '\r']).to_string();
+
+                Ok(Some(FastqRecord { id, seq, qual }))
+            }
+            ReaderSource::Threaded { rx, buffer, buf_pos, .. } => {
+                // Return next record from current batch buffer
+                if *buf_pos < buffer.len() {
+                    let idx = *buf_pos;
+                    *buf_pos += 1;
+                    // Take the record out, replacing with a dummy to avoid clone
+                    let record = std::mem::replace(
+                        &mut buffer[idx],
+                        FastqRecord { id: String::new(), seq: String::new(), qual: String::new() },
+                    );
+                    return Ok(Some(record));
+                }
+                // Buffer exhausted — receive next batch
+                match rx.recv() {
+                    Ok(Ok(batch)) => {
+                        if batch.is_empty() {
+                            Ok(None) // EOF signal
+                        } else {
+                            *buffer = batch;
+                            *buf_pos = 1;
+                            // Return first record from new batch
+                            let record = std::mem::replace(
+                                &mut buffer[0],
+                                FastqRecord { id: String::new(), seq: String::new(), qual: String::new() },
+                            );
+                            Ok(Some(record))
+                        }
+                    }
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Ok(None), // channel closed
+                }
+            }
+        }
     }
 
     /// Perform input sanity checks on the first record.
