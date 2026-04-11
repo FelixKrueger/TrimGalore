@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master]
+
+jobs:
+  trim-galore:
+    name: Trim Galore (Perl)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          channels: bioconda,conda-forge,defaults
+          channel-priority: strict
+          auto-activate-base: true
+
+      - name: Install dependencies
+        run: |
+          conda install -y cutadapt fastqc
+
+      - name: Verify dependencies
+        run: |
+          perl --version | head -2
+          cutadapt --version
+          fastqc --version
+
+      - name: Single-end tests
+        run: |
+          ./trim_galore test_files/illumina_100K.fastq.gz
+          ./trim_galore test_files/nextera_100K.fastq.gz
+          ./trim_galore test_files/smallRNA_100K.fastq.gz
+          ./trim_galore test_files/4_seqs_with_Ns.fastq.gz
+
+      - name: Demux test
+        run: |
+          ./trim_galore --demux test_files/demux_test_samplesheet.txt test_files/demux_test.fastq.gz
+
+      - name: Expected failures
+        run: |
+          # Colorspace — should be rejected
+          ! ./trim_galore test_files/colorspace_file.fastq 2>&1
+          # Truncated gzip — should fail
+          ! ./trim_galore test_files/truncated.fq.gz 2>&1
+          # Empty file — should fail
+          ! ./trim_galore test_files/empty_file.fastq 2>&1
+
+  optimus-prime:
+    name: Optimus Prime (Rust)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            optimus_prime/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('optimus_prime/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run tests
+        working-directory: optimus_prime
+        run: cargo test
+
+      - name: Build release
+        working-directory: optimus_prime
+        run: cargo build --release
