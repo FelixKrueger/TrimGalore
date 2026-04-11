@@ -2,8 +2,15 @@
 name = "optimus_prime"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 description = "A fast, single-pass NGS adapter and quality trimmer — Rust reimplementation of Trim Galore"
 license = "GPL-3.0"
+authors = ["Felix Krueger"]
+repository = "https://github.com/FelixKrueger/TrimGalore"
+homepage = "https://github.com/FelixKrueger/TrimGalore"
+keywords = ["bioinformatics", "ngs", "adapter-trimming", "fastq", "quality-trimming"]
+categories = ["command-line-utilities", "science"]
+readme = "../README.md"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

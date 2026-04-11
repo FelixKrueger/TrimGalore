@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, optimus_prime]
   pull_request:
     branches: [master]
 
@@ -86,3 +86,100 @@ jobs:
       - name: Build release
         working-directory: optimus_prime
         run: cargo build --release
+
+  validation:
+    name: Validate OP vs TrimGalore
+    runs-on: ubuntu-latest
+    needs: [trim-galore, optimus-prime]
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          channels: bioconda,conda-forge,defaults
+          channel-priority: strict
+          auto-activate-base: true
+
+      - name: Install dependencies
+        run: conda install -y cutadapt fastqc
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            optimus_prime/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('optimus_prime/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build Optimus Prime
+        working-directory: optimus_prime
+        run: cargo build --release
+
+      - name: Validate single-end output
+        run: |
+          mkdir -p /tmp/tg /tmp/op
+          ./trim_galore -o /tmp/tg test_files/illumina_10K.fastq.gz
+          ./optimus_prime/target/release/optimus_prime -o /tmp/op test_files/illumina_10K.fastq.gz
+          TG_MD5=$(gzip -dc /tmp/tg/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
+          OP_MD5=$(gzip -dc /tmp/op/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
+          echo "TrimGalore: $TG_MD5"
+          echo "OptimusPrime: $OP_MD5"
+          [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: single-end output differs!"; exit 1; }
+
+      - name: Validate paired-end output
+        run: |
+          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          ./trim_galore --paired -o /tmp/tg test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          ./optimus_prime/target/release/optimus_prime --paired -o /tmp/op test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          for f in BS-seq_10K_R1_val_1.fq.gz BS-seq_10K_R2_val_2.fq.gz; do
+            TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
+            OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
+            echo "$f: TG=$TG_MD5 OP=$OP_MD5"
+            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
+          done
+
+      - name: Validate hardtrim5
+        run: |
+          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          ./trim_galore --hardtrim5 30 -o /tmp/tg test_files/illumina_10K.fastq.gz
+          ./optimus_prime/target/release/optimus_prime --hardtrim5 30 -o /tmp/op test_files/illumina_10K.fastq.gz
+          TG_MD5=$(gzip -dc /tmp/tg/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
+          OP_MD5=$(gzip -dc /tmp/op/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
+          [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: hardtrim5 differs!"; exit 1; }
+
+      - name: Validate clock mode
+        run: |
+          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          ./trim_galore --clock --paired -o /tmp/tg test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
+          ./optimus_prime/target/release/optimus_prime --clock -o /tmp/op test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
+          for f in clock_10K_R1.clock_UMI.R1.fq.gz clock_10K_R2.clock_UMI.R2.fq.gz; do
+            TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
+            OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
+            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: clock $f differs!"; exit 1; }
+          done
+
+      - name: Validate demux
+        run: |
+          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          ./trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/tg test_files/demux_test.fastq.gz
+          ./optimus_prime/target/release/optimus_prime --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
+          for f in demux_test_trimmed_sample1.fq.gz demux_test_trimmed_sample2.fq.gz demux_test_trimmed_sample3.fq.gz demux_test_trimmed_NoCode.fq.gz; do
+            TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
+            OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
+            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: demux $f differs!"; exit 1; }
+          done
+          diff /tmp/tg/demux_test_trimmed_demultiplexing_summary.txt /tmp/op/demux_test_trimmed_demultiplexing_summary.txt
+
+      - name: All validations passed
+        run: echo "All Optimus Prime outputs are byte-identical to TrimGalore"
