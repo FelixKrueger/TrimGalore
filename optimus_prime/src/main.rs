@@ -10,6 +10,7 @@ use optimus_prime::fastq::{FastqReader, FastqWriter};
 use optimus_prime::filters::MaxNFilter;
 use optimus_prime::io as naming;
 use optimus_prime::report;
+use optimus_prime::specialty;
 use optimus_prime::trimmer;
 
 fn main() -> Result<()> {
@@ -23,6 +24,31 @@ fn main() -> Result<()> {
     eprintln!("=========================================\n");
 
     FastqReader::sanity_check(&cli.input[0])?;
+
+    let gzip = !cli.dont_gzip;
+    let output_dir = cli.output_dir.as_deref();
+
+    // Specialty modes — bypass normal trimming pipeline entirely
+    if let Some(n) = cli.hardtrim5 {
+        for input in &cli.input {
+            specialty::hardtrim5(input, n, gzip, output_dir, cli.rename, cli.cores)?;
+        }
+        return Ok(());
+    }
+    if let Some(n) = cli.hardtrim3 {
+        for input in &cli.input {
+            specialty::hardtrim3(input, n, gzip, output_dir, cli.rename, cli.cores)?;
+        }
+        return Ok(());
+    }
+    if cli.clock {
+        specialty::clock(&cli.input[0], &cli.input[1], gzip, output_dir, cli.cores)?;
+        return Ok(());
+    }
+    if let Some(umi_len) = cli.implicon {
+        specialty::implicon(&cli.input[0], &cli.input[1], umi_len, gzip, output_dir, cli.cores)?;
+        return Ok(());
+    }
 
     // Determine adapter
     let (adapter_name, adapter_seq, adapter_r2_seq) = resolve_adapter(&cli)?;
@@ -93,8 +119,6 @@ fn main() -> Result<()> {
         poly_a: cli.poly_a,
     };
 
-    let gzip = !cli.dont_gzip;
-    let output_dir = cli.output_dir.as_deref();
     let basename = cli.basename.as_deref();
 
     if cli.cores > 1 && gzip {

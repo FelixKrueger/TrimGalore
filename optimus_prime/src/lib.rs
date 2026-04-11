@@ -6,4 +6,5 @@ pub mod filters;
 pub mod io;
 pub mod quality;
 pub mod report;
+pub mod specialty;
 pub mod trimmer;

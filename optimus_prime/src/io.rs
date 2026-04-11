@@ -111,7 +111,7 @@ pub fn report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
 /// Strip FASTQ extensions from a filename, returning just the base stem.
 ///
 /// Handles: .fastq.gz, .fastq, .fq.gz, .fq
-fn strip_fastq_extensions(path: &Path) -> String {
+pub fn strip_fastq_extensions(path: &Path) -> String {
     let name = path
         .file_name()
         .unwrap_or_default()

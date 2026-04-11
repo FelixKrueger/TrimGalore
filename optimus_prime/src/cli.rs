@@ -176,6 +176,30 @@ pub struct Cli {
     /// Matches Cutadapt's --poly-a behavior.
     #[clap(long = "poly_a", alias = "poly-a", alias = "polyA")]
     pub poly_a: bool,
+
+    // --- Specialty modes (run-and-exit, bypass normal trimming) ---
+
+    /// Hard-trim to keep only the first N bases from the 5' end.
+    /// Bypasses adapter/quality trimming entirely.
+    #[clap(long = "hardtrim5")]
+    pub hardtrim5: Option<usize>,
+
+    /// Hard-trim to keep only the last N bases from the 3' end.
+    /// Bypasses adapter/quality trimming entirely.
+    #[clap(long = "hardtrim3")]
+    pub hardtrim3: Option<usize>,
+
+    /// Epigenetic Clock mode (paired-end only). Extracts 8bp UMI + 4bp
+    /// fixed sequence (CAGT) from both reads, appends to read IDs, and
+    /// clips R1 at position 13, R2 at position 15. Bypasses normal trimming.
+    #[clap(long = "clock")]
+    pub clock: bool,
+
+    /// Transfer the first N bases from Read 2 as a UMI barcode to both
+    /// read IDs, then clip R2 by N bases. Paired-end only.
+    /// Bypasses normal trimming (IMPLICON preprocessing).
+    #[clap(long = "implicon", alias = "umi_from_r2")]
+    pub implicon: Option<usize>,
 }
 
 impl Cli {
@@ -188,7 +212,9 @@ impl Cli {
             );
         }
 
-        if !self.paired && self.input.len() > 1 {
+        if !self.paired && self.input.len() > 1
+            && !self.clock && self.implicon.is_none()
+        {
             anyhow::bail!(
                 "Single-end mode expects 1 input file, got {}. Use --paired for paired-end.",
                 self.input.len()
@@ -230,6 +256,23 @@ impl Cli {
 
         if self.cores == 0 {
             anyhow::bail!("--cores must be at least 1");
+        }
+
+        if let Some(n) = self.hardtrim5 {
+            if n == 0 || n >= 1000 {
+                anyhow::bail!("--hardtrim5 must be between 1 and 999, got {}", n);
+            }
+        }
+        if let Some(n) = self.hardtrim3 {
+            if n == 0 || n >= 1000 {
+                anyhow::bail!("--hardtrim3 must be between 1 and 999, got {}", n);
+            }
+        }
+        if self.clock && self.input.len() != 2 {
+            anyhow::bail!("--clock requires exactly 2 paired-end input files");
+        }
+        if self.implicon.is_some() && self.input.len() != 2 {
+            anyhow::bail!("--implicon requires exactly 2 paired-end input files");
         }
 
         // Check input files exist
