@@ -41,6 +41,10 @@ jobs:
           ./trim_galore test_files/smallRNA_100K.fastq.gz
           ./trim_galore test_files/4_seqs_with_Ns.fastq.gz
 
+      - name: Paired-end tests
+        run: |
+          ./trim_galore --paired test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+
       - name: Demux test
         run: |
           ./trim_galore --demux test_files/demux_test_samplesheet.txt test_files/demux_test.fastq.gz
