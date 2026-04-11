@@ -1,0 +1,9 @@
+pub mod adapter;
+pub mod alignment;
+pub mod cli;
+pub mod fastq;
+pub mod filters;
+pub mod io;
+pub mod quality;
+pub mod report;
+pub mod trimmer;

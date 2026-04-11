@@ -1,0 +1,14 @@
+[package]
+name = "optimus_prime"
+version = "0.1.0"
+edition = "2021"
+description = "A fast, single-pass NGS adapter and quality trimmer — Rust reimplementation of Trim Galore"
+license = "GPL-3.0"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+anyhow = "1"
+memchr = "2"
+log = "0.4"
+env_logger = "0.11"
