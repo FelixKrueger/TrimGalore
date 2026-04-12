@@ -36,9 +36,9 @@ All outputs verified byte-identical (decompressed) across all core counts via md
 
 ![Wall Time Comparison](benchmark_wall_time.png)
 
-![Scaling Comparison](benchmark_scaling.png)
+![Thread Overhead & CPU Efficiency](benchmark_threads_cpu.png)
 
-![CPU Efficiency Comparison](benchmark_cpu_time.png)
+![Scaling Comparison](benchmark_scaling.png)
 
 ### Server benchmark — Intel Xeon 6975P-C (32 vCPU)
 
