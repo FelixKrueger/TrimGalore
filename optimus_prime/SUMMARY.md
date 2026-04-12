@@ -151,7 +151,7 @@ At `--cores 1`, the worker-pool is bypassed entirely — a single thread does ev
 
 At `-j 8` vs `--cores 8`: up to ~27 vs exactly 12 threads, yet 1.9x faster.
 
-Parallel efficiency on the Xeon: 82% (2 cores) → 82% (4 cores) → 81% (8 cores) → 78% (16 cores). The gentle slope means adding more cores continues to pay off up to at least 16.
+Parallel efficiency on the Xeon: 82% (2 cores) → 82% (4 cores) → 81% (8 cores) → 78% (16 cores) → 64% (24 cores). Scaling remains near-linear up to 16 cores, with diminishing returns beyond that. For most production use, `--cores 8` to `--cores 16` is the sweet spot — beyond 16, additional cores still help but deliver progressively less benefit per core.
 
 ### Benchmark methodology
 
@@ -169,3 +169,34 @@ Parallel efficiency on the Xeon: 82% (2 cores) → 82% (4 cores) → 81% (8 core
 - **Lower memory:** 5 MB single-threaded, ~10 MB per additional worker. No Python interpreter, no subprocess pipes.
 - **CPU-efficient:** Uses 2.6–5x less CPU time than Trim Galore — meaningful on shared HPC clusters where CPU-hours = money.
 - **Reproducible:** Pure Rust with deterministic behavior across platforms.
+- **New features:** Poly-G trimming (auto-detected for 2-colour instruments like NovaSeq/NextSeq) and poly-A trimming, both built in without external tools.
+
+## Why switch to Trim Galore - Oxidized Edition?
+
+The improvements are multilayered — there is no single "60x faster" headline, because the gains compound across several dimensions simultaneously:
+
+### 1. Faster wall time at the same resource allocation
+
+At the typical nf-core allocation of 12 CPUs, the Oxidized Edition with `--cores 8` finishes in **92 seconds vs 171 seconds** — nearly **twice as fast**. With `--cores 16`, it drops to **48 seconds (3.6x faster)** while still scaling efficiently. This means shorter pipeline runtimes, faster turnaround on time-sensitive analyses, and less queuing pressure on shared clusters.
+
+### 2. Dramatically lower CPU cost — and CO₂
+
+The Oxidized Edition uses **2.3–5x less CPU time** than Trim Galore for the same job. CPU time is what cloud providers bill for and what drives energy consumption:
+
+| Scenario | TG CPU time | Oxidized CPU time | **CPU savings** |
+|---|---|---|---|
+| Single-threaded | 3,001s | 599s | **5.0x** |
+| 8 cores (nf-core default) | 2,040s | 784s | **2.6x** |
+
+On AWS at ~$0.05/vCPU-hour, trimming 56M PE reads costs roughly **$0.34 with TG** vs **$0.13 with Oxidized** (at 8 cores). Across thousands of samples in a large cohort, this adds up to meaningful savings in both budget and carbon footprint.
+
+### 3. More features, fewer dependencies
+
+The Oxidized Edition includes features not available in vanilla Trim Galore:
+- **Poly-G trimming** with data-driven auto-detection for 2-colour instruments (NovaSeq, NextSeq, NovaSeq X) — no need for separate tools or manual `--nextseq` flags
+- **Poly-A trimming** for 3' poly-A tail removal
+- **Single binary** with zero external dependencies — no Python, no Cutadapt, no pigz, no conda environment
+
+### 4. Recommended core allocation
+
+Based on the benchmarks, we recommend `--cores 8` to `--cores 16` for production use. Scaling is near-linear up to 16 cores (78% parallel efficiency), with diminishing returns beyond that. For nf-core pipelines, the Oxidized Edition can use the full CPU allocation directly — no need to subtract cores for subprocess overhead, since everything runs in a single process.
