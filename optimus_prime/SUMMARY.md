@@ -36,6 +36,8 @@ All outputs verified byte-identical (decompressed) across all core counts via md
 
 ![Wall Time Comparison](benchmark_wall_time.png)
 
+![Scaling Comparison](benchmark_scaling.png)
+
 ![CPU Efficiency Comparison](benchmark_cpu_time.png)
 
 ### Server benchmark — Intel Xeon 6975P-C (32 vCPU)
@@ -110,15 +112,38 @@ The real wins come from **architectural differences:**
 
 2. **Worker-pool parallelism.** Each worker independently handles trimming **and** gzip compression for its batch of reads, producing independently-compressed gzip blocks concatenated in order (valid per RFC 1952). This distributes the dominant cost (compression) across N workers instead of funneling through one thread.
 
-3. **Fewer threads, more work per thread.** Trim Galore's `-j N` spawns ~3N+3 threads across Cutadapt, pigz, and Perl. The Oxidized Edition uses N+4 threads (N workers + 2 decompressors + 1 batcher + 1 writer). At `-j 8` vs `--cores 8`: 27 threads vs 12 threads, yet 1.9x faster.
+3. **Fewer threads, more work per thread.** When you pass `-j N` to Trim Galore, three separate programs each independently spawn N threads:
 
 ```
-Architecture (--cores N):
-  2 decompression threads (background, one per input file)
-  1 batcher thread (creates numbered batches of 4096 reads)
-  N worker threads (each: trim + gzip compress → independent gzip block)
-  1 main thread (collects blocks in order → writes to output files)
+Trim Galore -j N thread breakdown:
+  Cutadapt:          N workers + 1 reader + 1 writer  =  N+2
+  pigz (compress):   N threads                         =  N
+  pigz (decompress): N threads                         =  N
+  Perl:              1 main process                    =  1
+                                                       ≈ 3N+3 total
 ```
+
+The Oxidized Edition uses a single process with a fixed infrastructure cost of +4 threads:
+
+```
+Oxidized Edition --cores N thread breakdown:
+  N worker threads (each: trim + gzip compress → independent gzip block)
+  2 decompression threads (one per input file)
+  1 batcher thread (creates numbered batches of 4096 reads)
+  1 main thread (collects blocks in order → writes to output files)
+                                                       = N+4 total
+```
+
+At `--cores 1`, the worker-pool is bypassed entirely — a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). The infrastructure cost only applies from `--cores 2` upward, where each additional core adds exactly 1 thread and ~10 MB of memory.
+
+| Cores | TG threads (3N+3) | Oxidized threads (N+4) |
+|------:|-------------------:|-----------------------:|
+| 1 | 6 | 1 |
+| 4 | 15 | 8 |
+| 8 | 27 | 12 |
+| 16 | — | 20 |
+
+At `-j 8` vs `--cores 8`: 27 threads vs 12 threads, yet 1.9x faster.
 
 Parallel efficiency on the Xeon: 82% (2 cores) → 82% (4 cores) → 81% (8 cores) → 78% (16 cores). The gentle slope means adding more cores continues to pay off up to at least 16.
 
