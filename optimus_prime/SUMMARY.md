@@ -1,10 +1,10 @@
-# Optimus Prime — Project Summary
+# Trim Galore — Oxidized Edition
 
 ## What was built
 
 A complete **Rust rewrite of Trim Galore** that produces **byte-identical output** to the Perl original across every feature and test case. It's a true drop-in replacement — same CLI flags, same output filenames, same report format compatible with MultiQC.
 
-**Architecture shift:** TrimGalore (Perl) is a wrapper that shells out to Cutadapt (Python/Cython) for adapter matching. Optimus Prime does everything in a single process — adapter detection, alignment, quality trimming, adapter removal, filtering — in one pass through the data. Paired-end reads are processed in a single pass rather than two sequential Cutadapt runs.
+**Architecture shift:** Trim Galore (Perl) is a wrapper that shells out to Cutadapt (Python/Cython) for adapter matching. The Oxidized Edition does everything in a single process — adapter detection, alignment, quality trimming, adapter removal, filtering — in one pass through the data. Paired-end reads are processed in a single pass rather than two sequential Cutadapt runs.
 
 ## Feature parity
 
@@ -25,60 +25,88 @@ A complete **Rust rewrite of Trim Galore** that produces **byte-identical output
 | `--fastqc` / `--fastqc_args` | Done |
 | `--rename`, `--trim-n`, `--max_n`, `--max_length` | Done |
 | `--retain_unpaired`, `--clip_R1/R2`, `--three_prime_clip_R1/R2` | Done |
-| `--cores N` (worker-pool parallelism) | Done (new) |
+| `--cores N` (worker-pool parallelism) | Done |
 | Trimming reports (MultiQC-compatible) | Done |
 | Colorspace rejection | Done |
 
-## Performance: the benchmark story
+## Performance
 
-**Test dataset:** 55.8M paired-end reads (SRR24827378), typical whole-genome bisulfite sequencing.
-**Platform:** macOS, Apple M2 Pro (10 cores).
+**Test dataset:** 55.8M paired-end reads (SRR24827378, whole-genome bisulfite sequencing).
+All outputs verified byte-identical (decompressed) across all core counts via md5 checksums.
 
-### Optimization progression (single-threaded TrimGalore as baseline)
+### Server benchmark — Intel Xeon 6975P-C (32 vCPU)
 
-| Configuration | Wall time | Speedup |
-|---|---|---|
-| TrimGalore `-j 1` (Perl + Cutadapt) | 27:04 | 1.0x |
-| Optimus Prime, miniz_oxide, cores=1 | 20:06 | **1.35x** |
-| + zlib-rs backend | 12:01 | **2.26x** |
-| + pipeline parallelism (`--cores 2`) | 6:29 | **4.17x** |
-| **Worker-pool (`--cores 2`)** | 7:16 | **3.73x** |
-| **Worker-pool (`--cores 4`)** | **3:46** | **7.19x** |
+#### Trim Galore (Perl 5.38 + Cutadapt 5.2 + pigz 2.8 + isal)
 
-### Fair comparison: multi-core TrimGalore vs Optimus Prime
+| `-j` | Wall time | CPU time | Memory | Actual threads |
+|-----:|----------:|---------:|-------:|---------------:|
+| 1 | 30:05 (1,805s) | 3,001s | 21 MB | ~6 |
+| 2 | 8:43 (523s) | 2,009s | 39 MB | ~9 |
+| 4 | 4:33 (273s) | 2,010s | 42 MB | ~15 |
+| 8 | 2:51 (171s) | 2,040s | 61 MB | ~27 |
 
-| Configuration | Wall time | CPU time | Speedup (wall) |
+#### Trim Galore — Oxidized Edition (Rust, zlib-rs)
+
+| `--cores` | Wall time | CPU time | Memory | Actual threads |
+|----------:|----------:|---------:|-------:|---------------:|
+| 1 | 9:59 (599s) | 599s | 5 MB | 1 |
+| 2 | 6:06 (366s) | 780s | 43 MB | 6 |
+| 4 | 3:02 (182s) | 771s | 62 MB | 8 |
+| 8 | 1:32 (92s) | 784s | 100 MB | 12 |
+| **16** | **0:48 (48s)** | **814s** | **171 MB** | **20** |
+
+#### Head-to-head (same core count)
+
+| Cores | TG wall | Oxidized wall | **Wall speedup** | TG CPU | Oxidized CPU | **CPU savings** |
+|------:|--------:|--------------:|-----------------:|-------:|-------------:|----------------:|
+| 1 | 1,805s | 599s | **3.0x** | 3,001s | 599s | **5.0x** |
+| 4 | 273s | 182s | **1.5x** | 2,010s | 771s | **2.6x** |
+| 8 | 171s | 92s | **1.9x** | 2,040s | 784s | **2.6x** |
+
+#### Production comparison: nf-core default (`--cores 8`)
+
+In nf-core pipelines, Trim Galore is typically run with `--cores 8`, which spawns ~27 threads (8 Cutadapt workers + 8 pigz compress + 8 pigz decompress + 3 overhead).
+
+| | Trim Galore `-j 8` | Oxidized `--cores 8` | Oxidized `--cores 4` |
 |---|---|---|---|
-| TrimGalore `-j 1` | 27:04 (1,624s) | 2,536s | 1.0x |
-| TrimGalore `-j 2` | 13:50 (830s) | 2,741s | 2.0x |
-| TrimGalore `-j 4` | 7:15 (435s) | 2,868s | 3.7x |
-| OP `--cores 1` (sequential) | 11:46 (706s) | 695s | 2.3x |
-| OP `--cores 2` (worker-pool) | 7:16 (436s) | 908s | 3.7x |
-| **OP `--cores 4` (worker-pool)** | **3:46 (226s)** | **936s** | **7.2x** |
+| **Wall time** | 171s | **92s (1.9x faster)** | 182s (same speed) |
+| **CPU time** | 2,040s | **784s (2.6x less)** | 771s (2.6x less) |
+| **Threads used** | ~27 | 12 | 8 |
+| **Memory** | 61 MB | 100 MB | 62 MB |
 
-With 4 workers, Optimus Prime is **7.2x faster than TrimGalore `-j 1`** and **1.9x faster than TrimGalore `-j 4`**. CPU efficiency remains excellent: OP `--cores 4` uses 936 CPU-seconds (4.1 cores busy) while TrimGalore `-j 4` burns 2,868 CPU-seconds (6.6 cores busy) — a **3.1x difference in compute cost**. On shared clusters where CPU-hours = money, this matters.
+The Oxidized Edition at `--cores 4` (8 threads) **matches Trim Galore `-j 8` (27 threads) in wall time** while using 2.6x less CPU and less than a third of the threads. At `--cores 8`, it's nearly **twice as fast**. At `--cores 16`, it processes 56M PE reads in **48 seconds** — and still uses 2.5x less CPU than Trim Galore `-j 8`.
 
-## Why we initially expected 5-10x
+### Laptop benchmark — Apple M1 Pro (10 cores)
 
-The reasoning was sound in theory:
-- **Rust vs Perl:** Rust is typically 50-100x faster than Perl for CPU-bound string processing
-- **Single-pass vs two-pass:** TrimGalore runs Cutadapt separately for R1 and R2. Optimus Prime processes both in a single interleaved pass, halving file I/O
-- **No subprocess overhead:** TrimGalore spawns Cutadapt as a child process, communicating via pipes and temp files. Optimus Prime does everything in-process
-- **Cutadapt's Python overhead:** Even with Cython, there's interpreter overhead per read
+#### Trim Galore (Perl 5.34 + Cutadapt 4.9 + pigz)
 
-A 5-10x improvement would be realistic if the trimming logic were the bottleneck.
+| `-j` | Wall time | CPU time |
+|-----:|----------:|---------:|
+| 1 | 27:04 (1,624s) | 2,536s |
+| 2 | 13:50 (830s) | 2,741s |
+| 4 | 7:15 (435s) | 2,868s |
 
-## How we broke through the 4x ceiling
+#### Trim Galore — Oxidized Edition
+
+| `--cores` | Wall time | CPU time | Speedup vs TG `-j 1` |
+|----------:|----------:|---------:|----------------------:|
+| 1 | 11:46 (706s) | 695s | 2.3x |
+| 2 | 7:16 (436s) | 908s | 3.7x |
+| 4 | 3:46 (226s) | 936s | 7.2x |
+| 6 | 2:35 (155s) | 957s | 10.5x |
+| 8 | 2:03 (123s) | 994s | 13.2x |
+
+### Why the speedup is larger than "Rust is faster"
 
 **The bottleneck is gzip, not trimming.** The actual trimming logic (adapter alignment, quality clipping) is ~5% of runtime — the other 95% is gzip compression (~60%) and decompression (~30%). Rust's speed advantage over Perl/Python only applies to that 5%.
 
-**Phase 1: Pipeline model (capped at ~4x)**
+The real wins come from **architectural differences:**
 
-The initial approach used a pipeline: reader threads → single main thread → writer threads. This hit a ceiling at `--cores 2` (389s wall-time) because the single main thread was funneling all data through one point. Adding more compression threads didn't help — the main thread couldn't feed them fast enough.
+1. **Single-pass vs three-pass.** Trim Galore runs Cutadapt on R1, then R2, then pair-validates — reading and recompressing the data three separate times. The Oxidized Edition does everything in one pass.
 
-**Phase 2: Worker-pool model (linear scaling)**
+2. **Worker-pool parallelism.** Each worker independently handles trimming **and** gzip compression for its batch of reads, producing independently-compressed gzip blocks concatenated in order (valid per RFC 1952). This distributes the dominant cost (compression) across N workers instead of funneling through one thread.
 
-The breakthrough was rethinking the architecture. Instead of a pipeline, each worker independently handles both trimming **and** gzip compression for its batch of reads. The workers produce independently-compressed gzip blocks, which are concatenated in order — valid per RFC 1952 (gzip members concatenate freely).
+3. **Fewer threads, more work per thread.** Trim Galore's `-j N` spawns ~3N+3 threads across Cutadapt, pigz, and Perl. The Oxidized Edition uses N+4 threads (N workers + 2 decompressors + 1 batcher + 1 writer). At `-j 8` vs `--cores 8`: 27 threads vs 12 threads, yet 1.9x faster.
 
 ```
 Architecture (--cores N):
@@ -88,17 +116,13 @@ Architecture (--cores N):
   1 main thread (collects blocks in order → writes to output files)
 ```
 
-This scales because the dominant cost (gzip compression) is now distributed across N workers instead of funneled through one thread:
-- **cores=1**: 706s wall (sequential, no worker-pool overhead)
-- **cores=2**: 436s wall (1.62x speedup, 81% efficiency)
-- **cores=4**: 226s wall (3.13x speedup, 78% efficiency)
+Parallel efficiency on the Xeon: 82% (2 cores) → 82% (4 cores) → 81% (8 cores) → 78% (16 cores). The gentle slope means adding more cores continues to pay off up to at least 16.
 
-The ~78% parallel efficiency is limited by irreducible sequential work: input decompression, batch distribution, and output file writing all run on single threads (Amdahl's law). CPU time increases from 695s → 936s because independent gzip blocks are slightly less efficient than one continuous stream (smaller compression context per block).
-
-## What Optimus Prime does better regardless of speed
+## Beyond speed
 
 - **Zero external dependencies:** No Python, no Cutadapt, no pigz. Single static binary.
 - **Simpler deployment:** `cargo install` or download a binary. No conda environment needed.
 - **Single-pass paired-end:** Both reads processed together — guaranteed synchronization, no temp files.
-- **Lower memory:** No Python interpreter, no subprocess pipes.
+- **Lower memory:** 5 MB single-threaded, ~10 MB per additional worker. No Python interpreter, no subprocess pipes.
+- **CPU-efficient:** Uses 2.6–5x less CPU time than Trim Galore — meaningful on shared HPC clusters where CPU-hours = money.
 - **Reproducible:** Pure Rust with deterministic behavior across platforms.
