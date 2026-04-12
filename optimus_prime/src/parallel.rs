@@ -333,6 +333,14 @@ fn process_pairs<W: Write>(
             stats_r2.poly_a_trimmed += 1;
             stats_r2.poly_a_bases_trimmed += res_r2.poly_a_trimmed;
         }
+        if res_r1.poly_g_trimmed > 0 {
+            stats_r1.poly_g_trimmed += 1;
+            stats_r1.poly_g_bases_trimmed += res_r1.poly_g_trimmed;
+        }
+        if res_r2.poly_g_trimmed > 0 {
+            stats_r2.poly_g_trimmed += 1;
+            stats_r2.poly_g_bases_trimmed += res_r2.poly_g_trimmed;
+        }
 
         match filters::filter_paired_end(
             r1, r2,
@@ -524,6 +532,10 @@ fn process_reads<W: Write>(
         if result.poly_a_trimmed > 0 {
             stats.poly_a_trimmed += 1;
             stats.poly_a_bases_trimmed += result.poly_a_trimmed;
+        }
+        if result.poly_g_trimmed > 0 {
+            stats.poly_g_trimmed += 1;
+            stats.poly_g_bases_trimmed += result.poly_g_trimmed;
         }
 
         match filters::filter_single_end(

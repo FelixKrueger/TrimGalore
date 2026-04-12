@@ -95,18 +95,32 @@ pub fn quality_trim_3prime_nextseq(
     }
 }
 
-/// Find the start index of a poly-A tail (3' end) or poly-T head (5' end).
+/// Find the start of a homopolymer tail (3' end) or head (5' end).
+///
+/// `target_3prime`: the base to match at the 3' end (e.g. b'A' for poly-A, b'G' for poly-G).
+/// The 5' complement is derived automatically (A↔T, G↔C).
 ///
 /// Uses Cutadapt's scoring algorithm: +1 per matching base, -2 per mismatch.
-/// The best scoring position is returned, subject to a maximum 20% error rate.
-/// Tails shorter than 3 bases are ignored.
+/// Max 20% error rate. Tails shorter than 3 bases are ignored.
 ///
-/// When `revcomp` is false: scans from 3' end looking for poly-A tail,
+/// When `revcomp` is false: scans from 3' end for `target_3prime`,
 /// returns the trim position (keep bases 0..index).
 ///
-/// When `revcomp` is true: scans from 5' end looking for poly-T head,
+/// When `revcomp` is true: scans from 5' end for the complement base,
 /// returns the clip position (remove bases 0..index).
-pub fn poly_a_trim_index(sequence: &[u8], revcomp: bool) -> usize {
+pub fn homopolymer_trim_index(sequence: &[u8], target_3prime: u8, revcomp: bool) -> usize {
+    let target = if revcomp {
+        match target_3prime {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'G' => b'C',
+            b'C' => b'G',
+            _ => target_3prime,
+        }
+    } else {
+        target_3prime
+    };
+
     let n = sequence.len();
     if n < 3 {
         return if revcomp { 0 } else { n };
@@ -116,10 +130,10 @@ pub fn poly_a_trim_index(sequence: &[u8], revcomp: bool) -> usize {
     let mut errors: usize = 0;
 
     if revcomp {
-        // Scan from 5' end for poly-T head
+        // Scan from 5' end for complement head (e.g. poly-T for poly-A, poly-C for poly-G)
         let mut best_index: usize = 0;
         for i in 0..n {
-            if sequence[i] == b'T' {
+            if sequence[i] == target {
                 score += 1;
             } else {
                 score -= 2;
@@ -133,10 +147,10 @@ pub fn poly_a_trim_index(sequence: &[u8], revcomp: bool) -> usize {
         // Ignore heads shorter than 3bp
         if best_index < 3 { 0 } else { best_index }
     } else {
-        // Scan from 3' end for poly-A tail
+        // Scan from 3' end for target tail (e.g. poly-A, poly-G)
         let mut best_index: usize = n;
         for i in (0..n).rev() {
-            if sequence[i] == b'A' {
+            if sequence[i] == target {
                 score += 1;
             } else {
                 score -= 2;
@@ -150,6 +164,13 @@ pub fn poly_a_trim_index(sequence: &[u8], revcomp: bool) -> usize {
         // Ignore tails shorter than 3bp
         if best_index > n - 3 { n } else { best_index }
     }
+}
+
+/// Find the start index of a poly-A tail (3' end) or poly-T head (5' end).
+///
+/// Thin wrapper around `homopolymer_trim_index` for backwards compatibility.
+pub fn poly_a_trim_index(sequence: &[u8], revcomp: bool) -> usize {
+    homopolymer_trim_index(sequence, b'A', revcomp)
 }
 
 #[cfg(test)]
@@ -404,5 +425,83 @@ mod tests {
         let seq = b"TTTTTCTTTTTACGT";
         let pos = poly_a_trim_index(seq, true);
         assert_eq!(pos, 11); // clips 11bp poly-T head (including the C error)
+    }
+
+    // --- Poly-G / Poly-C trimming tests (via homopolymer_trim_index) ---
+
+    #[test]
+    fn test_poly_g_clear_tail() {
+        // ACGTACGTGGGGGGGGG — 9 trailing Gs
+        let seq = b"ACGTACGTGGGGGGGGG";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        assert_eq!(pos, 8); // keep first 8 bases
+    }
+
+    #[test]
+    fn test_poly_g_no_tail() {
+        let seq = b"ACGTACGTACGT";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        assert_eq!(pos, 12); // no trimming
+    }
+
+    #[test]
+    fn test_poly_g_short_tail_ignored() {
+        // 2 trailing Gs — too short (min 3bp)
+        let seq = b"ACGTACGTGG";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        assert_eq!(pos, 10); // no trimming
+    }
+
+    #[test]
+    fn test_poly_g_exactly_3() {
+        let seq = b"ACGTACGTGGG";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        assert_eq!(pos, 8); // 3 Gs — minimum for trimming
+    }
+
+    #[test]
+    fn test_poly_g_with_errors() {
+        // Poly-G tail with one mismatch: GGGGGAGGGGG (A at position 5)
+        let seq = b"ACGTGGGGGAGGGGG";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        // 10 Gs + 1 error = 1/11 = 9% error rate, under 20% threshold
+        assert_eq!(pos, 4); // trims the entire G-rich tail including the A error
+    }
+
+    #[test]
+    fn test_poly_g_all_g() {
+        let seq = b"GGGGGGGGGG";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        assert_eq!(pos, 0); // entire read is poly-G
+    }
+
+    #[test]
+    fn test_poly_c_head_revcomp() {
+        // CCCCCCCCCCACGT — 10 leading Cs (poly-C head on R2)
+        let seq = b"CCCCCCCCCCACGT";
+        let pos = homopolymer_trim_index(seq, b'G', true);
+        assert_eq!(pos, 10); // clip first 10 bases
+    }
+
+    #[test]
+    fn test_poly_c_no_head() {
+        let seq = b"ACGTACGTACGT";
+        let pos = homopolymer_trim_index(seq, b'G', true);
+        assert_eq!(pos, 0); // no trimming
+    }
+
+    #[test]
+    fn test_poly_c_short_head_ignored() {
+        let seq = b"CCACGTACGT";
+        let pos = homopolymer_trim_index(seq, b'G', true);
+        assert_eq!(pos, 0); // 2 Cs — too short
+    }
+
+    #[test]
+    fn test_poly_g_after_poly_a_removal() {
+        // After poly-A has removed trailing A's, the remaining sequence ends in G's
+        let seq = b"ACGTACGTGGGGG";
+        let pos = homopolymer_trim_index(seq, b'G', false);
+        assert_eq!(pos, 8); // trims 5 Gs
     }
 }

@@ -177,6 +177,20 @@ pub struct Cli {
     #[clap(long = "poly_a", alias = "poly-a", alias = "polyA")]
     pub poly_a: bool,
 
+    /// Trim poly-G tails from the 3' end of Read 1 (and single-end reads),
+    /// and poly-C heads from the 5' end of Read 2. Useful for data from
+    /// 2-colour instruments (NovaSeq, NextSeq) where no-signal bases are
+    /// called as high-quality G. By default, poly-G trimming is auto-detected
+    /// from the data. Use this flag to force-enable it.
+    /// This is independent from --nextseq (quality-based G-trimming).
+    #[clap(long = "poly_g", alias = "poly-g", alias = "polyG",
+           conflicts_with = "no_poly_g")]
+    pub poly_g: bool,
+
+    /// Disable poly-G auto-detection and trimming.
+    #[clap(long = "no_poly_g", alias = "no-poly-g", alias = "no-polyG")]
+    pub no_poly_g: bool,
+
     // --- Specialty modes (run-and-exit, bypass normal trimming) ---
 
     /// Hard-trim to keep only the first N bases from the 5' end.

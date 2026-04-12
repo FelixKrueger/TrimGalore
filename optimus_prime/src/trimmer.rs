@@ -32,6 +32,7 @@ pub struct TrimConfig {
     pub non_directional: bool,
     pub is_paired: bool,
     pub poly_a: bool,
+    pub poly_g: bool,
 }
 
 /// Result of trimming a single read (carries per-read stats).
@@ -40,6 +41,7 @@ pub struct TrimResult {
     pub rrbs_trimmed_3prime: bool,
     pub rrbs_trimmed_5prime: bool,
     pub poly_a_trimmed: usize, // number of bases trimmed (0 = no poly-A found)
+    pub poly_g_trimmed: usize, // number of bases trimmed (0 = no poly-G found)
 }
 
 /// Trim a single read in-place according to the configured pipeline.
@@ -149,6 +151,26 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         }
     }
 
+    // 2.8. Poly-G / Poly-C trimming (2-colour chemistry artifact removal)
+    // R1/SE: trim poly-G from 3' end. R2: trim poly-C from 5' end.
+    let mut poly_g_trimmed: usize = 0;
+    if config.poly_g && !record.is_empty() {
+        let revcomp = is_r2;
+        let seq_len_before = record.seq.len();
+        let idx = quality::homopolymer_trim_index(record.seq.as_bytes(), b'G', revcomp);
+        if revcomp {
+            if idx > 0 {
+                record.clip_5prime(idx);
+                poly_g_trimmed = idx;
+            }
+        } else {
+            if idx < seq_len_before {
+                record.truncate(idx);
+                poly_g_trimmed = seq_len_before - idx;
+            }
+        }
+    }
+
     // 3. Trim Ns from both ends
     if config.trim_n {
         record.trim_ns();
@@ -181,6 +203,7 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         rrbs_trimmed_3prime,
         rrbs_trimmed_5prime,
         poly_a_trimmed,
+        poly_g_trimmed,
     }
 }
 
@@ -207,6 +230,10 @@ pub fn run_single_end(
         if result.poly_a_trimmed > 0 {
             stats.poly_a_trimmed += 1;
             stats.poly_a_bases_trimmed += result.poly_a_trimmed;
+        }
+        if result.poly_g_trimmed > 0 {
+            stats.poly_g_trimmed += 1;
+            stats.poly_g_bases_trimmed += result.poly_g_trimmed;
         }
 
         // Apply filters
@@ -275,6 +302,14 @@ pub fn run_paired_end(
                 if result_r2.poly_a_trimmed > 0 {
                     stats_r2.poly_a_trimmed += 1;
                     stats_r2.poly_a_bases_trimmed += result_r2.poly_a_trimmed;
+                }
+                if result_r1.poly_g_trimmed > 0 {
+                    stats_r1.poly_g_trimmed += 1;
+                    stats_r1.poly_g_bases_trimmed += result_r1.poly_g_trimmed;
+                }
+                if result_r2.poly_g_trimmed > 0 {
+                    stats_r2.poly_g_trimmed += 1;
+                    stats_r2.poly_g_bases_trimmed += result_r2.poly_g_trimmed;
                 }
 
                 // Pair-aware filtering

@@ -42,19 +42,19 @@ All outputs verified byte-identical (decompressed) across all core counts via md
 
 ### Server benchmark — Intel Xeon 6975P-C (32 vCPU)
 
-#### Trim Galore (Perl 5.38 + Cutadapt 5.2 + pigz 2.8 + isal)
+#### Trim Galore (Perl 5.38 + Cutadapt 5.2 + pigz 2.8 + igzip/ISA-L for decompression)
 
-| `-j` | Wall time | CPU time | Memory | Actual threads |
-|-----:|----------:|---------:|-------:|---------------:|
-| 1 | 30:05 (1,805s) | 3,001s | 21 MB | ~6 |
-| 2 | 8:43 (523s) | 2,009s | 39 MB | ~9 |
-| 4 | 4:33 (273s) | 2,010s | 42 MB | ~15 |
-| 8 | 2:51 (171s) | 2,040s | 61 MB | ~27 |
+| `-j` | Wall time | CPU time | Memory | Threads (observed) |
+|-----:|----------:|---------:|-------:|-------------------:|
+| 1 | 30:05 (1,805s) | 3,001s | 21 MB | up to ~6 |
+| 2 | 8:43 (523s) | 2,009s | 39 MB | up to ~9 |
+| 4 | 4:33 (273s) | 2,010s | 42 MB | up to ~15 |
+| 8 | 2:51 (171s) | 2,040s | 61 MB | up to ~27 |
 
 #### Trim Galore — Oxidized Edition (Rust, zlib-rs)
 
-| `--cores` | Wall time | CPU time | Memory | Actual threads |
-|----------:|----------:|---------:|-------:|---------------:|
+| `--cores` | Wall time | CPU time | Memory | Threads (deterministic) |
+|----------:|----------:|---------:|-------:|------------------------:|
 | 1 | 9:59 (599s) | 599s | 5 MB | 1 |
 | 2 | 6:06 (366s) | 780s | 43 MB | 6 |
 | 4 | 3:02 (182s) | 771s | 62 MB | 8 |
@@ -72,19 +72,19 @@ All outputs verified byte-identical (decompressed) across all core counts via md
 
 #### Production comparison: nf-core default (`--cores 8`)
 
-In nf-core pipelines, Trim Galore is typically run with `--cores 8`, which spawns ~27 threads (8 Cutadapt workers + 8 pigz compress + 8 pigz decompress + 3 overhead).
+In nf-core pipelines, Trim Galore is typically allocated 12 CPUs (`process_high`) and run with `-j 8` (the module subtracts 4 for overhead). With `-j 8`, TG spawns up to ~27 threads across Cutadapt workers, pigz compression, and pigz/igzip decompression. nf-core installs TG from bioconda, which includes igzip (Intel ISA-L) for decompression.
 
 | | TG `-j 8` | Oxidized `--cores 4` | Oxidized `--cores 8` | Oxidized `--cores 24` |
 |---|---|---|---|---|
 | **Wall time** | 171s | 182s | **92s (1.9x faster)** | **39s (4.4x faster)** |
 | **CPU time** | 2,040s | 771s (2.6x less) | 784s (2.6x less) | **874s (2.3x less)** |
-| **Threads** | ~27 | 8 | 12 | **28** |
+| **Threads** | up to ~27 | 8 | 12 | **28** |
 | **Memory** | 61 MB | 62 MB | 100 MB | 157 MB |
 
 Three ways to read this:
-- **Same speed, fewer resources:** Oxidized `--cores 4` (8 threads) matches TG `-j 8` (27 threads) in wall time, using 2.6x less CPU and a third of the threads.
-- **Same resources, much faster:** Oxidized `--cores 8` uses 12 threads (fewer than TG's 27) and is nearly **twice as fast**.
-- **Same threads, 4.4x faster:** Oxidized `--cores 24` uses the same ~28 threads as TG `-j 8` but finishes in **39 seconds vs 171 seconds**, using 2.3x less CPU.
+- **Same speed, fewer resources:** Oxidized `--cores 4` (8 threads) matches TG `-j 8` (up to ~27 threads) in wall time, using 2.6x less CPU and a third of the threads.
+- **Same resources, much faster:** Oxidized `--cores 8` uses 12 threads (fewer than TG's ~27) and is nearly **twice as fast**.
+- **Comparable thread budget, 4.4x faster:** Oxidized `--cores 24` (28 threads) vs TG `-j 8` (up to ~27 threads) — finishes in **39 seconds vs 171 seconds**, using 2.3x less CPU.
 
 ### Laptop benchmark — Apple M1 Pro (10 cores)
 
@@ -116,16 +116,18 @@ The real wins come from **architectural differences:**
 
 2. **Worker-pool parallelism.** Each worker independently handles trimming **and** gzip compression for its batch of reads, producing independently-compressed gzip blocks concatenated in order (valid per RFC 1952). This distributes the dominant cost (compression) across N workers instead of funneling through one thread.
 
-3. **Fewer threads, more work per thread.** When you pass `-j N` to Trim Galore, three separate programs each independently spawn N threads:
+3. **Fewer threads, more work per thread.** When you pass `-j N` to Trim Galore, three separate programs each independently spawn threads. The theoretical maximum is approximately 3N+3, though not all threads are necessarily active simultaneously:
 
 ```
-Trim Galore -j N thread breakdown:
-  Cutadapt:          N workers + 1 reader + 1 writer  =  N+2
-  pigz (compress):   N threads                         =  N
-  pigz (decompress): N threads                         =  N
-  Perl:              1 main process                    =  1
-                                                       ≈ 3N+3 total
+Trim Galore -j N thread breakdown (theoretical maximum):
+  Cutadapt:                    N workers + 1 reader + 1 writer  =  N+2
+  pigz (compress):             N threads                         =  N
+  pigz/igzip (decompress):     up to N threads                   ≈  N
+  Perl:                        1 main process                    =  1
+                                                                 ≈ 3N+3 total
 ```
+
+Note: The nf-core trimgalore module accounts for this by reserving `task.cpus - 4` cores for the `-j` flag (e.g., 12 allocated CPUs → `-j 8`). Thread counts above were observed via `ps` during benchmarking and represent approximate peak values.
 
 The Oxidized Edition uses a single process with a fixed infrastructure cost of +4 threads:
 
@@ -140,16 +142,24 @@ Oxidized Edition --cores N thread breakdown:
 
 At `--cores 1`, the worker-pool is bypassed entirely — a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). The infrastructure cost only applies from `--cores 2` upward, where each additional core adds exactly 1 thread and ~10 MB of memory.
 
-| Cores | TG threads (3N+3) | Oxidized threads (N+4) |
-|------:|-------------------:|-----------------------:|
-| 1 | 6 | 1 |
-| 4 | 15 | 8 |
-| 8 | 27 | 12 |
+| Cores | TG threads (up to ~3N+3) | Oxidized threads (N+4) |
+|------:|-------------------------:|-----------------------:|
+| 1 | up to ~6 | 1 |
+| 4 | up to ~15 | 8 |
+| 8 | up to ~27 | 12 |
 | 16 | — | 20 |
 
-At `-j 8` vs `--cores 8`: 27 threads vs 12 threads, yet 1.9x faster.
+At `-j 8` vs `--cores 8`: up to ~27 vs exactly 12 threads, yet 1.9x faster.
 
 Parallel efficiency on the Xeon: 82% (2 cores) → 82% (4 cores) → 81% (8 cores) → 78% (16 cores). The gentle slope means adding more cores continues to pay off up to at least 16.
+
+### Benchmark methodology
+
+- **Timing:** All wall time, CPU time, and peak memory measured via `/usr/bin/time -v`.
+- **Thread counts (TG):** Observed via `ps` during execution — these are approximate peak values, as threads are spawned across three independent subprocesses (Cutadapt, pigz, pigz/igzip) whose lifetimes may not fully overlap.
+- **Thread counts (Oxidized):** Deterministic from the architecture: exactly N+4 threads for `--cores N` (N workers + 2 decompressors + 1 batcher + 1 writer), or exactly 1 thread for `--cores 1`.
+- **igzip:** The bioconda Trim Galore installation includes igzip (Intel ISA-L) for fast single-threaded decompression. Benchmarks were re-run with igzip to match the nf-core production environment; the difference was <1% (decompression is not the bottleneck — compression is).
+- **Outputs verified:** All outputs were confirmed byte-identical (decompressed) between TG and Oxidized across all core counts via md5 checksums.
 
 ## Beyond speed
 

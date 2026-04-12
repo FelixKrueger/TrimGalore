@@ -62,6 +62,8 @@ pub struct DetectionResult {
     pub message: String,
     /// Whether adapter trimming was suppressed (--consider_already_trimmed)
     pub suppressed: bool,
+    /// Number of reads with ≥10 consecutive trailing G's (for poly-G auto-detection)
+    pub poly_g_count: usize,
 }
 
 /// Maximum number of reads to scan for auto-detection.
@@ -89,6 +91,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
 
     let mut counts = [0usize; 3];
     let mut reads_scanned = 0;
+    let mut poly_g_count: usize = 0;
 
     while let Some(record) = reader.next_record()? {
         reads_scanned += 1;
@@ -101,6 +104,11 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
             if contains_subsequence(seq, adapter_seq.as_bytes()) {
                 counts[i] += 1;
             }
+        }
+
+        // Poly-G detection: count reads with ≥10 consecutive trailing G's
+        if has_trailing_poly_g(seq, 10) {
+            poly_g_count += 1;
         }
     }
 
@@ -188,7 +196,54 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
         reads_scanned,
         message,
         suppressed,
+        poly_g_count,
     })
+}
+
+/// Check if a sequence ends with `min_len` or more consecutive G bases.
+/// Used for poly-G auto-detection (strict: no mismatches allowed).
+fn has_trailing_poly_g(seq: &[u8], min_len: usize) -> bool {
+    if seq.len() < min_len {
+        return false;
+    }
+    let mut count = 0;
+    for &base in seq.iter().rev() {
+        if base == b'G' {
+            count += 1;
+            if count >= min_len {
+                return true;
+            }
+        } else {
+            break;
+        }
+    }
+    false
+}
+
+/// Standalone poly-G detection scan (used when adapter auto-detection is skipped).
+///
+/// Scans up to 1M reads from the input file, counting reads whose 3' end
+/// has ≥10 consecutive G bases. Returns (poly_g_count, reads_scanned).
+///
+/// This is called when the user specifies an adapter explicitly (--illumina,
+/// --adapter, etc.), which causes `autodetect_adapter()` to be skipped. Without
+/// this, poly-G auto-detection would silently fail for those users.
+pub fn detect_poly_g<P: AsRef<Path>>(path: P) -> Result<(usize, usize)> {
+    let mut reader = FastqReader::open(path)?;
+    let mut reads_scanned = 0;
+    let mut poly_g_count: usize = 0;
+
+    while let Some(record) = reader.next_record()? {
+        reads_scanned += 1;
+        if has_trailing_poly_g(record.seq.as_bytes(), 10) {
+            poly_g_count += 1;
+        }
+        if reads_scanned >= MAX_SCAN_READS {
+            break;
+        }
+    }
+
+    Ok((poly_g_count, reads_scanned))
 }
 
 /// Check if `haystack` contains `needle` as a subsequence (exact substring match).
@@ -212,6 +267,26 @@ mod tests {
         assert!(!contains_subsequence(b"ACGTACGT", b"AGATCGGAAGAGC"));
         assert!(contains_subsequence(b"AGATCGGAAGAGC", b"AGATCGGAAGAGC"));
         assert!(!contains_subsequence(b"", b"AGATC"));
+    }
+
+    #[test]
+    fn test_has_trailing_poly_g() {
+        // Clear poly-G tail
+        assert!(has_trailing_poly_g(b"ACGTACGTGGGGGGGGGG", 10));
+        // Exactly at threshold
+        assert!(has_trailing_poly_g(b"ACGTGGGGGGGGGG", 10));
+        // Below threshold
+        assert!(!has_trailing_poly_g(b"ACGTGGGGGGGGG", 10)); // 9 Gs
+        // No trailing Gs
+        assert!(!has_trailing_poly_g(b"ACGTACGTACGT", 10));
+        // Entirely poly-G
+        assert!(has_trailing_poly_g(b"GGGGGGGGGGGGGGGG", 10));
+        // Interrupted (non-G breaks the run)
+        assert!(!has_trailing_poly_g(b"ACGTGGGGGAGGGGGGGG", 10)); // only 9 trailing
+        // Short sequence
+        assert!(!has_trailing_poly_g(b"GGG", 10));
+        // Empty
+        assert!(!has_trailing_poly_g(b"", 10));
     }
 
     #[test]

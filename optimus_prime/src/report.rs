@@ -31,6 +31,10 @@ pub struct TrimStats {
     pub poly_a_trimmed: usize,
     /// Total bases removed by poly-A/poly-T trimming
     pub poly_a_bases_trimmed: usize,
+    /// Reads with poly-G/poly-C tails trimmed
+    pub poly_g_trimmed: usize,
+    /// Total bases removed by poly-G/poly-C trimming
+    pub poly_g_bases_trimmed: usize,
 }
 
 impl TrimStats {
@@ -54,6 +58,8 @@ impl TrimStats {
         self.rrbs_trimmed_5prime += other.rrbs_trimmed_5prime;
         self.poly_a_trimmed += other.poly_a_trimmed;
         self.poly_a_bases_trimmed += other.poly_a_bases_trimmed;
+        self.poly_g_trimmed += other.poly_g_trimmed;
+        self.poly_g_bases_trimmed += other.poly_g_bases_trimmed;
     }
 }
 
@@ -105,6 +111,7 @@ pub struct TrimConfig {
     pub non_directional: bool,
     pub phred_encoding: u8,
     pub poly_a: bool,
+    pub poly_g: bool,
     pub command_line: String,
 }
 
@@ -141,6 +148,9 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     }
     if config.poly_a {
         writeln!(w, "Poly-A trimming enabled: removing poly-A tails from 3' end of R1/SE reads, and poly-T heads from 5' end of R2 reads")?;
+    }
+    if config.poly_g {
+        writeln!(w, "Poly-G trimming enabled: removing poly-G tails from 3' end of R1/SE reads, and poly-C heads from 5' end of R2 reads")?;
     }
     if config.gzip {
         writeln!(w, "Output file will be GZIP compressed")?;
@@ -193,6 +203,13 @@ pub fn write_run_stats<W: Write>(w: &mut W, stats: &TrimStats) -> std::io::Resul
             percentage(stats.poly_a_trimmed, stats.total_reads))?;
         writeln!(w, "  Poly-A/T bases removed:       {:>10}",
             format_number(stats.poly_a_bases_trimmed))?;
+    }
+    if stats.poly_g_trimmed > 0 {
+        writeln!(w, "Reads with poly-G/C trimmed:    {:>10} ({:.1}%)",
+            format_number(stats.poly_g_trimmed),
+            percentage(stats.poly_g_trimmed, stats.total_reads))?;
+        writeln!(w, "  Poly-G/C bases removed:       {:>10}",
+            format_number(stats.poly_g_bases_trimmed))?;
     }
 
     Ok(())

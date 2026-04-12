@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     }
 
     // Determine adapter
-    let (adapter_name, adapter_seq, adapter_r2_seq) = resolve_adapter(&cli)?;
+    let (adapter_name, adapter_seq, adapter_r2_seq, autodetect_poly_g) = resolve_adapter(&cli)?;
 
     eprintln!("Adapter: {} ({})", adapter_name, adapter_seq);
     if let Some(ref a2) = adapter_r2_seq {
@@ -97,6 +97,54 @@ fn main() -> Result<()> {
         eprintln!("File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction");
     }
 
+    // Determine poly-G trimming: CLI overrides auto-detection
+    let poly_g_enabled = if cli.poly_g {
+        true  // Force-enabled by user
+    } else if cli.no_poly_g {
+        false // Force-disabled by user
+    } else {
+        // Auto-detect: use piggybacked data from autodetect_adapter if available,
+        // otherwise run a standalone poly-G scan
+        let (poly_g_count, reads_scanned) = if let Some((count, scanned)) = autodetect_poly_g {
+            (count, scanned)
+        } else {
+            eprintln!("Scanning for poly-G content...");
+            adapter::detect_poly_g(&cli.input[0])?
+        };
+        // Threshold: 0.01% of scanned reads, with a floor of 10
+        let threshold = (reads_scanned / 10_000).max(10);
+        let enabled = poly_g_count > threshold;
+
+        let poly_g_pct = if reads_scanned > 0 {
+            poly_g_count as f64 / reads_scanned as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        if enabled {
+            eprintln!(
+                "Poly-G trimming: ENABLED (auto-detected). \
+                 {} of {} reads ({:.2}%) have poly-G tails (>=10bp) — \
+                 consistent with 2-colour chemistry (NovaSeq/NextSeq). \
+                 To disable: --no_poly_g",
+                poly_g_count, reads_scanned, poly_g_pct
+            );
+        } else {
+            eprintln!(
+                "Poly-G trimming: not enabled (auto-detection found {} of {} reads ({:.2}%) \
+                 with poly-G tails — below threshold). To force-enable: --poly_g",
+                poly_g_count, reads_scanned, poly_g_pct
+            );
+        }
+        enabled
+    };
+
+    if cli.poly_g {
+        eprintln!("Poly-G trimming: ENABLED (user-specified --poly_g)");
+    } else if cli.no_poly_g {
+        eprintln!("Poly-G trimming: DISABLED (user-specified --no_poly_g)");
+    }
+
     // Build trim config
     let config = trimmer::TrimConfig {
         adapter: adapter_seq.as_bytes().to_vec(),
@@ -119,6 +167,7 @@ fn main() -> Result<()> {
         non_directional: cli.non_directional,
         is_paired: cli.paired,
         poly_a: cli.poly_a,
+        poly_g: poly_g_enabled,
     };
 
     let basename = cli.basename.as_deref();
@@ -136,27 +185,33 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>)> {
+/// Returns (adapter_name, adapter_seq, adapter_r2_seq, poly_g_from_autodetect).
+/// The last element is Some((poly_g_count, reads_scanned)) when auto-detection ran,
+/// None when the adapter was user-specified or preset-selected (poly-G must be
+/// detected separately via `adapter::detect_poly_g()`).
+fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>, Option<(usize, usize)>)> {
     if let Some(ref seq) = cli.adapter {
         let name = "user-specified".to_string();
         let r2 = cli.adapter2.clone();
-        return Ok((name, seq.clone(), r2));
+        return Ok((name, seq.clone(), r2, None));
     }
 
     if cli.nextera {
-        return Ok((adapter::NEXTERA.name.to_string(), adapter::NEXTERA.seq.to_string(), None));
+        return Ok((adapter::NEXTERA.name.to_string(), adapter::NEXTERA.seq.to_string(), None, None));
     }
     if cli.small_rna {
         return Ok((
             adapter::SMALL_RNA.name.to_string(),
             adapter::SMALL_RNA.seq.to_string(),
             adapter::SMALL_RNA.seq_r2.map(|s| s.to_string()),
+            None,
         ));
     }
     if cli.stranded_illumina {
         return Ok((
             adapter::STRANDED_ILLUMINA.name.to_string(),
             adapter::STRANDED_ILLUMINA.seq.to_string(),
+            None,
             None,
         ));
     }
@@ -165,22 +220,25 @@ fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>)> {
             adapter::BGISEQ.name.to_string(),
             adapter::BGISEQ.seq.to_string(),
             adapter::BGISEQ.seq_r2.map(|s| s.to_string()),
+            None,
         ));
     }
     if cli.illumina {
-        return Ok((adapter::ILLUMINA.name.to_string(), adapter::ILLUMINA.seq.to_string(), None));
+        return Ok((adapter::ILLUMINA.name.to_string(), adapter::ILLUMINA.seq.to_string(), None, None));
     }
 
-    // Auto-detect
+    // Auto-detect (also piggybacks poly-G counting)
     eprintln!("Auto-detecting adapter type...");
     let detection = adapter::autodetect_adapter(&cli.input[0], cli.consider_already_trimmed)?;
     eprintln!("{}", detection.message);
 
+    let poly_g_data = Some((detection.poly_g_count, detection.reads_scanned));
     let r2 = detection.adapter.seq_r2.map(|s| s.to_string());
     Ok((
         detection.adapter.name.to_string(),
         detection.adapter.seq.to_string(),
         r2,
+        poly_g_data,
     ))
 }
 
@@ -233,6 +291,11 @@ fn run_single(
             stats.poly_a_trimmed, pct(stats.poly_a_trimmed, stats.total_reads));
         eprintln!("  Poly-A/T bases removed:        {:>10}", stats.poly_a_bases_trimmed);
     }
+    if stats.poly_g_trimmed > 0 {
+        eprintln!("Reads with poly-G/C trimmed:     {:>10} ({:.1}%)",
+            stats.poly_g_trimmed, pct(stats.poly_g_trimmed, stats.total_reads));
+        eprintln!("  Poly-G/C bases removed:        {:>10}", stats.poly_g_bases_trimmed);
+    }
 
     // Write report
     if !cli.no_report_file {
@@ -253,6 +316,7 @@ fn run_single(
             non_directional: cli.non_directional,
             phred_encoding: cli.phred_offset(),
             poly_a: cli.poly_a,
+            poly_g: config.poly_g,
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
         };
 
@@ -378,6 +442,16 @@ fn run_paired(
         eprintln!("R2 reads with poly-T trimmed:    {:>10} ({:.1}%)",
             stats_r2.poly_a_trimmed, pct(stats_r2.poly_a_trimmed, stats_r2.total_reads));
     }
+    if stats_r1.poly_g_trimmed > 0 {
+        eprintln!("R1 reads with poly-G trimmed:    {:>10} ({:.1}%)",
+            stats_r1.poly_g_trimmed, pct(stats_r1.poly_g_trimmed, stats_r1.total_reads));
+        eprintln!("  R1 poly-G bases removed:       {:>10}", stats_r1.poly_g_bases_trimmed);
+    }
+    if stats_r2.poly_g_trimmed > 0 {
+        eprintln!("R2 reads with poly-C trimmed:    {:>10} ({:.1}%)",
+            stats_r2.poly_g_trimmed, pct(stats_r2.poly_g_trimmed, stats_r2.total_reads));
+        eprintln!("  R2 poly-C bases removed:       {:>10}", stats_r2.poly_g_bases_trimmed);
+    }
 
     eprintln!("\n=== Paired-end validation ===\n");
     eprintln!("Pairs analyzed:                  {:>10}", pair_stats.pairs_analyzed);
@@ -410,6 +484,7 @@ fn run_paired(
                 non_directional: cli.non_directional,
                 phred_encoding: cli.phred_offset(),
                 poly_a: cli.poly_a,
+                poly_g: config.poly_g,
                 command_line: std::env::args().collect::<Vec<_>>().join(" "),
             };
 
