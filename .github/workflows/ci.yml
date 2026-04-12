@@ -26,7 +26,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          conda install -y cutadapt fastqc
+          conda install -y "cutadapt>=4.4" fastqc
 
       - name: Verify dependencies
         run: |
@@ -106,7 +106,7 @@ jobs:
           auto-activate-base: true
 
       - name: Install dependencies
-        run: conda install -y cutadapt fastqc
+        run: conda install -y "cutadapt>=4.4" fastqc
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
