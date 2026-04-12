@@ -59,7 +59,8 @@ All outputs verified byte-identical (decompressed) across all core counts via md
 | 2 | 6:06 (366s) | 780s | 43 MB | 6 |
 | 4 | 3:02 (182s) | 771s | 62 MB | 8 |
 | 8 | 1:32 (92s) | 784s | 100 MB | 12 |
-| **16** | **0:48 (48s)** | **814s** | **171 MB** | **20** |
+| 16 | 0:48 (48s) | 814s | 171 MB | 20 |
+| **24** | **0:39 (39s)** | **874s** | **157 MB** | **28** |
 
 #### Head-to-head (same core count)
 
@@ -73,14 +74,17 @@ All outputs verified byte-identical (decompressed) across all core counts via md
 
 In nf-core pipelines, Trim Galore is typically run with `--cores 8`, which spawns ~27 threads (8 Cutadapt workers + 8 pigz compress + 8 pigz decompress + 3 overhead).
 
-| | Trim Galore `-j 8` | Oxidized `--cores 8` | Oxidized `--cores 4` |
-|---|---|---|---|
-| **Wall time** | 171s | **92s (1.9x faster)** | 182s (same speed) |
-| **CPU time** | 2,040s | **784s (2.6x less)** | 771s (2.6x less) |
-| **Threads used** | ~27 | 12 | 8 |
-| **Memory** | 61 MB | 100 MB | 62 MB |
+| | TG `-j 8` | Oxidized `--cores 4` | Oxidized `--cores 8` | Oxidized `--cores 24` |
+|---|---|---|---|---|
+| **Wall time** | 171s | 182s | **92s (1.9x faster)** | **39s (4.4x faster)** |
+| **CPU time** | 2,040s | 771s (2.6x less) | 784s (2.6x less) | **874s (2.3x less)** |
+| **Threads** | ~27 | 8 | 12 | **28** |
+| **Memory** | 61 MB | 62 MB | 100 MB | 157 MB |
 
-The Oxidized Edition at `--cores 4` (8 threads) **matches Trim Galore `-j 8` (27 threads) in wall time** while using 2.6x less CPU and less than a third of the threads. At `--cores 8`, it's nearly **twice as fast**. At `--cores 16`, it processes 56M PE reads in **48 seconds** — and still uses 2.5x less CPU than Trim Galore `-j 8`.
+Three ways to read this:
+- **Same speed, fewer resources:** Oxidized `--cores 4` (8 threads) matches TG `-j 8` (27 threads) in wall time, using 2.6x less CPU and a third of the threads.
+- **Same resources, much faster:** Oxidized `--cores 8` uses 12 threads (fewer than TG's 27) and is nearly **twice as fast**.
+- **Same threads, 4.4x faster:** Oxidized `--cores 24` uses the same ~28 threads as TG `-j 8` but finishes in **39 seconds vs 171 seconds**, using 2.3x less CPU.
 
 ### Laptop benchmark — Apple M1 Pro (10 cores)
 
