@@ -33,6 +33,30 @@ pub struct TrimStats {
     pub poly_a_bases_trimmed: usize,
 }
 
+impl TrimStats {
+    /// Merge another batch's stats into this accumulator.
+    pub fn merge(&mut self, other: &TrimStats) {
+        self.total_reads += other.total_reads;
+        self.reads_with_adapter += other.reads_with_adapter;
+        self.bases_quality_trimmed += other.bases_quality_trimmed;
+        self.too_short += other.too_short;
+        self.too_long += other.too_long;
+        self.too_many_n += other.too_many_n;
+        self.reads_written += other.reads_written;
+        // Merge adapter length distribution (element-wise addition)
+        if other.adapter_length_counts.len() > self.adapter_length_counts.len() {
+            self.adapter_length_counts.resize(other.adapter_length_counts.len(), 0);
+        }
+        for (i, &count) in other.adapter_length_counts.iter().enumerate() {
+            self.adapter_length_counts[i] += count;
+        }
+        self.rrbs_trimmed_3prime += other.rrbs_trimmed_3prime;
+        self.rrbs_trimmed_5prime += other.rrbs_trimmed_5prime;
+        self.poly_a_trimmed += other.poly_a_trimmed;
+        self.poly_a_bases_trimmed += other.poly_a_bases_trimmed;
+    }
+}
+
 /// Statistics for paired-end validation.
 #[derive(Debug, Default)]
 pub struct PairValidationStats {
@@ -48,6 +72,18 @@ pub struct PairValidationStats {
     pub r1_unpaired: usize,
     /// R2 reads written to unpaired output
     pub r2_unpaired: usize,
+}
+
+impl PairValidationStats {
+    /// Merge another batch's pair stats into this accumulator.
+    pub fn merge(&mut self, other: &PairValidationStats) {
+        self.pairs_analyzed += other.pairs_analyzed;
+        self.pairs_removed += other.pairs_removed;
+        self.pairs_removed_n += other.pairs_removed_n;
+        self.pairs_removed_too_long += other.pairs_removed_too_long;
+        self.r1_unpaired += other.r1_unpaired;
+        self.r2_unpaired += other.r2_unpaired;
+    }
 }
 
 /// Configuration that was used for this trimming run (for the report header).

@@ -5,6 +5,7 @@ pub mod demux;
 pub mod fastq;
 pub mod filters;
 pub mod io;
+pub mod parallel;
 pub mod quality;
 pub mod report;
 pub mod specialty;

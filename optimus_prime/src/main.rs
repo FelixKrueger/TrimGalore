@@ -10,6 +10,7 @@ use optimus_prime::demux;
 use optimus_prime::fastq::{FastqReader, FastqWriter};
 use optimus_prime::filters::MaxNFilter;
 use optimus_prime::io as naming;
+use optimus_prime::parallel;
 use optimus_prime::report;
 use optimus_prime::specialty;
 use optimus_prime::trimmer;
@@ -122,8 +123,8 @@ fn main() -> Result<()> {
 
     let basename = cli.basename.as_deref();
 
-    if cli.cores > 1 && gzip {
-        eprintln!("Using {} compression threads (parallel gzip)", cli.cores);
+    if cli.cores > 1 {
+        eprintln!("Using {} worker threads (parallel trim + compress)", cli.cores);
     }
 
     if cli.paired {
@@ -198,16 +199,16 @@ fn run_single(
     eprintln!("Trimming: {}", input.display());
     eprintln!("Output:   {}", output_path.display());
 
-    let mut reader = if cli.cores > 1 {
-        FastqReader::open_threaded(input)?
+    let stats = if cli.cores > 1 {
+        parallel::run_single_end_parallel(input, &output_path, config, cli.cores, gzip)?
     } else {
-        FastqReader::open(input)?
+        let mut reader = FastqReader::open(input)?;
+        let mut writer = FastqWriter::create(&output_path, gzip, 1)?;
+        let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
+        writer.flush()?;
+        drop(writer);
+        stats
     };
-    let mut writer = FastqWriter::create(&output_path, gzip, cli.cores)?;
-
-    let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
-    writer.flush()?;
-    drop(writer); // Finalize gzip stream (writes EOF trailer) before any downstream processing
 
     // Print summary
     eprintln!("\n=== Summary ===\n");
@@ -302,52 +303,59 @@ fn run_paired(
     eprintln!("  Output R1: {}", output_r1.display());
     eprintln!("  Output R2: {}", output_r2.display());
 
-    let mut reader_r1 = if cli.cores > 1 {
-        FastqReader::open_threaded(input_r1)?
-    } else {
-        FastqReader::open(input_r1)?
-    };
-    let mut reader_r2 = if cli.cores > 1 {
-        FastqReader::open_threaded(input_r2)?
-    } else {
-        FastqReader::open(input_r2)?
-    };
-    let mut writer_r1 = FastqWriter::create(&output_r1, gzip, cli.cores)?;
-    let mut writer_r2 = FastqWriter::create(&output_r2, gzip, cli.cores)?;
-
-    // Optional unpaired writers
-    let (mut unpaired_w1, mut unpaired_w2) = if cli.retain_unpaired {
+    // Compute unpaired output paths (needed for both parallel and sequential paths)
+    let (unpaired_r1_path, unpaired_r2_path) = if cli.retain_unpaired {
         let (up1, up2) = naming::unpaired_output_names(input_r1, input_r2, output_dir, basename, gzip);
         eprintln!("  Unpaired R1: {}", up1.display());
         eprintln!("  Unpaired R2: {}", up2.display());
-        (
-            Some(FastqWriter::create(&up1, gzip, cli.cores)?),
-            Some(FastqWriter::create(&up2, gzip, cli.cores)?),
-        )
+        (Some(up1), Some(up2))
     } else {
         (None, None)
     };
 
-    let (stats_r1, stats_r2, pair_stats) = trimmer::run_paired_end(
-        &mut reader_r1,
-        &mut reader_r2,
-        &mut writer_r1,
-        &mut writer_r2,
-        unpaired_w1.as_mut(),
-        unpaired_w2.as_mut(),
-        config,
-        cli.length_1,
-        cli.length_2,
-    )?;
+    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
+        // Worker-pool parallel path: N workers each handle trim + compress
+        parallel::run_paired_end_parallel(
+            input_r1, input_r2,
+            &output_r1, &output_r2,
+            unpaired_r1_path.as_deref(),
+            unpaired_r2_path.as_deref(),
+            config, cli.cores, gzip,
+            cli.length_1, cli.length_2,
+        )?
+    } else {
+        // Sequential path (--cores 1)
+        let mut reader_r1 = FastqReader::open(input_r1)?;
+        let mut reader_r2 = FastqReader::open(input_r2)?;
+        let mut writer_r1 = FastqWriter::create(&output_r1, gzip, 1)?;
+        let mut writer_r2 = FastqWriter::create(&output_r2, gzip, 1)?;
 
-    writer_r1.flush()?;
-    writer_r2.flush()?;
-    if let Some(ref mut w) = unpaired_w1 { w.flush()?; }
-    if let Some(ref mut w) = unpaired_w2 { w.flush()?; }
-    drop(writer_r1); // Finalize gzip streams before downstream processing
-    drop(writer_r2);
-    drop(unpaired_w1);
-    drop(unpaired_w2);
+        let (mut unpaired_w1, mut unpaired_w2) = match (&unpaired_r1_path, &unpaired_r2_path) {
+            (Some(p1), Some(p2)) => (
+                Some(FastqWriter::create(p1, gzip, 1)?),
+                Some(FastqWriter::create(p2, gzip, 1)?),
+            ),
+            _ => (None, None),
+        };
+
+        let result = trimmer::run_paired_end(
+            &mut reader_r1, &mut reader_r2,
+            &mut writer_r1, &mut writer_r2,
+            unpaired_w1.as_mut(), unpaired_w2.as_mut(),
+            config, cli.length_1, cli.length_2,
+        )?;
+
+        writer_r1.flush()?;
+        writer_r2.flush()?;
+        if let Some(ref mut w) = unpaired_w1 { w.flush()?; }
+        if let Some(ref mut w) = unpaired_w2 { w.flush()?; }
+        drop(writer_r1);
+        drop(writer_r2);
+        drop(unpaired_w1);
+        drop(unpaired_w2);
+
+        result
+    };
 
     // Print summary
     eprintln!("\n=== Summary (Read 1) ===\n");
