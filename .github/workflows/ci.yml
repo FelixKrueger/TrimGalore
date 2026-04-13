@@ -53,7 +53,7 @@ jobs:
           auto-activate-base: true
 
       - name: Install Perl Trim Galore from bioconda
-        run: conda install -y trim-galore=0.6.11
+        run: conda install -y trim-galore=0.6.11 "xopen!=2.0.2"
 
       - name: Verify Perl Trim Galore
         run: |
