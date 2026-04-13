@@ -277,8 +277,8 @@ jobs:
 
       - name: Pull and test
         run: |
-          docker run --rm ghcr.io/${{ env.IMAGE_NAME }}:dev --help
-          docker run --rm ghcr.io/${{ env.IMAGE_NAME }}:dev --version
+          docker run --rm ghcr.io/${{ env.IMAGE_NAME }}:dev trim_galore --help
+          docker run --rm ghcr.io/${{ env.IMAGE_NAME }}:dev trim_galore --version
 
   # ------------------------------------------------------------------
   # 4. Create tag and draft release (release only, after all builds)
