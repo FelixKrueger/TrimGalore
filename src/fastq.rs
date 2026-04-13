@@ -4,7 +4,7 @@
 //! for efficient I/O throughput.
 
 use anyhow::{bail, Context, Result};
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use gzp::deflate::Gzip;
@@ -166,7 +166,7 @@ impl FastqReader {
             .extension()
             .is_some_and(|ext| ext == "gz")
         {
-            Box::new(BufReader::with_capacity(BUF_SIZE, GzDecoder::new(file)))
+            Box::new(BufReader::with_capacity(BUF_SIZE, MultiGzDecoder::new(file)))
         } else {
             Box::new(BufReader::with_capacity(BUF_SIZE, file))
         };
@@ -254,7 +254,7 @@ impl FastqReader {
             .extension()
             .is_some_and(|ext| ext == "gz")
         {
-            Box::new(BufReader::with_capacity(BUF_SIZE, GzDecoder::new(file)))
+            Box::new(BufReader::with_capacity(BUF_SIZE, MultiGzDecoder::new(file)))
         } else {
             Box::new(BufReader::with_capacity(BUF_SIZE, file))
         };
