@@ -70,23 +70,26 @@ trim_galore --help
 
 ## Validating output
 
-To verify byte-identical output against the Perl version:
+To verify byte-identical output against the Perl version (install via bioconda as `trim-galore==0.6.11`):
 
 ```bash
+# Install Perl Trim Galore for comparison
+conda install -c bioconda trim-galore==0.6.11
+
 # Run both versions on the same input
-trim_galore -o /tmp/oxidized test_files/illumina_10K.fastq.gz
-legacy/trim_galore -o /tmp/perl test_files/illumina_10K.fastq.gz
+trim_galore -o /tmp/oxidized test_files/illumina_10K.fastq.gz     # Oxidized (from cargo install)
+trim_galore_perl -o /tmp/perl test_files/illumina_10K.fastq.gz    # or use full path to Perl version
 
 # Compare decompressed output (compressed bytes differ, content is identical)
 diff <(gzip -dc /tmp/perl/illumina_10K_trimmed.fq.gz) \
      <(gzip -dc /tmp/oxidized/illumina_10K_trimmed.fq.gz)
 ```
 
-The `legacy/` directory contains the original Perl script for comparison testing. It requires Perl, Cutadapt, and optionally FastQC.
+The original Perl script is preserved in git history (tag `v0.6.11`) and available via `conda install trim-galore==0.6.11`.
 
 ## Documentation
 
-For general Trim Galore usage, see the [User Guide](Docs/Trim_Galore_User_Guide.md).
+For general Trim Galore usage, see the [User Guide](docs/Trim_Galore_User_Guide.md).
 
 For benchmarks and technical details of the Oxidized Edition, see [docs/SUMMARY.md](docs/SUMMARY.md).
 

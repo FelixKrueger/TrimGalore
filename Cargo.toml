@@ -15,14 +15,11 @@ exclude = [
     "test_files/",
     "plans/",
     "docs/",
-    "Docs/",
-    "legacy/",
     "optimus_prime/",
     ".github/",
     ".claude/",
     "CLAUDE.md",
     "CHANGELOG.md",
-    "profiling_results_TrimGalore.md",
 ]
 
 [[bin]]
