@@ -19,7 +19,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **Poly-A / poly-G trimming** — built-in tail trimming without external tools
 - **Parallel compression** — `--cores N` for faster gzip I/O on multi-core systems
 - **FastQC integration** — optional post-trimming quality reports
-- **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards
+- **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
 - **Demultiplexing** — 3' inline barcode demultiplexing
 
 ## Installation
@@ -98,11 +98,13 @@ trim_galore --help
 
 ### Output files
 
-| Mode | Trimmed output | Report |
-|------|---------------|--------|
-| Single-end | `*_trimmed.fq.gz` | `*_trimming_report.txt` |
-| Paired-end | `*_val_1.fq.gz` / `*_val_2.fq.gz` | per-read report |
+| Mode | Trimmed output | Reports |
+|------|---------------|---------|
+| Single-end | `*_trimmed.fq.gz` | `*_trimming_report.txt` + `*_trimming_report.json` |
+| Paired-end | `*_val_1.fq.gz` / `*_val_2.fq.gz` | per-read text + JSON reports |
 | Unpaired (with `--retain_unpaired`) | `*_unpaired_1.fq.gz` / `*_unpaired_2.fq.gz` | |
+
+The JSON report contains the same statistics as the text report in a structured format (schema v1), designed for native parsing by MultiQC.
 
 ## Documentation
 
