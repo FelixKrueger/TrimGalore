@@ -173,7 +173,6 @@ pub struct Cli {
     /// Trim poly-A tails from the 3' end of Read 1 (and single-end reads),
     /// and poly-T heads from the 5' end of Read 2. Runs after adapter trimming,
     /// so poly-A tails hidden behind adapters are also removed.
-    /// Matches Cutadapt's --poly-a behavior.
     #[clap(long = "poly_a", alias = "poly-a", alias = "polyA")]
     pub poly_a: bool,
 
