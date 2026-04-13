@@ -162,7 +162,7 @@ pub struct Cli {
     pub fastqc: bool,
 
     /// Additional arguments to pass to FastQC. Implies --fastqc.
-    #[clap(long = "fastqc_args")]
+    #[clap(long = "fastqc_args", allow_hyphen_values = true)]
     pub fastqc_args: Option<String>,
 
     /// Number of compression threads for gzip output (default: 1).
@@ -240,7 +240,7 @@ pub struct Cli {
     pub path_to_cutadapt: Option<String>,
 
     /// [Deprecated] No longer needed — Cutadapt is built in.
-    #[clap(long = "cutadapt_args", hide = true)]
+    #[clap(long = "cutadapt_args", hide = true, allow_hyphen_values = true)]
     pub cutadapt_args: Option<String>,
 
     /// [Deprecated] No longer needed — no Cutadapt subprocess.
