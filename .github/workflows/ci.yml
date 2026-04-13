@@ -127,22 +127,14 @@ jobs:
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
           conda run -n perl_tg trim_galore_perl --demux test_files/demux_test_samplesheet.txt -o /tmp/tg test_files/demux_test.fastq.gz
-          ./target/release/trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
-          FAIL=0
+          # --no_poly_g: disable v2.0 auto poly-G detection so output matches Perl v0.6.11
+          ./target/release/trim_galore --no_poly_g --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
           for f in demux_test_trimmed_sample1.fq.gz demux_test_trimmed_sample2.fq.gz demux_test_trimmed_sample3.fq.gz demux_test_trimmed_NoCode.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
-            if [ "$TG_MD5" = "$OP_MD5" ]; then
-              echo "MATCH: $f ($TG_MD5)"
-            else
-              echo "MISMATCH: $f TG=$TG_MD5 OP=$OP_MD5"
-              echo "--- TG lines: $(gzip -dc /tmp/tg/$f | wc -l), OP lines: $(gzip -dc /tmp/op/$f | wc -l)"
-              diff <(gzip -dc /tmp/tg/$f) <(gzip -dc /tmp/op/$f) | head -80 || true
-              FAIL=1
-            fi
+            echo "$f: TG=$TG_MD5 OP=$OP_MD5"
+            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
           done
-          diff /tmp/tg/demux_test_trimmed_demultiplexing_summary.txt /tmp/op/demux_test_trimmed_demultiplexing_summary.txt || true
-          [ "$FAIL" = "0" ] || { echo "Demux validation failed"; exit 1; }
 
       - name: All validations passed
         run: echo "All Oxidized Edition outputs are byte-identical to Perl TrimGalore 0.6.11"
