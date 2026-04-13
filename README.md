@@ -47,6 +47,16 @@ cargo build --release
 # Binary is at target/release/trim_galore
 ```
 
+### Latest development version
+
+To install the latest unreleased changes directly from the development branch:
+
+```bash
+cargo install --git https://github.com/FelixKrueger/TrimGalore --branch optimus_prime trim-galore --force
+```
+
+The `--force` flag overwrites any existing `trim_galore` binary (e.g. a v2.0.0 install from crates.io).
+
 ### Prebuilt binaries
 
 Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Intel, Apple Silicon) will be available on the [Releases](https://github.com/FelixKrueger/TrimGalore/releases) page.
