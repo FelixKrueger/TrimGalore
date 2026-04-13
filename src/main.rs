@@ -52,8 +52,42 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if cli.discard_untrimmed {
+        eprintln!("Discarding reads without adapter match (--discard-untrimmed)");
+    }
+
+    if cli.cores > 1 {
+        eprintln!("Using {} worker threads (parallel trim + compress)", cli.cores);
+    }
+
+    if cli.paired {
+        FastqReader::sanity_check(&cli.input[1])?;
+        let (_adapter_name, adapter_seq, adapter_r2_seq, config) = setup_trimming(&cli, &cli.input[0])?;
+        run_paired(&cli, &config, gzip, output_dir, cli.basename.as_deref(), &adapter_seq, &adapter_r2_seq)?;
+    } else {
+        // Single-end: process each input file independently
+        // (matches Perl TrimGalore behavior of looping over all positional args)
+        for (i, input) in cli.input.iter().enumerate() {
+            if i > 0 {
+                eprintln!("\n--------------------------------------------------");
+                FastqReader::sanity_check(input)?;
+            }
+            let (_adapter_name, adapter_seq, _, config) = setup_trimming(&cli, input)?;
+            run_single_file(&cli, input, &config, gzip, output_dir, &adapter_seq)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Set up adapter detection, poly-G scanning, and build TrimConfig for one input file.
+///
+/// When adapter is user-specified, auto-detection is skipped. When auto-detecting,
+/// the poly-G scan piggybacks on the adapter scan. Returns (adapter_name, adapter_seq,
+/// adapter_r2_seq, TrimConfig).
+fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, String, Option<String>, trimmer::TrimConfig)> {
     // Determine adapter
-    let (adapter_name, adapter_seq, adapter_r2_seq, autodetect_poly_g) = resolve_adapter(&cli)?;
+    let (adapter_name, adapter_seq, adapter_r2_seq, autodetect_poly_g) = resolve_adapter(cli, input_file)?;
 
     eprintln!("Adapter: {} ({})", adapter_name, adapter_seq);
     if let Some(ref a2) = adapter_r2_seq {
@@ -61,7 +95,6 @@ fn main() -> Result<()> {
     }
 
     // Resolve length cutoff: smallRNA adapter auto-reduces to 18bp
-    // (matches TrimGalore behavior to preserve short miRNA species)
     let length_cutoff = cli.length.unwrap_or_else(|| {
         if adapter_seq == "TGGAATTCTCGG" {
             eprintln!("Reducing length cutoff to 18bp for small RNA-Seq reads because a cutoff of 20bp may remove some short species of small RNAs if they had been trimmed by 1,2 or 3bp");
@@ -82,7 +115,6 @@ fn main() -> Result<()> {
     });
 
     // RRBS: auto-set --clip_r2 2 for directional paired-end mode
-    // (removes filled-in C bases from Read 2 5' end at MspI sites)
     let clip_r2 = if cli.rrbs && !cli.non_directional && cli.paired && cli.clip_r2.is_none() {
         eprintln!("Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)");
         Some(2)
@@ -99,19 +131,16 @@ fn main() -> Result<()> {
 
     // Determine poly-G trimming: CLI overrides auto-detection
     let poly_g_enabled = if cli.poly_g {
-        true  // Force-enabled by user
+        true
     } else if cli.no_poly_g {
-        false // Force-disabled by user
+        false
     } else {
-        // Auto-detect: use piggybacked data from autodetect_adapter if available,
-        // otherwise run a standalone poly-G scan
         let (poly_g_count, reads_scanned) = if let Some((count, scanned)) = autodetect_poly_g {
             (count, scanned)
         } else {
             eprintln!("Scanning for poly-G content...");
-            adapter::detect_poly_g(&cli.input[0])?
+            adapter::detect_poly_g(input_file)?
         };
-        // Threshold: 0.01% of scanned reads, with a floor of 10
         let threshold = (reads_scanned / 10_000).max(10);
         let enabled = poly_g_count > threshold;
 
@@ -145,7 +174,6 @@ fn main() -> Result<()> {
         eprintln!("Poly-G trimming: DISABLED (user-specified --no_poly_g)");
     }
 
-    // Build trim config
     let config = trimmer::TrimConfig {
         adapter: adapter_seq.as_bytes().to_vec(),
         adapter_r2: adapter_r2_seq.as_ref().map(|s| s.as_bytes().to_vec()),
@@ -168,28 +196,17 @@ fn main() -> Result<()> {
         is_paired: cli.paired,
         poly_a: cli.poly_a,
         poly_g: poly_g_enabled,
+        discard_untrimmed: cli.discard_untrimmed,
     };
 
-    let basename = cli.basename.as_deref();
-
-    if cli.cores > 1 {
-        eprintln!("Using {} worker threads (parallel trim + compress)", cli.cores);
-    }
-
-    if cli.paired {
-        run_paired(&cli, &config, gzip, output_dir, basename, &adapter_seq, &adapter_r2_seq)?;
-    } else {
-        run_single(&cli, &config, gzip, output_dir, basename, &adapter_seq)?;
-    }
-
-    Ok(())
+    Ok((adapter_name, adapter_seq, adapter_r2_seq, config))
 }
 
 /// Returns (adapter_name, adapter_seq, adapter_r2_seq, poly_g_from_autodetect).
 /// The last element is Some((poly_g_count, reads_scanned)) when auto-detection ran,
 /// None when the adapter was user-specified or preset-selected (poly-G must be
 /// detected separately via `adapter::detect_poly_g()`).
-fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>, Option<(usize, usize)>)> {
+fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, String, Option<String>, Option<(usize, usize)>)> {
     if let Some(ref seq) = cli.adapter {
         let name = "user-specified".to_string();
         let r2 = cli.adapter2.clone();
@@ -229,7 +246,7 @@ fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>, Option<
 
     // Auto-detect (also piggybacks poly-G counting)
     eprintln!("Auto-detecting adapter type...");
-    let detection = adapter::autodetect_adapter(&cli.input[0], cli.consider_already_trimmed)?;
+    let detection = adapter::autodetect_adapter(input_file, cli.consider_already_trimmed)?;
     eprintln!("{}", detection.message);
 
     let poly_g_data = Some((detection.poly_g_count, detection.reads_scanned));
@@ -242,16 +259,15 @@ fn resolve_adapter(cli: &Cli) -> Result<(String, String, Option<String>, Option<
     ))
 }
 
-fn run_single(
+fn run_single_file(
     cli: &Cli,
+    input: &Path,
     config: &trimmer::TrimConfig,
     gzip: bool,
     output_dir: Option<&Path>,
-    basename: Option<&str>,
     adapter_seq: &str,
 ) -> Result<()> {
-    let input = &cli.input[0];
-    let output_path = naming::single_end_output_name(input, output_dir, basename, gzip);
+    let output_path = naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
     let report_path = naming::report_name(input, output_dir);
 
     eprintln!("Trimming: {}", input.display());
@@ -274,6 +290,10 @@ fn run_single(
     eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
         stats.reads_with_adapter,
         pct(stats.reads_with_adapter, stats.total_reads));
+    if stats.discarded_untrimmed > 0 {
+        eprintln!("Reads discarded as untrimmed:    {:>10} ({:.1}%)",
+            stats.discarded_untrimmed, pct(stats.discarded_untrimmed, stats.total_reads));
+    }
     eprintln!("Reads too short:                 {:>10} ({:.1}%)",
         stats.too_short, pct(stats.too_short, stats.total_reads));
     eprintln!("Reads written (passing filters): {:>10} ({:.1}%)",

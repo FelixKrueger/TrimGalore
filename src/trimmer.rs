@@ -33,6 +33,7 @@ pub struct TrimConfig {
     pub is_paired: bool,
     pub poly_a: bool,
     pub poly_g: bool,
+    pub discard_untrimmed: bool,
 }
 
 /// Result of trimming a single read (carries per-read stats).
@@ -236,6 +237,12 @@ pub fn run_single_end(
             stats.poly_g_bases_trimmed += result.poly_g_trimmed;
         }
 
+        // Discard reads without adapter match (--discard-untrimmed)
+        if config.discard_untrimmed && !result.had_adapter {
+            stats.discarded_untrimmed += 1;
+            continue;
+        }
+
         // Apply filters
         match filters::filter_single_end(
             &record,
@@ -310,6 +317,14 @@ pub fn run_paired_end(
                 if result_r2.poly_g_trimmed > 0 {
                     stats_r2.poly_g_trimmed += 1;
                     stats_r2.poly_g_bases_trimmed += result_r2.poly_g_trimmed;
+                }
+
+                // Discard pairs without adapter match (--discard-untrimmed)
+                if config.discard_untrimmed && !result_r1.had_adapter && !result_r2.had_adapter {
+                    stats_r1.discarded_untrimmed += 1;
+                    stats_r2.discarded_untrimmed += 1;
+                    pair_stats.pairs_removed += 1;
+                    continue;
                 }
 
                 // Pair-aware filtering

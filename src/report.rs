@@ -35,6 +35,8 @@ pub struct TrimStats {
     pub poly_g_trimmed: usize,
     /// Total bases removed by poly-G/poly-C trimming
     pub poly_g_bases_trimmed: usize,
+    /// Reads discarded because no adapter was found (--discard-untrimmed)
+    pub discarded_untrimmed: usize,
 }
 
 impl TrimStats {
@@ -171,6 +173,11 @@ pub fn write_run_stats<W: Write>(w: &mut W, stats: &TrimStats) -> std::io::Resul
     writeln!(w)?;
 
     if stats.total_reads > 0 {
+        if stats.discarded_untrimmed > 0 {
+            writeln!(w, "Reads discarded as untrimmed:       {:>10} ({:.1}%)",
+                format_number(stats.discarded_untrimmed),
+                percentage(stats.discarded_untrimmed, stats.total_reads))?;
+        }
         writeln!(w, "Reads that were too short:          {:>10} ({:.1}%)",
             format_number(stats.too_short),
             percentage(stats.too_short, stats.total_reads))?;

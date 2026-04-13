@@ -342,6 +342,13 @@ fn process_pairs<W: Write>(
             stats_r2.poly_g_bases_trimmed += res_r2.poly_g_trimmed;
         }
 
+        if config.discard_untrimmed && !res_r1.had_adapter && !res_r2.had_adapter {
+            stats_r1.discarded_untrimmed += 1;
+            stats_r2.discarded_untrimmed += 1;
+            pair_stats.pairs_removed += 1;
+            continue;
+        }
+
         match filters::filter_paired_end(
             r1, r2,
             config.length_cutoff, config.max_length, config.max_n.clone(),
@@ -536,6 +543,11 @@ fn process_reads<W: Write>(
         if result.poly_g_trimmed > 0 {
             stats.poly_g_trimmed += 1;
             stats.poly_g_bases_trimmed += result.poly_g_trimmed;
+        }
+
+        if config.discard_untrimmed && !result.had_adapter {
+            stats.discarded_untrimmed += 1;
+            continue;
         }
 
         match filters::filter_single_end(

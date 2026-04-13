@@ -191,6 +191,12 @@ pub struct Cli {
     #[clap(long = "no_poly_g", alias = "no-poly-g", alias = "no-polyG")]
     pub no_poly_g: bool,
 
+    /// Discard reads that did not contain an adapter sequence. Only reads
+    /// where at least one adapter match was found are written to output.
+    /// For paired-end, the pair is discarded if neither read had an adapter.
+    #[clap(long = "discard_untrimmed", alias = "discard-untrimmed")]
+    pub discard_untrimmed: bool,
+
     // --- Specialty modes (run-and-exit, bypass normal trimming) ---
 
     /// Hard-trim to keep only the first N bases from the 5' end.
@@ -265,12 +271,9 @@ impl Cli {
             );
         }
 
-        if !self.paired && self.input.len() > 1
-            && !self.clock && self.implicon.is_none()
-        {
+        if !self.paired && self.input.len() > 1 && self.basename.is_some() {
             anyhow::bail!(
-                "Single-end mode expects 1 input file, got {}. Use --paired for paired-end.",
-                self.input.len()
+                "--basename cannot be used with multiple input files (ambiguous output naming)"
             );
         }
 
@@ -352,6 +355,7 @@ impl Cli {
         }
         if self.cutadapt_args.is_some() {
             eprintln!("WARNING: --cutadapt_args is deprecated in Trim Galore v2.0 (no external Cutadapt needed). Ignoring.");
+            eprintln!("         Note: --discard-untrimmed is now a native flag.");
         }
         if self.suppress_warn {
             eprintln!("WARNING: --suppress_warn is deprecated in Trim Galore v2.0 (no Cutadapt subprocess). Ignoring.");
