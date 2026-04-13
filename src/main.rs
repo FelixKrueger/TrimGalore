@@ -4,16 +4,16 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
-use optimus_prime::adapter;
-use optimus_prime::cli::Cli;
-use optimus_prime::demux;
-use optimus_prime::fastq::{FastqReader, FastqWriter};
-use optimus_prime::filters::MaxNFilter;
-use optimus_prime::io as naming;
-use optimus_prime::parallel;
-use optimus_prime::report;
-use optimus_prime::specialty;
-use optimus_prime::trimmer;
+use trim_galore::adapter;
+use trim_galore::cli::Cli;
+use trim_galore::demux;
+use trim_galore::fastq::{FastqReader, FastqWriter};
+use trim_galore::filters::MaxNFilter;
+use trim_galore::io as naming;
+use trim_galore::parallel;
+use trim_galore::report;
+use trim_galore::specialty;
+use trim_galore::trimmer;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -22,8 +22,8 @@ fn main() -> Result<()> {
     cli.validate()?;
 
     // Input sanity check on first file
-    eprintln!("\nTrim Galore v{}", env!("CARGO_PKG_VERSION"));
-    eprintln!("=========================================\n");
+    eprintln!("\nTrim Galore - Oxidized Edition v{}", env!("CARGO_PKG_VERSION"));
+    eprintln!("==================================================\n");
 
     FastqReader::sanity_check(&cli.input[0])?;
 

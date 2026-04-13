@@ -380,19 +380,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "optimus_prime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "flate2",
- "gzp",
- "log",
- "memchr",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -536,6 +523,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "trim-galore"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "flate2",
+ "gzp",
+ "log",
+ "memchr",
 ]
 
 [[package]]

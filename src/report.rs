@@ -121,7 +121,7 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     writeln!(w, "=========================")?;
     writeln!(w, "Input filename: (from command line)")?;
     writeln!(w, "Trimming mode: {}", if config.paired { "paired-end" } else { "single-end" })?;
-    writeln!(w, "Trim Galore version: {} (Optimus Prime)", config.version)?;
+    writeln!(w, "Trim Galore version: {} (Oxidized Edition)", config.version)?;
     if config.nextseq {
         writeln!(w, "2-colour high quality G-trimming enabled, with quality cutoff: --nextseq-trim={}", config.quality_cutoff)?;
     } else {

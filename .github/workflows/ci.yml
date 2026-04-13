@@ -36,27 +36,27 @@ jobs:
 
       - name: Single-end tests
         run: |
-          ./trim_galore test_files/illumina_10K.fastq.gz
-          ./trim_galore test_files/nextera_100K.fastq.gz
-          ./trim_galore test_files/smallRNA_100K.fastq.gz
-          ./trim_galore test_files/4_seqs_with_Ns.fastq.gz
+          ./legacy/trim_galore test_files/illumina_10K.fastq.gz
+          ./legacy/trim_galore test_files/nextera_100K.fastq.gz
+          ./legacy/trim_galore test_files/smallRNA_100K.fastq.gz
+          ./legacy/trim_galore test_files/4_seqs_with_Ns.fastq.gz
 
       - name: Paired-end tests
         run: |
-          ./trim_galore --paired test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          ./legacy/trim_galore --paired test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
 
       - name: Demux test
         run: |
-          ./trim_galore --demux test_files/demux_test_samplesheet.txt test_files/demux_test.fastq.gz
+          ./legacy/trim_galore --demux test_files/demux_test_samplesheet.txt test_files/demux_test.fastq.gz
 
       - name: Expected failures
         run: |
           # Colorspace — should be rejected
-          ! ./trim_galore test_files/colorspace_file.fastq 2>&1
+          ! ./legacy/trim_galore test_files/colorspace_file.fastq 2>&1
           # Truncated gzip — should fail
-          ! ./trim_galore test_files/truncated.fq.gz 2>&1
+          ! ./legacy/trim_galore test_files/truncated.fq.gz 2>&1
           # Empty file — should fail
-          ! ./trim_galore test_files/empty_file.fastq 2>&1
+          ! ./legacy/trim_galore test_files/empty_file.fastq 2>&1
 
   optimus-prime:
     name: Optimus Prime (Rust)
@@ -74,17 +74,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            optimus_prime/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('optimus_prime/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Run tests
-        working-directory: optimus_prime
         run: cargo test
 
       - name: Build release
-        working-directory: optimus_prime
         run: cargo build --release
 
   validation:
@@ -117,20 +115,19 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            optimus_prime/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('optimus_prime/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build Optimus Prime
-        working-directory: optimus_prime
+      - name: Build Oxidized Edition
         run: cargo build --release
 
       - name: Validate single-end output
         run: |
           mkdir -p /tmp/tg /tmp/op
-          ./trim_galore -o /tmp/tg test_files/illumina_10K.fastq.gz
-          ./optimus_prime/target/release/trim_galore -o /tmp/op test_files/illumina_10K.fastq.gz
+          ./legacy/trim_galore -o /tmp/tg test_files/illumina_10K.fastq.gz
+          ./target/release/trim_galore -o /tmp/op test_files/illumina_10K.fastq.gz
           TG_MD5=$(gzip -dc /tmp/tg/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
           OP_MD5=$(gzip -dc /tmp/op/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
           echo "TrimGalore: $TG_MD5"
@@ -140,8 +137,8 @@ jobs:
       - name: Validate paired-end output
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
-          ./trim_galore --paired -o /tmp/tg test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
-          ./optimus_prime/target/release/trim_galore --paired -o /tmp/op test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          ./legacy/trim_galore --paired -o /tmp/tg test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          ./target/release/trim_galore --paired -o /tmp/op test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
           for f in BS-seq_10K_R1_val_1.fq.gz BS-seq_10K_R2_val_2.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
@@ -152,8 +149,8 @@ jobs:
       - name: Validate hardtrim5
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
-          ./trim_galore --hardtrim5 30 -o /tmp/tg test_files/illumina_10K.fastq.gz
-          ./optimus_prime/target/release/trim_galore --hardtrim5 30 -o /tmp/op test_files/illumina_10K.fastq.gz
+          ./legacy/trim_galore --hardtrim5 30 -o /tmp/tg test_files/illumina_10K.fastq.gz
+          ./target/release/trim_galore --hardtrim5 30 -o /tmp/op test_files/illumina_10K.fastq.gz
           TG_MD5=$(gzip -dc /tmp/tg/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
           OP_MD5=$(gzip -dc /tmp/op/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
           [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: hardtrim5 differs!"; exit 1; }
@@ -161,8 +158,8 @@ jobs:
       - name: Validate clock mode
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
-          ./trim_galore --clock --paired -o /tmp/tg test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
-          ./optimus_prime/target/release/trim_galore --clock -o /tmp/op test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
+          ./legacy/trim_galore --clock --paired -o /tmp/tg test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
+          ./target/release/trim_galore --clock -o /tmp/op test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
           for f in clock_10K_R1.clock_UMI.R1.fq.gz clock_10K_R2.clock_UMI.R2.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
@@ -172,8 +169,8 @@ jobs:
       - name: Validate demux
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
-          ./trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/tg test_files/demux_test.fastq.gz
-          ./optimus_prime/target/release/trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
+          ./legacy/trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/tg test_files/demux_test.fastq.gz
+          ./target/release/trim_galore --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
           for f in demux_test_trimmed_sample1.fq.gz demux_test_trimmed_sample2.fq.gz demux_test_trimmed_sample3.fq.gz demux_test_trimmed_NoCode.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
             OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
@@ -182,4 +179,4 @@ jobs:
           diff /tmp/tg/demux_test_trimmed_demultiplexing_summary.txt /tmp/op/demux_test_trimmed_demultiplexing_summary.txt
 
       - name: All validations passed
-        run: echo "All Optimus Prime outputs are byte-identical to TrimGalore"
+        run: echo "All Oxidized Edition outputs are byte-identical to TrimGalore"

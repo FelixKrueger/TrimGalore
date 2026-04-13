@@ -50,18 +50,17 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            optimus_prime/target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('optimus_prime/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build release binary
-        working-directory: optimus_prime
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package binary
         run: |
-          BIN=optimus_prime/target/${{ matrix.target }}/release/trim_galore
+          BIN=target/${{ matrix.target }}/release/trim_galore
           ARCHIVE=trim_galore-${{ github.ref_name }}-${{ matrix.target }}
           mkdir -p "$ARCHIVE"
           cp "$BIN" "$ARCHIVE/"
@@ -106,7 +105,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Test cargo install from local path
-        run: cargo install --path optimus_prime
+        run: cargo install --path .
 
       - name: Verify binary
         run: trim_galore --help

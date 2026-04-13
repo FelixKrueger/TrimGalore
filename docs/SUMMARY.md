@@ -34,11 +34,11 @@ A complete **Rust rewrite of Trim Galore** that produces **byte-identical output
 **Test dataset:** 55.8M paired-end reads (SRR24827378, whole-genome bisulfite sequencing).
 All outputs verified byte-identical (decompressed) across all core counts via md5 checksums.
 
-![Wall Time Comparison](benchmark_wall_time.png)
+![Wall Time Comparison](benchmarks/benchmark_wall_time.png)
 
-![Thread Overhead & CPU Efficiency](benchmark_threads_cpu.png)
+![Thread Overhead & CPU Efficiency](benchmarks/benchmark_threads_cpu.png)
 
-![Scaling Comparison](benchmark_scaling.png)
+![Scaling Comparison](benchmarks/benchmark_scaling.png)
 
 ### Server benchmark — Intel Xeon 6975P-C (32 vCPU)
 
