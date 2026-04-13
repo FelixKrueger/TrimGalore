@@ -57,9 +57,19 @@ cargo install --git https://github.com/FelixKrueger/TrimGalore --branch optimus_
 
 The `--force` flag overwrites any existing `trim_galore` binary (e.g. a v2.0.0 install from crates.io).
 
+### Docker
+
+Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
+
+```bash
+docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore trim_galore input.fastq.gz
+```
+
+The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.0.0`) are published on release.
+
 ### Prebuilt binaries
 
-Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Intel, Apple Silicon) will be available on the [Releases](https://github.com/FelixKrueger/TrimGalore/releases) page.
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Intel, Apple Silicon) are available on the [Releases](https://github.com/FelixKrueger/TrimGalore/releases) page.
 
 ## Usage
 
