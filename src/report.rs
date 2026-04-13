@@ -271,10 +271,11 @@ pub fn write_cutadapt_section<W: Write>(
     config: &TrimConfig,
     stats: &TrimStats,
 ) -> std::io::Result<()> {
-    // Header — triggers MultiQC file discovery (search pattern: "This is cutadapt")
-    // Version must be >= 1.7 to select the modern regex set in MultiQC.
     writeln!(w)?;
-    writeln!(w, "This is cutadapt 4.0 (compatible; Trim Galore {} Oxidized Edition)", config.version)?;
+    // Native identifier for MultiQC with Trim Galore v2.0 support
+    writeln!(w, "Trim Galore {} (Oxidized Edition) — adapter trimming built in", config.version)?;
+    // Backwards compatibility: older MultiQC discovers reports via "This is cutadapt"
+    writeln!(w, "This is cutadapt 4.0 (compatible; for MultiQC backwards compatibility)")?;
     // Command line — MultiQC extracts the sample name from the input filename here
     writeln!(w, "Command line parameters: -j 1 -e {} -q {} -O {} -a {} {}",
         config.error_rate, config.quality_cutoff, config.stringency,
