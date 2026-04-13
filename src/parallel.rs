@@ -314,13 +314,31 @@ fn process_pairs<W: Write>(
     for (r1, r2) in reads_r1.iter_mut().zip(reads_r2.iter_mut()) {
         stats_r1.total_reads += 1;
         stats_r2.total_reads += 1;
+        stats_r1.total_bp_processed += r1.seq.len();
+        stats_r2.total_bp_processed += r2.seq.len();
         pair_stats.pairs_analyzed += 1;
 
         let res_r1 = trimmer::trim_read(r1, config, false);
         let res_r2 = trimmer::trim_read(r2, config, true);
 
-        if res_r1.had_adapter { stats_r1.reads_with_adapter += 1; }
-        if res_r2.had_adapter { stats_r2.reads_with_adapter += 1; }
+        stats_r1.bases_quality_trimmed += res_r1.quality_trimmed_bp;
+        stats_r2.bases_quality_trimmed += res_r2.quality_trimmed_bp;
+        if res_r1.had_adapter {
+            stats_r1.reads_with_adapter += 1;
+            let len = res_r1.adapter_match_len;
+            if len >= stats_r1.adapter_length_counts.len() {
+                stats_r1.adapter_length_counts.resize(len + 1, 0);
+            }
+            stats_r1.adapter_length_counts[len] += 1;
+        }
+        if res_r2.had_adapter {
+            stats_r2.reads_with_adapter += 1;
+            let len = res_r2.adapter_match_len;
+            if len >= stats_r2.adapter_length_counts.len() {
+                stats_r2.adapter_length_counts.resize(len + 1, 0);
+            }
+            stats_r2.adapter_length_counts[len] += 1;
+        }
         if res_r1.rrbs_trimmed_3prime { stats_r1.rrbs_trimmed_3prime += 1; }
         if res_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
         if res_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
@@ -355,6 +373,8 @@ fn process_pairs<W: Write>(
             unpaired_length_r1, unpaired_length_r2,
         ) {
             PairFilterResult::Pass => {
+                stats_r1.total_bp_written += r1.seq.len();
+                stats_r2.total_bp_written += r2.seq.len();
                 r1.write_to(writer_r1)?;
                 r2.write_to(writer_r2)?;
                 stats_r1.reads_written += 1;
@@ -531,9 +551,18 @@ fn process_reads<W: Write>(
 ) -> Result<()> {
     for record in reads.iter_mut() {
         stats.total_reads += 1;
+        stats.total_bp_processed += record.seq.len();
 
         let result = trimmer::trim_read(record, config, false);
-        if result.had_adapter { stats.reads_with_adapter += 1; }
+        stats.bases_quality_trimmed += result.quality_trimmed_bp;
+        if result.had_adapter {
+            stats.reads_with_adapter += 1;
+            let len = result.adapter_match_len;
+            if len >= stats.adapter_length_counts.len() {
+                stats.adapter_length_counts.resize(len + 1, 0);
+            }
+            stats.adapter_length_counts[len] += 1;
+        }
         if result.rrbs_trimmed_3prime { stats.rrbs_trimmed_3prime += 1; }
         if result.rrbs_trimmed_5prime { stats.rrbs_trimmed_5prime += 1; }
         if result.poly_a_trimmed > 0 {
@@ -554,6 +583,7 @@ fn process_reads<W: Write>(
             record, config.length_cutoff, config.max_length, config.max_n.clone(),
         ) {
             FilterResult::Pass => {
+                stats.total_bp_written += record.seq.len();
                 record.write_to(writer)?;
                 stats.reads_written += 1;
             }

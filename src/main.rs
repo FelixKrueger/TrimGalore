@@ -319,6 +319,8 @@ fn run_single_file(
 
     // Write report
     if !cli.no_report_file {
+        let input_filename = input.file_name()
+            .unwrap_or_default().to_string_lossy().to_string();
         let report_cfg = report::TrimConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
             quality_cutoff: cli.effective_quality_cutoff(),
@@ -338,12 +340,14 @@ fn run_single_file(
             poly_a: cli.poly_a,
             poly_g: config.poly_g,
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
+            input_filename: input_filename.clone(),
         };
 
         let file = File::create(&report_path)?;
         let mut w = BufWriter::new(file);
         report::write_report_header(&mut w, &report_cfg)?;
-        report::write_run_stats(&mut w, &stats)?;
+        report::write_cutadapt_section(&mut w, &report_cfg, &stats)?;
+        report::write_run_footer(&mut w, &report_cfg, &stats)?;
         eprintln!("\nReport: {}", report_path.display());
     }
 
@@ -485,8 +489,10 @@ fn run_paired(
 
     // Write reports
     if !cli.no_report_file {
-        for (input, stats) in [(input_r1, &stats_r1), (input_r2, &stats_r2)] {
+        for (idx, (input, stats)) in [(input_r1, &stats_r1), (input_r2, &stats_r2)].iter().enumerate() {
             let report_path = naming::report_name(input, output_dir);
+            let input_filename = input.file_name()
+                .unwrap_or_default().to_string_lossy().to_string();
             let report_cfg = report::TrimConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 quality_cutoff: cli.effective_quality_cutoff(),
@@ -506,13 +512,18 @@ fn run_paired(
                 poly_a: cli.poly_a,
                 poly_g: config.poly_g,
                 command_line: std::env::args().collect::<Vec<_>>().join(" "),
+                input_filename,
             };
 
             let file = File::create(&report_path)?;
             let mut w = BufWriter::new(file);
             report::write_report_header(&mut w, &report_cfg)?;
-            report::write_run_stats(&mut w, stats)?;
-            report::write_pair_validation_stats(&mut w, &pair_stats)?;
+            report::write_cutadapt_section(&mut w, &report_cfg, stats)?;
+            report::write_run_footer(&mut w, &report_cfg, stats)?;
+            // Pair validation stats go in R2 report only (matches Perl behavior)
+            if idx == 1 {
+                report::write_pair_validation_stats(&mut w, &pair_stats)?;
+            }
             eprintln!("Report: {}", report_path.display());
         }
     }

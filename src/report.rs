@@ -13,6 +13,10 @@ pub struct TrimStats {
     pub reads_with_adapter: usize,
     /// Total bases quality-trimmed
     pub bases_quality_trimmed: usize,
+    /// Total basepairs in input reads (before any trimming)
+    pub total_bp_processed: usize,
+    /// Total basepairs written to output (after all trimming + filtering)
+    pub total_bp_written: usize,
     /// Reads removed for being too short
     pub too_short: usize,
     /// Reads removed for being too long
@@ -45,6 +49,8 @@ impl TrimStats {
         self.total_reads += other.total_reads;
         self.reads_with_adapter += other.reads_with_adapter;
         self.bases_quality_trimmed += other.bases_quality_trimmed;
+        self.total_bp_processed += other.total_bp_processed;
+        self.total_bp_written += other.total_bp_written;
         self.too_short += other.too_short;
         self.too_long += other.too_long;
         self.too_many_n += other.too_many_n;
@@ -115,13 +121,15 @@ pub struct TrimConfig {
     pub poly_a: bool,
     pub poly_g: bool,
     pub command_line: String,
+    /// Input filename (basename only) — used in Cutadapt-compatible section for MultiQC
+    pub input_filename: String,
 }
 
 /// Write the trimming report header (parameter summary).
 pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io::Result<()> {
     writeln!(w, "SUMMARISING RUN PARAMETERS")?;
     writeln!(w, "=========================")?;
-    writeln!(w, "Input filename: (from command line)")?;
+    writeln!(w, "Input filename: {}", config.input_filename)?;
     writeln!(w, "Trimming mode: {}", if config.paired { "paired-end" } else { "single-end" })?;
     writeln!(w, "Trim Galore version: {} (Oxidized Edition)", config.version)?;
     if config.nextseq {
@@ -248,6 +256,161 @@ pub fn write_pair_validation_stats<W: Write>(
     }
 
     writeln!(w)?;
+
+    Ok(())
+}
+
+/// Write a Cutadapt-compatible section for MultiQC parsing.
+///
+/// MultiQC has no dedicated Trim Galore module — it uses its Cutadapt parser,
+/// which requires "This is cutadapt" in the first 100 lines, a "Command line
+/// parameters:" line for sample name extraction, bp statistics, and an adapter
+/// length distribution table.
+pub fn write_cutadapt_section<W: Write>(
+    w: &mut W,
+    config: &TrimConfig,
+    stats: &TrimStats,
+) -> std::io::Result<()> {
+    // Header — triggers MultiQC file discovery (search pattern: "This is cutadapt")
+    // Version must be >= 1.7 to select the modern regex set in MultiQC.
+    writeln!(w)?;
+    writeln!(w, "This is cutadapt 4.0 (compatible; Trim Galore {} Oxidized Edition)", config.version)?;
+    // Command line — MultiQC extracts the sample name from the input filename here
+    writeln!(w, "Command line parameters: -j 1 -e {} -q {} -O {} -a {} {}",
+        config.error_rate, config.quality_cutoff, config.stringency,
+        config.adapter, config.input_filename)?;
+    writeln!(w, "Processing reads on 1 core in single-end mode ...")?;
+    writeln!(w)?;
+
+    // Summary — regexes: "Total reads processed:\s*([\d,]+)" etc.
+    writeln!(w, "=== Summary ===")?;
+    writeln!(w)?;
+    writeln!(w, "Total reads processed:           {:>10}", format_number(stats.total_reads))?;
+    writeln!(w, "Reads with adapters:             {:>10} ({:.1}%)",
+        format_number(stats.reads_with_adapter),
+        percentage(stats.reads_with_adapter, stats.total_reads))?;
+    if stats.discarded_untrimmed > 0 {
+        writeln!(w, "Reads discarded as untrimmed:    {:>10} ({:.1}%)",
+            format_number(stats.discarded_untrimmed),
+            percentage(stats.discarded_untrimmed, stats.total_reads))?;
+    }
+    writeln!(w, "Reads written (passing filters): {:>10} ({:.1}%)",
+        format_number(stats.reads_written),
+        percentage(stats.reads_written, stats.total_reads))?;
+    writeln!(w)?;
+
+    // Basepair statistics — "Total basepairs processed:\s*([\d,]+) bp"
+    writeln!(w, "Total basepairs processed:   {:>12} bp", format_number(stats.total_bp_processed))?;
+    writeln!(w, "Quality-trimmed:             {:>12} bp ({:.1}%)",
+        format_number(stats.bases_quality_trimmed),
+        percentage(stats.bases_quality_trimmed, stats.total_bp_processed))?;
+    writeln!(w, "Total written (filtered):    {:>12} bp ({:.1}%)",
+        format_number(stats.total_bp_written),
+        percentage(stats.total_bp_written, stats.total_bp_processed))?;
+    writeln!(w)?;
+
+    // Adapter section — "=== Adapter 1 ===" triggers section parsing
+    writeln!(w, "=== Adapter 1 ===")?;
+    writeln!(w)?;
+    // "Sequence: ...; Type: regular 3'; Length: N; Trimmed: N times."
+    writeln!(w, "Sequence: {}; Type: regular 3'; Length: {}; Trimmed: {} times.",
+        config.adapter, config.adapter.len(), stats.reads_with_adapter)?;
+    writeln!(w)?;
+
+    // Allowed errors (cosmetic — MultiQC ignores this, but users may read it)
+    write_allowed_errors(w, config.adapter.len(), config.error_rate)?;
+    writeln!(w)?;
+
+    // Adapter length distribution table
+    // MultiQC parses: header with "length", "count", "expect"; then rows ^(\d+)\s+(\d+)\s+([\d\.]+)
+    writeln!(w, "Overview of removed sequences")?;
+    writeln!(w, "length\tcount\texpect\tmax.err\terror counts")?;
+
+    for (length, &count) in stats.adapter_length_counts.iter().enumerate() {
+        if length == 0 || count == 0 {
+            continue;
+        }
+        // Expected: total_reads / 4^length (random match probability)
+        let expect = stats.total_reads as f64 / 4f64.powi(length as i32);
+        let max_err = (length as f64 * config.error_rate).floor() as usize;
+        // Simplified error counts: assume all matches have 0 errors
+        // (MultiQC only uses the first 3 columns)
+        writeln!(w, "{}\t{}\t{:.1}\t{}\t{}", length, count, expect, max_err, count)?;
+    }
+    writeln!(w)?;
+    writeln!(w)?;
+
+    Ok(())
+}
+
+/// Write the "RUN STATISTICS" footer (TG-specific, not parsed by MultiQC).
+pub fn write_run_footer<W: Write>(
+    w: &mut W,
+    config: &TrimConfig,
+    stats: &TrimStats,
+) -> std::io::Result<()> {
+    writeln!(w, "RUN STATISTICS FOR INPUT FILE: {}", config.input_filename)?;
+    writeln!(w, "=============================================")?;
+    writeln!(w, "{} sequences processed in total", stats.total_reads)?;
+
+    if stats.too_short > 0 {
+        writeln!(w, "Sequences removed because they became shorter than the length cutoff of {} bp:\t{} ({:.1}%)",
+            config.length_cutoff, stats.too_short, percentage(stats.too_short, stats.total_reads))?;
+    }
+    if stats.too_long > 0 {
+        writeln!(w, "Sequences removed because they were longer than the upper length cutoff:\t{} ({:.1}%)",
+            stats.too_long, percentage(stats.too_long, stats.total_reads))?;
+    }
+    if stats.too_many_n > 0 {
+        writeln!(w, "Sequences removed because of too many N bases:\t{} ({:.1}%)",
+            stats.too_many_n, percentage(stats.too_many_n, stats.total_reads))?;
+    }
+
+    if stats.rrbs_trimmed_3prime > 0 {
+        writeln!(w, "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t{} ({:.1}%)",
+            stats.rrbs_trimmed_3prime, percentage(stats.rrbs_trimmed_3prime, stats.total_reads))?;
+    }
+    if stats.rrbs_trimmed_5prime > 0 {
+        writeln!(w, "RRBS reads trimmed by 2 bp at the start when read started with CAA or CGA in total:\t{} ({:.1}%)",
+            stats.rrbs_trimmed_5prime, percentage(stats.rrbs_trimmed_5prime, stats.total_reads))?;
+    }
+    if stats.poly_a_trimmed > 0 {
+        writeln!(w, "Reads with poly-A/T trimmed:\t{} ({:.1}%); {} bp removed",
+            stats.poly_a_trimmed, percentage(stats.poly_a_trimmed, stats.total_reads),
+            format_number(stats.poly_a_bases_trimmed))?;
+    }
+    if stats.poly_g_trimmed > 0 {
+        writeln!(w, "Reads with poly-G/C trimmed:\t{} ({:.1}%); {} bp removed",
+            stats.poly_g_trimmed, percentage(stats.poly_g_trimmed, stats.total_reads),
+            format_number(stats.poly_g_bases_trimmed))?;
+    }
+
+    writeln!(w)?;
+
+    Ok(())
+}
+
+/// Write the "No. of allowed errors" section (cosmetic, not parsed by MultiQC).
+fn write_allowed_errors<W: Write>(w: &mut W, adapter_len: usize, error_rate: f64) -> std::io::Result<()> {
+    writeln!(w, "No. of allowed errors:")?;
+    let mut parts = Vec::new();
+    let mut range_start = 1;
+    let mut current_max_err = 0usize;
+
+    for len in 1..=adapter_len {
+        let max_err = (len as f64 * error_rate).floor() as usize;
+        if max_err != current_max_err {
+            // Close previous range
+            if range_start <= len - 1 {
+                parts.push(format!("{}-{} bp: {}", range_start, len - 1, current_max_err));
+            }
+            range_start = len;
+            current_max_err = max_err;
+        }
+    }
+    // Close final range
+    parts.push(format!("{}-{} bp: {}", range_start, adapter_len, current_max_err));
+    writeln!(w, "{}", parts.join("; "))?;
 
     Ok(())
 }
