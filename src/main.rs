@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use trim_galore::adapter;
@@ -349,6 +349,24 @@ fn run_single_file(
         report::write_cutadapt_section(&mut w, &report_cfg, &stats)?;
         report::write_run_footer(&mut w, &report_cfg, &stats)?;
         eprintln!("\nReport: {}", report_path.display());
+
+        // JSON report (use effective config values, not raw CLI values,
+        // because setup_trimming() may override e.g. clip_r2 for RRBS)
+        let json_path = naming::json_report_name(input, output_dir);
+        let json_extra = report::JsonReportParams {
+            clip_r1: config.clip_r1,
+            clip_r2: config.clip_r2,
+            three_prime_clip_r1: config.three_prime_clip_r1,
+            three_prime_clip_r2: config.three_prime_clip_r2,
+            max_n: cli.max_n,
+            discard_untrimmed: config.discard_untrimmed,
+            consider_already_trimmed: cli.consider_already_trimmed,
+        };
+        let json_file = File::create(&json_path)?;
+        let mut jw = BufWriter::new(json_file);
+        report::write_json_report(&mut jw, &report_cfg, &stats, None, 1, &json_extra)?;
+        jw.flush()?;
+        eprintln!("JSON report: {}", json_path.display());
     }
 
     // Run FastQC if requested
@@ -525,6 +543,29 @@ fn run_paired(
                 report::write_pair_validation_stats(&mut w, &pair_stats)?;
             }
             eprintln!("Report: {}", report_path.display());
+
+            // JSON report — pair_validation included in BOTH R1 and R2
+            // (use effective config values, not raw CLI, for clip/discard params)
+            let json_path = naming::json_report_name(input, output_dir);
+            let json_extra = report::JsonReportParams {
+                clip_r1: config.clip_r1,
+                clip_r2: config.clip_r2,
+                three_prime_clip_r1: config.three_prime_clip_r1,
+                three_prime_clip_r2: config.three_prime_clip_r2,
+                max_n: cli.max_n,
+                discard_untrimmed: config.discard_untrimmed,
+                consider_already_trimmed: cli.consider_already_trimmed,
+            };
+            let json_file = File::create(&json_path)?;
+            let mut jw = BufWriter::new(json_file);
+            report::write_json_report(
+                &mut jw, &report_cfg, stats,
+                Some(&pair_stats),
+                (idx + 1) as u8,
+                &json_extra,
+            )?;
+            jw.flush()?;
+            eprintln!("JSON report: {}", json_path.display());
         }
     }
 

@@ -68,6 +68,7 @@ impl TrimStats {
         self.poly_a_bases_trimmed += other.poly_a_bases_trimmed;
         self.poly_g_trimmed += other.poly_g_trimmed;
         self.poly_g_bases_trimmed += other.poly_g_bases_trimmed;
+        self.discarded_untrimmed += other.discarded_untrimmed;
     }
 }
 
@@ -391,6 +392,243 @@ pub fn write_run_footer<W: Write>(
     Ok(())
 }
 
+// ── JSON report ──────────────────────────────────────────────────────────────
+
+/// Extra parameters for the JSON report not present on [`TrimConfig`].
+///
+/// These come from `trimmer::TrimConfig` and the CLI, and are passed separately
+/// to avoid coupling report.rs to trimmer.rs.
+#[derive(Debug)]
+pub struct JsonReportParams {
+    pub clip_r1: Option<usize>,
+    pub clip_r2: Option<usize>,
+    pub three_prime_clip_r1: Option<usize>,
+    pub three_prime_clip_r2: Option<usize>,
+    pub max_n: Option<f64>,
+    pub discard_untrimmed: bool,
+    pub consider_already_trimmed: Option<usize>,
+}
+
+/// Write a structured JSON trimming report.
+///
+/// Produces a machine-readable report for MultiQC's native TrimGalore module.
+/// The schema is versioned (`schema_version: 1`) so MultiQC can handle future
+/// changes without breaking.
+pub fn write_json_report<W: Write>(
+    w: &mut W,
+    config: &TrimConfig,
+    stats: &TrimStats,
+    pair_stats: Option<&PairValidationStats>,
+    read_number: u8,
+    extra: &JsonReportParams,
+) -> std::io::Result<()> {
+    let i1 = "  ";
+    let i2 = "    ";
+    let i3 = "      ";
+
+    writeln!(w, "{{")?;
+
+    // ── Top-level fields ─────────────────────────────────────────
+    json_str(w, i1, "tool", "Trim Galore", true)?;
+    writeln!(w, "{}\"schema_version\": 1,", i1)?;
+    json_str(w, i1, "trim_galore_version", &config.version, true)?;
+    json_str(w, i1, "input_filename", &config.input_filename, true)?;
+    json_str(w, i1, "mode", if config.paired { "paired-end" } else { "single-end" }, true)?;
+    writeln!(w, "{}\"read_number\": {},", i1, read_number)?;
+    json_str(w, i1, "command_line", &config.command_line, true)?;
+
+    // ── Parameters ───────────────────────────────────────────────
+    writeln!(w, "{}\"parameters\": {{", i1)?;
+    writeln!(w, "{}\"quality_cutoff\": {},", i2, config.quality_cutoff)?;
+    json_str(w, i2, "adapter", &config.adapter, true)?;
+    json_opt_str(w, i2, "adapter_r2", config.adapter_r2.as_deref(), true)?;
+    json_float(w, i2, "error_rate", config.error_rate, true)?;
+    json_int(w, i2, "stringency", config.stringency, true)?;
+    json_int(w, i2, "length_cutoff", config.length_cutoff, true)?;
+    json_opt_int(w, i2, "max_length", config.max_length, true)?;
+    writeln!(w, "{}\"phred_encoding\": {},", i2, config.phred_encoding)?;
+    json_bool(w, i2, "trim_n", config.trim_n, true)?;
+    json_bool(w, i2, "nextseq", config.nextseq, true)?;
+    json_bool(w, i2, "rrbs", config.rrbs, true)?;
+    json_bool(w, i2, "non_directional", config.non_directional, true)?;
+    json_bool(w, i2, "poly_a", config.poly_a, true)?;
+    json_bool(w, i2, "poly_g", config.poly_g, true)?;
+    json_opt_int(w, i2, "clip_r1", extra.clip_r1, true)?;
+    json_opt_int(w, i2, "clip_r2", extra.clip_r2, true)?;
+    json_opt_int(w, i2, "three_prime_clip_r1", extra.three_prime_clip_r1, true)?;
+    json_opt_int(w, i2, "three_prime_clip_r2", extra.three_prime_clip_r2, true)?;
+    json_opt_float(w, i2, "max_n", extra.max_n, true)?;
+    json_bool(w, i2, "discard_untrimmed", extra.discard_untrimmed, true)?;
+    json_opt_int(w, i2, "consider_already_trimmed", extra.consider_already_trimmed, false)?;
+    writeln!(w, "{}}},", i1)?;
+
+    // ── Read processing ──────────────────────────────────────────
+    writeln!(w, "{}\"read_processing\": {{", i1)?;
+    json_int(w, i2, "total_reads", stats.total_reads, true)?;
+    json_int(w, i2, "reads_with_adapter", stats.reads_with_adapter, true)?;
+    json_int(w, i2, "reads_written", stats.reads_written, true)?;
+    json_int(w, i2, "reads_too_short", stats.too_short, true)?;
+    json_int(w, i2, "reads_too_long", stats.too_long, true)?;
+    json_int(w, i2, "reads_too_many_n", stats.too_many_n, true)?;
+    json_int(w, i2, "reads_discarded_untrimmed", stats.discarded_untrimmed, false)?;
+    writeln!(w, "{}}},", i1)?;
+
+    // ── Basepair processing ──────────────────────────────────────
+    writeln!(w, "{}\"basepair_processing\": {{", i1)?;
+    json_int(w, i2, "total_bp_processed", stats.total_bp_processed, true)?;
+    json_int(w, i2, "quality_trimmed_bp", stats.bases_quality_trimmed, true)?;
+    json_int(w, i2, "total_bp_written", stats.total_bp_written, false)?;
+    writeln!(w, "{}}},", i1)?;
+
+    // ── Adapter trimming ─────────────────────────────────────────
+    // For R2, use the R2-specific adapter if set (Small RNA, BGI presets)
+    let adapter_seq = if read_number == 2 {
+        config.adapter_r2.as_deref().unwrap_or(&config.adapter)
+    } else {
+        &config.adapter
+    };
+    writeln!(w, "{}\"adapter_trimming\": {{", i1)?;
+    json_str(w, i2, "sequence", adapter_seq, true)?;
+    json_str(w, i2, "type", "regular 3'", true)?;
+    json_int(w, i2, "length", adapter_seq.len(), true)?;
+    json_int(w, i2, "times_trimmed", stats.reads_with_adapter, true)?;
+
+    // Sparse length distribution: omit index 0 and zero-count entries
+    let entries: Vec<(usize, usize)> = stats
+        .adapter_length_counts
+        .iter()
+        .enumerate()
+        .filter(|&(i, &count)| i > 0 && count > 0)
+        .map(|(i, &count)| (i, count))
+        .collect();
+
+    if entries.is_empty() {
+        writeln!(w, "{}\"length_distribution\": {{}}", i2)?;
+    } else {
+        writeln!(w, "{}\"length_distribution\": {{", i2)?;
+        for (idx, &(length, count)) in entries.iter().enumerate() {
+            let comma = if idx < entries.len() - 1 { "," } else { "" };
+            writeln!(w, "{}\"{}\": {}{}", i3, length, count, comma)?;
+        }
+        writeln!(w, "{}}}", i2)?;
+    }
+    writeln!(w, "{}}},", i1)?;
+
+    // ── Poly-A trimming ──────────────────────────────────────────
+    writeln!(w, "{}\"poly_a_trimming\": {{", i1)?;
+    json_int(w, i2, "reads_trimmed", stats.poly_a_trimmed, true)?;
+    json_int(w, i2, "bases_removed", stats.poly_a_bases_trimmed, false)?;
+    writeln!(w, "{}}},", i1)?;
+
+    // ── Poly-G trimming ──────────────────────────────────────────
+    writeln!(w, "{}\"poly_g_trimming\": {{", i1)?;
+    json_int(w, i2, "reads_trimmed", stats.poly_g_trimmed, true)?;
+    json_int(w, i2, "bases_removed", stats.poly_g_bases_trimmed, false)?;
+    writeln!(w, "{}}},", i1)?;
+
+    // ── RRBS ─────────────────────────────────────────────────────
+    writeln!(w, "{}\"rrbs\": {{", i1)?;
+    json_int(w, i2, "trimmed_3prime", stats.rrbs_trimmed_3prime, true)?;
+    json_int(w, i2, "trimmed_5prime", stats.rrbs_trimmed_5prime, false)?;
+    writeln!(w, "{}}},", i1)?;
+
+    // ── Pair validation ──────────────────────────────────────────
+    // In PE mode: included in BOTH R1 and R2 reports (self-contained per file).
+    // In SE mode: null.
+    match pair_stats {
+        Some(ps) => {
+            writeln!(w, "{}\"pair_validation\": {{", i1)?;
+            json_int(w, i2, "pairs_analyzed", ps.pairs_analyzed, true)?;
+            json_int(w, i2, "pairs_removed", ps.pairs_removed, true)?;
+            json_int(w, i2, "pairs_removed_n", ps.pairs_removed_n, true)?;
+            json_int(w, i2, "pairs_removed_too_long", ps.pairs_removed_too_long, true)?;
+            json_int(w, i2, "r1_unpaired", ps.r1_unpaired, true)?;
+            json_int(w, i2, "r2_unpaired", ps.r2_unpaired, false)?;
+            writeln!(w, "{}}}", i1)?;
+        }
+        None => {
+            json_null(w, i1, "pair_validation", false)?;
+        }
+    }
+
+    writeln!(w, "}}")?;
+    Ok(())
+}
+
+// ── JSON writing helpers ─────────────────────────────────────────────────────
+
+/// Escape a string for safe inclusion in JSON output.
+fn json_escape_string(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                // Control characters → \u00xx
+                escaped.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+fn json_str<W: Write>(w: &mut W, indent: &str, key: &str, value: &str, comma: bool) -> std::io::Result<()> {
+    writeln!(w, "{}\"{}\": \"{}\"{}",
+        indent, key, json_escape_string(value), if comma { "," } else { "" })
+}
+
+fn json_int<W: Write>(w: &mut W, indent: &str, key: &str, value: usize, comma: bool) -> std::io::Result<()> {
+    writeln!(w, "{}\"{}\": {}{}",
+        indent, key, value, if comma { "," } else { "" })
+}
+
+fn json_float<W: Write>(w: &mut W, indent: &str, key: &str, value: f64, comma: bool) -> std::io::Result<()> {
+    if !value.is_finite() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("non-finite float value for JSON key \"{}\": {}", key, value),
+        ));
+    }
+    writeln!(w, "{}\"{}\": {}{}",
+        indent, key, value, if comma { "," } else { "" })
+}
+
+fn json_bool<W: Write>(w: &mut W, indent: &str, key: &str, value: bool, comma: bool) -> std::io::Result<()> {
+    writeln!(w, "{}\"{}\": {}{}",
+        indent, key, if value { "true" } else { "false" }, if comma { "," } else { "" })
+}
+
+fn json_null<W: Write>(w: &mut W, indent: &str, key: &str, comma: bool) -> std::io::Result<()> {
+    writeln!(w, "{}\"{}\": null{}",
+        indent, key, if comma { "," } else { "" })
+}
+
+fn json_opt_int<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<usize>, comma: bool) -> std::io::Result<()> {
+    match value {
+        Some(v) => json_int(w, indent, key, v, comma),
+        None => json_null(w, indent, key, comma),
+    }
+}
+
+fn json_opt_str<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<&str>, comma: bool) -> std::io::Result<()> {
+    match value {
+        Some(v) => json_str(w, indent, key, v, comma),
+        None => json_null(w, indent, key, comma),
+    }
+}
+
+fn json_opt_float<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<f64>, comma: bool) -> std::io::Result<()> {
+    match value {
+        Some(v) => json_float(w, indent, key, v, comma),
+        None => json_null(w, indent, key, comma),
+    }
+}
+
 /// Write the "No. of allowed errors" section (cosmetic, not parsed by MultiQC).
 fn write_allowed_errors<W: Write>(w: &mut W, adapter_len: usize, error_rate: f64) -> std::io::Result<()> {
     writeln!(w, "No. of allowed errors:")?;
@@ -455,5 +693,271 @@ mod tests {
         assert_eq!(percentage(50, 100), 50.0);
         assert_eq!(percentage(0, 100), 0.0);
         assert_eq!(percentage(0, 0), 0.0);
+    }
+
+    // ── JSON report tests ────────────────────────────────────────
+
+    #[test]
+    fn test_json_escape_string() {
+        // Normal strings pass through unchanged
+        assert_eq!(json_escape_string("hello"), "hello");
+        assert_eq!(json_escape_string("AGATCGGAAGAGC"), "AGATCGGAAGAGC");
+
+        // Backslash and quotes
+        assert_eq!(json_escape_string(r#"say "hi""#), r#"say \"hi\""#);
+        assert_eq!(json_escape_string(r"path\to\file"), r"path\\to\\file");
+
+        // Control characters
+        assert_eq!(json_escape_string("line1\nline2"), "line1\\nline2");
+        assert_eq!(json_escape_string("col1\tcol2"), "col1\\tcol2");
+        assert_eq!(json_escape_string("cr\r"), "cr\\r");
+
+        // Other control chars get \u00xx encoding
+        assert_eq!(json_escape_string("\x01"), "\\u0001");
+        assert_eq!(json_escape_string("\x1f"), "\\u001f");
+
+        // Empty string
+        assert_eq!(json_escape_string(""), "");
+    }
+
+    /// Helper to build a minimal TrimConfig for testing.
+    fn test_config() -> TrimConfig {
+        TrimConfig {
+            version: "2.0.0".to_string(),
+            quality_cutoff: 20,
+            adapter: "AGATCGGAAGAGC".to_string(),
+            adapter_r2: None,
+            error_rate: 0.1,
+            stringency: 1,
+            length_cutoff: 20,
+            max_length: None,
+            paired: false,
+            gzip: true,
+            trim_n: false,
+            nextseq: false,
+            rrbs: false,
+            non_directional: false,
+            phred_encoding: 33,
+            poly_a: false,
+            poly_g: false,
+            command_line: "trim_galore sample.fq.gz".to_string(),
+            input_filename: "sample.fq.gz".to_string(),
+        }
+    }
+
+    /// Helper to build minimal JsonReportParams for testing.
+    fn test_extra_params() -> JsonReportParams {
+        JsonReportParams {
+            clip_r1: None,
+            clip_r2: None,
+            three_prime_clip_r1: None,
+            three_prime_clip_r2: None,
+            max_n: None,
+            discard_untrimmed: false,
+            consider_already_trimmed: None,
+        }
+    }
+
+    /// Helper to build TrimStats with some non-zero values.
+    fn test_stats() -> TrimStats {
+        let mut stats = TrimStats::default();
+        stats.total_reads = 10000;
+        stats.reads_with_adapter = 5234;
+        stats.reads_written = 9800;
+        stats.too_short = 150;
+        stats.too_long = 0;
+        stats.too_many_n = 50;
+        stats.total_bp_processed = 1_000_000;
+        stats.bases_quality_trimmed = 50_000;
+        stats.total_bp_written = 900_000;
+        stats.adapter_length_counts = vec![0, 1000, 500, 250, 0, 120];
+        stats
+    }
+
+    #[test]
+    fn test_write_json_report_se() {
+        let config = test_config();
+        let stats = test_stats();
+        let extra = test_extra_params();
+
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
+
+        let json: serde_json::Value = serde_json::from_slice(&buf)
+            .expect("JSON output must be valid");
+
+        assert_eq!(json["tool"], "Trim Galore");
+        assert_eq!(json["schema_version"], 1);
+        assert_eq!(json["trim_galore_version"], "2.0.0");
+        assert_eq!(json["input_filename"], "sample.fq.gz");
+        assert_eq!(json["mode"], "single-end");
+        assert_eq!(json["read_number"], 1);
+
+        // Parameters
+        assert_eq!(json["parameters"]["quality_cutoff"], 20);
+        assert_eq!(json["parameters"]["adapter"], "AGATCGGAAGAGC");
+        assert!(json["parameters"]["adapter_r2"].is_null());
+        assert_eq!(json["parameters"]["error_rate"], 0.1);
+        assert_eq!(json["parameters"]["stringency"], 1);
+        assert_eq!(json["parameters"]["length_cutoff"], 20);
+        assert!(json["parameters"]["max_length"].is_null());
+        assert_eq!(json["parameters"]["trim_n"], false);
+        assert_eq!(json["parameters"]["discard_untrimmed"], false);
+        assert!(json["parameters"]["consider_already_trimmed"].is_null());
+
+        // Read processing
+        assert_eq!(json["read_processing"]["total_reads"], 10000);
+        assert_eq!(json["read_processing"]["reads_with_adapter"], 5234);
+        assert_eq!(json["read_processing"]["reads_written"], 9800);
+        assert_eq!(json["read_processing"]["reads_too_short"], 150);
+
+        // Basepair processing
+        assert_eq!(json["basepair_processing"]["total_bp_processed"], 1_000_000);
+        assert_eq!(json["basepair_processing"]["quality_trimmed_bp"], 50_000);
+        assert_eq!(json["basepair_processing"]["total_bp_written"], 900_000);
+
+        // Adapter trimming
+        assert_eq!(json["adapter_trimming"]["sequence"], "AGATCGGAAGAGC");
+        assert_eq!(json["adapter_trimming"]["type"], "regular 3'");
+        assert_eq!(json["adapter_trimming"]["length"], 13);
+        assert_eq!(json["adapter_trimming"]["times_trimmed"], 5234);
+
+        // Length distribution is sparse
+        let ld = &json["adapter_trimming"]["length_distribution"];
+        assert_eq!(ld["1"], 1000);
+        assert_eq!(ld["2"], 500);
+        assert_eq!(ld["3"], 250);
+        assert_eq!(ld["5"], 120);
+        assert!(ld.get("0").is_none()); // index 0 omitted
+        assert!(ld.get("4").is_none()); // zero-count omitted
+
+        // Sections with zeros are still present
+        assert_eq!(json["poly_a_trimming"]["reads_trimmed"], 0);
+        assert_eq!(json["poly_g_trimming"]["reads_trimmed"], 0);
+        assert_eq!(json["rrbs"]["trimmed_3prime"], 0);
+
+        // SE: pair_validation is null
+        assert!(json["pair_validation"].is_null());
+    }
+
+    #[test]
+    fn test_write_json_report_pe() {
+        let mut config = test_config();
+        config.paired = true;
+        config.adapter_r2 = Some("TGGAATTCTCGG".to_string());
+        config.input_filename = "sample_R1.fq.gz".to_string();
+
+        let stats = test_stats();
+        let extra = JsonReportParams {
+            clip_r1: None,
+            clip_r2: Some(2),
+            ..test_extra_params()
+        };
+
+        let pair_stats = PairValidationStats {
+            pairs_analyzed: 10000,
+            pairs_removed: 200,
+            pairs_removed_n: 50,
+            pairs_removed_too_long: 0,
+            r1_unpaired: 10,
+            r2_unpaired: 15,
+        };
+
+        // R1 report
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &stats, Some(&pair_stats), 1, &extra).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+
+        assert_eq!(json["mode"], "paired-end");
+        assert_eq!(json["read_number"], 1);
+        // R1 uses the primary adapter
+        assert_eq!(json["adapter_trimming"]["sequence"], "AGATCGGAAGAGC");
+        // pair_validation is populated for R1 too
+        assert_eq!(json["pair_validation"]["pairs_analyzed"], 10000);
+        assert_eq!(json["pair_validation"]["pairs_removed"], 200);
+        assert_eq!(json["pair_validation"]["r1_unpaired"], 10);
+        assert_eq!(json["parameters"]["clip_r2"], 2);
+
+        // R2 report
+        config.input_filename = "sample_R2.fq.gz".to_string();
+        let mut buf2 = Vec::new();
+        write_json_report(&mut buf2, &config, &stats, Some(&pair_stats), 2, &extra).unwrap();
+        let json2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
+
+        assert_eq!(json2["read_number"], 2);
+        // R2 uses the R2-specific adapter
+        assert_eq!(json2["adapter_trimming"]["sequence"], "TGGAATTCTCGG");
+        assert_eq!(json2["adapter_trimming"]["length"], 12);
+        // pair_validation also present in R2
+        assert_eq!(json2["pair_validation"]["pairs_analyzed"], 10000);
+    }
+
+    #[test]
+    fn test_write_json_report_sparse_length_distribution() {
+        let config = test_config();
+        let extra = test_extra_params();
+
+        // Empty adapter_length_counts → empty object
+        let mut stats = TrimStats::default();
+        stats.total_reads = 100;
+        stats.reads_written = 100;
+
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+
+        let ld = &json["adapter_trimming"]["length_distribution"];
+        assert!(ld.is_object());
+        assert_eq!(ld.as_object().unwrap().len(), 0);
+
+        // Only non-zero entries appear
+        stats.adapter_length_counts = vec![0, 0, 0, 42, 0, 0, 0, 7];
+        let mut buf2 = Vec::new();
+        write_json_report(&mut buf2, &config, &stats, None, 1, &extra).unwrap();
+        let json2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
+
+        let ld2 = json2["adapter_trimming"]["length_distribution"].as_object().unwrap();
+        assert_eq!(ld2.len(), 2);
+        assert_eq!(ld2["3"], 42);
+        assert_eq!(ld2["7"], 7);
+    }
+
+    #[test]
+    fn test_write_json_report_special_characters() {
+        let mut config = test_config();
+        config.command_line = r#"trim_galore --fastqc_args "--nogroup" "my file.fq.gz""#.to_string();
+        config.input_filename = "my file.fq.gz".to_string();
+
+        let stats = TrimStats::default();
+        let extra = test_extra_params();
+
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
+
+        // Must produce valid JSON despite quotes and spaces in values
+        let json: serde_json::Value = serde_json::from_slice(&buf)
+            .expect("JSON with special characters must be valid");
+
+        assert_eq!(json["input_filename"], "my file.fq.gz");
+        // Command line with embedded quotes is escaped correctly
+        assert!(json["command_line"].as_str().unwrap().contains("--nogroup"));
+    }
+
+    #[test]
+    fn test_write_json_report_all_zero_stats() {
+        let config = test_config();
+        let stats = TrimStats::default(); // all zeros
+        let extra = test_extra_params();
+
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
+
+        let json: serde_json::Value = serde_json::from_slice(&buf)
+            .expect("All-zero JSON must be valid");
+
+        assert_eq!(json["read_processing"]["total_reads"], 0);
+        assert_eq!(json["read_processing"]["reads_written"], 0);
+        assert_eq!(json["basepair_processing"]["total_bp_processed"], 0);
+        assert_eq!(json["adapter_trimming"]["times_trimmed"], 0);
     }
 }

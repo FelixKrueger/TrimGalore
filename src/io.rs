@@ -108,6 +108,22 @@ pub fn report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
     }
 }
 
+/// Generate the JSON trimming report filename.
+pub fn json_report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
+    let input_name = input
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let report = format!("{}_trimming_report.json", input_name);
+
+    match output_dir {
+        Some(dir) => dir.join(&report),
+        None => input.parent().unwrap_or(Path::new(".")).join(&report),
+    }
+}
+
 /// Strip FASTQ extensions from a filename, returning just the base stem.
 ///
 /// Handles: .fastq.gz, .fastq, .fq.gz, .fq
@@ -183,5 +199,15 @@ mod tests {
         let input = Path::new("/data/sample.fq.gz");
         let out = report_name(input, None);
         assert_eq!(out, PathBuf::from("/data/sample.fq.gz_trimming_report.txt"));
+    }
+
+    #[test]
+    fn test_json_report_name() {
+        let input = Path::new("/data/sample.fq.gz");
+        let out = json_report_name(input, None);
+        assert_eq!(out, PathBuf::from("/data/sample.fq.gz_trimming_report.json"));
+
+        let out = json_report_name(input, Some(Path::new("/output")));
+        assert_eq!(out, PathBuf::from("/output/sample.fq.gz_trimming_report.json"));
     }
 }
