@@ -1,35 +1,98 @@
-# Trim Galore
-_Trim Galore_ is a wrapper around [Cutadapt](https://github.com/marcelm/cutadapt) and [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) to consistently apply adapter and quality trimming to FastQ files, with extra functionality for RRBS data.
+# Trim Galore - Oxidized Edition
 
-[![DOI](https://zenodo.org/badge/62039322.svg)](https://zenodo.org/badge/latestdoi/62039322)
-[![Build Status](https://travis-ci.org/FelixKrueger/TrimGalore.svg?branch=master)](https://travis-ci.org/FelixKrueger/TrimGalore)
-[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
-[![container ready](https://quay.io/repository/biocontainers/trim-galore/status)](https://quay.io/repository/biocontainers/trim-galore)
+A complete Rust rewrite of [Trim Galore](https://github.com/FelixKrueger/TrimGalore/tree/master) — the widely used adapter and quality trimmer for next-generation sequencing data. This is a **drop-in replacement** that produces **byte-identical output** to the Perl original, with no external dependencies.
 
+[![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=optimus_prime)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
+
+> **Status: Pre-release (beta testing).** The Oxidized Edition passes all validation tests and produces byte-identical output to Trim Galore v0.6.11 across all modes. It is currently undergoing real-world testing before replacing the Perl version on bioconda. Feedback and bug reports are welcome.
+
+## What's different?
+
+- **Zero dependencies.** No Python, no Cutadapt, no pigz — a single static binary.
+- **Faster.** 1.9x faster wall time at 8 cores, up to 4.4x at 24 cores. Uses 2.3-5x less CPU time.
+- **Same CLI.** All existing flags work. Same output filenames. Same report format (MultiQC-compatible).
+- **Single-pass paired-end.** Both reads processed together — no temp files, guaranteed synchronization.
+- **Built-in poly-G trimming.** Auto-detected for 2-colour instruments (NovaSeq, NextSeq).
+
+For detailed benchmarks, see [docs/SUMMARY.md](docs/SUMMARY.md).
 
 ## Installation
-_Trim Galore_ is a a Perl wrapper around two tools: [Cutadapt](https://github.com/marcelm/cutadapt) and [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/). To use, ensure that these two pieces of software are available and copy the `trim_galore` script to a location available on the `PATH`.
 
-For example:
+### From crates.io (recommended)
+
+Requires the [Rust toolchain](https://rustup.rs/) (1.74+):
+
 ```bash
-# Check that cutadapt is installed
-cutadapt --version
-# Check that FastQC is installed
-fastqc -v
-# Install Trim Galore
-curl -fsSL https://github.com/FelixKrueger/TrimGalore/archive/0.6.11.tar.gz -o trim_galore.tar.gz
-tar xvzf trim_galore.tar.gz
-# Run Trim Galore
-~/TrimGalore-0.6.11/trim_galore
+cargo install trim-galore
 ```
 
-If you are using Bioconda:
+### Build from source
+
+```bash
+git clone https://github.com/FelixKrueger/TrimGalore.git
+cd TrimGalore
+git checkout optimus_prime
+cargo build --release
+# Binary is at target/release/trim_galore
 ```
-conda install trim-galore
+
+### Prebuilt binaries
+
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Intel, Apple Silicon) will be available on the [Releases](https://github.com/FelixKrueger/TrimGalore/releases) page once beta testing completes.
+
+## Usage
+
+The CLI is identical to the Perl version:
+
+```bash
+# Single-end
+trim_galore input.fastq.gz
+
+# Paired-end
+trim_galore --paired file_R1.fastq.gz file_R2.fastq.gz
+
+# With parallel compression (recommended for large files)
+trim_galore --cores 8 --paired file_R1.fastq.gz file_R2.fastq.gz
+
+# RRBS mode
+trim_galore --rrbs --paired file_R1.fastq.gz file_R2.fastq.gz
+
+# Run FastQC on trimmed output
+trim_galore --fastqc input.fastq.gz
 ```
+
+For the complete list of options:
+
+```bash
+trim_galore --help
+```
+
+## Validating output
+
+To verify byte-identical output against the Perl version:
+
+```bash
+# Run both versions on the same input
+trim_galore -o /tmp/oxidized test_files/illumina_10K.fastq.gz
+legacy/trim_galore -o /tmp/perl test_files/illumina_10K.fastq.gz
+
+# Compare decompressed output (compressed bytes differ, content is identical)
+diff <(gzip -dc /tmp/perl/illumina_10K_trimmed.fq.gz) \
+     <(gzip -dc /tmp/oxidized/illumina_10K_trimmed.fq.gz)
+```
+
+The `legacy/` directory contains the original Perl script for comparison testing. It requires Perl, Cutadapt, and optionally FastQC.
 
 ## Documentation
-For instructions on how to use _Trim Galore_, please see the [User Guide](Docs/Trim_Galore_User_Guide.md).
+
+For general Trim Galore usage, see the [User Guide](Docs/Trim_Galore_User_Guide.md).
+
+For benchmarks and technical details of the Oxidized Edition, see [docs/SUMMARY.md](docs/SUMMARY.md).
 
 ## Credits
+
 _Trim Galore_ was developed at The Babraham Institute by [@FelixKrueger](https://github.com/FelixKrueger/), now part of [Altos Labs](https://altoslabs.com/).
+
+## License
+
+[GPL-3.0](LICENSE)
