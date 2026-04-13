@@ -2,110 +2,359 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [optimus_prime, master]
+  workflow_dispatch: {}
 
 permissions:
   contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  # ------------------------------------------------------------------
+  # 0. Detect whether this is a release run
+  # ------------------------------------------------------------------
+  check-release:
+    name: Check release
+    runs-on: ubuntu-latest
+    outputs:
+      is_release: ${{ steps.check.outputs.is_release }}
+      version: ${{ steps.check.outputs.version }}
+      version_major: ${{ steps.check.outputs.version_major }}
+      version_minor: ${{ steps.check.outputs.version_minor }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          fetch-tags: true
+
+      - name: Detect release
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Release must be triggered from master
+            if [ "${{ github.ref_name }}" != "master" ]; then
+              echo "::error::Release must be triggered from master branch, not ${{ github.ref_name }}"
+              exit 1
+            fi
+
+            VERSION="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
+            RAW="${VERSION#v}"
+            MAJOR=$(echo "$RAW" | cut -d. -f1)
+            MINOR="${MAJOR}.$(echo "$RAW" | cut -d. -f2)"
+
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "version_major=$MAJOR" >> "$GITHUB_OUTPUT"
+            echo "version_minor=$MINOR" >> "$GITHUB_OUTPUT"
+
+            if git tag -l "$VERSION" | grep -q .; then
+              echo "::error::Tag $VERSION already exists"
+              exit 1
+            fi
+
+            LOCK_VERSION=$(awk '/^name = "trim-galore"/{found=1} found && /^version =/{print; exit}' Cargo.lock | sed 's/.*"\(.*\)"/\1/')
+            if [ "$LOCK_VERSION" != "$RAW" ]; then
+              echo "::error::Cargo.lock version ($LOCK_VERSION) does not match Cargo.toml version ($RAW)"
+              exit 1
+            fi
+
+            echo "Detected release: $VERSION"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "Not a release run"
+          fi
+
+  # ------------------------------------------------------------------
+  # 1. Build binaries for each target (release only)
+  # ------------------------------------------------------------------
+  build-binaries:
+    name: Build ${{ matrix.name }}
+    if: needs.check-release.outputs.is_release == 'true'
+    needs: [check-release]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-musl
+          - name: linux-x86_64
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-          - target: x86_64-apple-darwin
+            target: x86_64-unknown-linux-gnu
+
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+          - name: macos-x86_64
             os: macos-13
-          - target: aarch64-apple-darwin
-            os: macos-14
+            target: x86_64-apple-darwin
+
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install musl tools (Linux cross)
-        if: contains(matrix.target, 'musl')
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        id: package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-          # For aarch64 cross-compilation
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          fi
+          BIN="trim_galore"
+          ARCHIVE="${BIN}-${{ matrix.name }}"
 
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-
+          mkdir -p "staging/${ARCHIVE}"
+          cp "target/${{ matrix.target }}/release/${BIN}" "staging/${ARCHIVE}/"
+          cp README.md LICENSE "staging/${ARCHIVE}/" 2>/dev/null || true
 
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+          cd staging
+          tar czf "../${ARCHIVE}.tar.gz" "${ARCHIVE}"
+          cd ..
 
-      - name: Package binary
-        run: |
-          BIN=target/${{ matrix.target }}/release/trim_galore
-          ARCHIVE=trim_galore-${{ github.ref_name }}-${{ matrix.target }}
-          mkdir -p "$ARCHIVE"
-          cp "$BIN" "$ARCHIVE/"
-          cp README.md LICENSE "$ARCHIVE/" 2>/dev/null || true
-          tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
-          echo "ARCHIVE=$ARCHIVE.tar.gz" >> $GITHUB_ENV
+          shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      - name: Upload artifact
+          echo "archive=${ARCHIVE}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=${ARCHIVE}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
-          path: ${{ env.ARCHIVE }}
+          name: binary-${{ matrix.name }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          retention-days: 1
 
-  release:
-    name: Create GitHub Release
-    needs: build
+  # ------------------------------------------------------------------
+  # 1a. Smoke test the linux binary
+  # ------------------------------------------------------------------
+  smoke-test-binaries:
+    name: Smoke test binaries
+    if: needs.check-release.outputs.is_release == 'true'
+    needs: [check-release, build-binaries]
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
+      - name: Download linux-x86_64 binary
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: binary-linux-x86_64
+          path: /tmp/binaries
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: artifacts/**/*.tar.gz
+      - name: Smoke test
+        run: |
+          cd /tmp/binaries
+          tar xzf trim_galore-linux-x86_64.tar.gz
+          ./trim_galore-linux-x86_64/trim_galore --help
+          ./trim_galore-linux-x86_64/trim_galore --version
 
-  test-install:
-    name: Test cargo install
-    needs: build
-    runs-on: ubuntu-latest
-
+  # ------------------------------------------------------------------
+  # 2. Build per-platform Docker images on native runners
+  # ------------------------------------------------------------------
+  docker-build:
+    name: Docker ${{ matrix.platform }}
+    needs: [check-release]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ------------------------------------------------------------------
+  # 3. Merge per-platform images into a multi-arch manifest
+  # ------------------------------------------------------------------
+  docker-merge:
+    name: Docker merge
+    needs: [check-release, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.check-release.outputs.version }},enable=${{ needs.check-release.outputs.is_release == 'true' }}
+            type=raw,value=${{ needs.check-release.outputs.version_minor }},enable=${{ needs.check-release.outputs.is_release == 'true' }}
+            type=raw,value=${{ needs.check-release.outputs.version_major }},enable=${{ needs.check-release.outputs.is_release == 'true' }}
+            type=raw,value=latest,enable=${{ needs.check-release.outputs.is_release == 'true' }}
+            type=raw,value=dev
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+  # ------------------------------------------------------------------
+  # 3a. Smoke test the Docker image
+  # ------------------------------------------------------------------
+  smoke-test-docker:
+    name: Smoke test Docker
+    needs: [docker-merge]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Pull and test
+        run: |
+          docker run --rm ghcr.io/${{ env.IMAGE_NAME }}:dev --help
+          docker run --rm ghcr.io/${{ env.IMAGE_NAME }}:dev --version
+
+  # ------------------------------------------------------------------
+  # 4. Create tag and draft release (release only, after all builds)
+  # ------------------------------------------------------------------
+  create-tag-and-release:
+    name: Create tag and release
+    if: needs.check-release.outputs.is_release == 'true'
+    needs: [check-release, build-binaries, smoke-test-binaries, docker-merge, smoke-test-docker]
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ needs.check-release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create tag
+        run: |
+          git tag "${{ needs.check-release.outputs.version }}"
+          git push origin "${{ needs.check-release.outputs.version }}"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.check-release.outputs.version }}" \
+            --target "${{ github.sha }}" \
+            --title "Trim Galore ${{ needs.check-release.outputs.version }}" \
+            --generate-notes
+
+  # ------------------------------------------------------------------
+  # 5. Upload binaries to the release
+  # ------------------------------------------------------------------
+  upload-binaries:
+    name: Upload binaries
+    if: needs.check-release.outputs.is_release == 'true'
+    needs: [check-release, create-tag-and-release, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: /tmp/binaries
+          merge-multiple: true
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.create-tag-and-release.outputs.tag }}" \
+            /tmp/binaries/*.tar.gz \
+            /tmp/binaries/*.sha256
+
+  # ------------------------------------------------------------------
+  # 6. Publish to crates.io (release only, last step)
+  # ------------------------------------------------------------------
+  publish-crate:
+    name: Publish to crates.io
+    if: needs.check-release.outputs.is_release == 'true'
+    needs: [check-release, upload-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Test cargo install from local path
-        run: cargo install --path .
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
 
-      - name: Verify binary
-        run: trim_galore --help
+      - name: Publish to crates.io
+        run: cargo publish --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
