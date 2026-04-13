@@ -3,6 +3,7 @@
 A complete Rust rewrite of [Trim Galore](https://github.com/FelixKrueger/TrimGalore/tree/master) — the widely used adapter and quality trimmer for next-generation sequencing data. This is a **drop-in replacement** that produces **byte-identical output** to the Perl original, with no external dependencies.
 
 [![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=optimus_prime)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/trim-galore)](https://crates.io/crates/trim-galore)
 
 > **Status: Pre-release (beta testing).** The Oxidized Edition passes all validation tests and produces byte-identical output to Trim Galore v0.6.11 across all modes. It is currently undergoing real-world testing before replacing the Perl version on bioconda. Feedback and bug reports are welcome.
 

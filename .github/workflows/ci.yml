@@ -26,7 +26,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          conda install -y cutadapt=5.2 fastqc
+          conda install -y cutadapt=5.2 "xopen!=2.0.2" fastqc
 
       - name: Verify dependencies
         run: |
@@ -104,7 +104,7 @@ jobs:
           auto-activate-base: true
 
       - name: Install dependencies
-        run: conda install -y cutadapt=5.2 fastqc
+        run: conda install -y cutadapt=5.2 "xopen!=2.0.2" fastqc
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
