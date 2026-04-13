@@ -1,8 +1,8 @@
 [package]
 name = "trim-galore"
 version = "2.0.0"
-edition = "2021"
-rust-version = "1.74"
+edition = "2024"
+rust-version = "1.85"
 description = "Fast adapter and quality trimming for NGS data — Oxidized Edition"
 license = "GPL-3.0-only"
 authors = ["Felix Krueger"]

@@ -21,7 +21,7 @@ For detailed benchmarks, see [docs/SUMMARY.md](docs/SUMMARY.md).
 
 ### From crates.io (recommended)
 
-Requires the [Rust toolchain](https://rustup.rs/) (1.74+):
+Requires the [Rust toolchain](https://rustup.rs/) (1.85+):
 
 ```bash
 cargo install trim-galore
