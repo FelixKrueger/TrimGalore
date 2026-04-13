@@ -95,7 +95,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
 
     while let Some(record) = reader.next_record()? {
         reads_scanned += 1;
-        if reads_scanned > MAX_SCAN_READS {
+        if reads_scanned >= MAX_SCAN_READS {
             break;
         }
 
