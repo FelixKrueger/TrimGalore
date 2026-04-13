@@ -137,7 +137,7 @@ jobs:
             else
               echo "MISMATCH: $f TG=$TG_MD5 OP=$OP_MD5"
               echo "--- TG lines: $(gzip -dc /tmp/tg/$f | wc -l), OP lines: $(gzip -dc /tmp/op/$f | wc -l)"
-              diff <(gzip -dc /tmp/tg/$f | head -40) <(gzip -dc /tmp/op/$f | head -40) || true
+              diff <(gzip -dc /tmp/tg/$f) <(gzip -dc /tmp/op/$f) | head -80 || true
               FAIL=1
             fi
           done
