@@ -17,6 +17,9 @@ pub struct TrimStats {
     pub total_bp_processed: usize,
     /// Total basepairs written to output (after all trimming + filtering)
     pub total_bp_written: usize,
+    /// Total basepairs after adapter/quality trimming but before length/pair filtering.
+    /// This matches what Cutadapt would have reported as "Total written (filtered)".
+    pub total_bp_after_trim: usize,
     /// Reads removed for being too short
     pub too_short: usize,
     /// Reads removed for being too long
@@ -51,6 +54,7 @@ impl TrimStats {
         self.bases_quality_trimmed += other.bases_quality_trimmed;
         self.total_bp_processed += other.total_bp_processed;
         self.total_bp_written += other.total_bp_written;
+        self.total_bp_after_trim += other.total_bp_after_trim;
         self.too_short += other.too_short;
         self.too_long += other.too_long;
         self.too_many_n += other.too_many_n;
@@ -296,9 +300,13 @@ pub fn write_cutadapt_section<W: Write>(
             format_number(stats.discarded_untrimmed),
             percentage(stats.discarded_untrimmed, stats.total_reads))?;
     }
+    // In v0.6.x, Cutadapt wrote ALL reads — length/pair filtering was a separate
+    // TrimGalore step. So Cutadapt's "Reads written" was total_reads minus only
+    // --discard-untrimmed. We replicate that here for MultiQC backwards compatibility.
+    let cutadapt_reads_written = stats.total_reads - stats.discarded_untrimmed;
     writeln!(w, "Reads written (passing filters): {:>10} ({:.1}%)",
-        format_number(stats.reads_written),
-        percentage(stats.reads_written, stats.total_reads))?;
+        format_number(cutadapt_reads_written),
+        percentage(cutadapt_reads_written, stats.total_reads))?;
     writeln!(w)?;
 
     // Basepair statistics — "Total basepairs processed:\s*([\d,]+) bp"
@@ -306,9 +314,11 @@ pub fn write_cutadapt_section<W: Write>(
     writeln!(w, "Quality-trimmed:             {:>12} bp ({:.1}%)",
         format_number(stats.bases_quality_trimmed),
         percentage(stats.bases_quality_trimmed, stats.total_bp_processed))?;
+    // Same as reads: report bp after trimming but before length/pair filtering,
+    // matching what Cutadapt would have written.
     writeln!(w, "Total written (filtered):    {:>12} bp ({:.1}%)",
-        format_number(stats.total_bp_written),
-        percentage(stats.total_bp_written, stats.total_bp_processed))?;
+        format_number(stats.total_bp_after_trim),
+        percentage(stats.total_bp_after_trim, stats.total_bp_processed))?;
     writeln!(w)?;
 
     // Adapter section — "=== Adapter 1 ===" triggers section parsing

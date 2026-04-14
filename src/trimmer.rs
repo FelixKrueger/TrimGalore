@@ -259,6 +259,9 @@ pub fn run_single_end(
             continue;
         }
 
+        // Track bp after trimming but before length filtering (Cutadapt-compatible stat)
+        stats.total_bp_after_trim += record.seq.len();
+
         // Apply filters
         match filters::filter_single_end(
             &record,
@@ -361,6 +364,10 @@ pub fn run_paired_end(
                     pair_stats.pairs_removed += 1;
                     continue;
                 }
+
+                // Track bp after trimming but before pair/length filtering (Cutadapt-compatible stat)
+                stats_r1.total_bp_after_trim += r1.seq.len();
+                stats_r2.total_bp_after_trim += r2.seq.len();
 
                 // Pair-aware filtering
                 match filters::filter_paired_end(
