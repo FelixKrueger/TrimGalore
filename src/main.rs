@@ -341,6 +341,7 @@ fn run_single_file(
             poly_g: config.poly_g,
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
             input_filename: input_filename.clone(),
+            input_filenames: vec![input_filename.clone()],
         };
 
         let file = File::create(&report_path)?;
@@ -507,6 +508,10 @@ fn run_paired(
 
     // Write reports
     if !cli.no_report_file {
+        let all_input_filenames: Vec<String> = [input_r1, input_r2].iter()
+            .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+            .collect();
+
         for (idx, (input, stats)) in [(input_r1, &stats_r1), (input_r2, &stats_r2)].iter().enumerate() {
             let report_path = naming::report_name(input, output_dir);
             let input_filename = input.file_name()
@@ -531,6 +536,7 @@ fn run_paired(
                 poly_g: config.poly_g,
                 command_line: std::env::args().collect::<Vec<_>>().join(" "),
                 input_filename,
+                input_filenames: all_input_filenames.clone(),
             };
 
             let file = File::create(&report_path)?;

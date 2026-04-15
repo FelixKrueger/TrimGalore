@@ -129,8 +129,10 @@ pub struct TrimConfig {
     pub poly_a: bool,
     pub poly_g: bool,
     pub command_line: String,
-    /// Input filename (basename only) — used in Cutadapt-compatible section for MultiQC
+    /// Input filename (basename only) — used in text report and Cutadapt-compatible section
     pub input_filename: String,
+    /// All input filenames — SE: one element, PE: both R1 and R2. Used in JSON report.
+    pub input_filenames: Vec<String>,
 }
 
 /// Write the trimming report header (parameter summary).
@@ -445,7 +447,15 @@ pub fn write_json_report<W: Write>(
     json_str(w, i1, "tool", "Trim Galore", true)?;
     writeln!(w, "{}\"schema_version\": 1,", i1)?;
     json_str(w, i1, "trim_galore_version", &config.version, true)?;
-    json_str(w, i1, "input_filename", &config.input_filename, true)?;
+    // Input filenames as array: SE = ["file.fq.gz"], PE = ["R1.fq.gz", "R2.fq.gz"]
+    write!(w, "{}\"input_filenames\": [", i1)?;
+    for (i, fname) in config.input_filenames.iter().enumerate() {
+        write!(w, "\"{}\"", json_escape_string(fname))?;
+        if i + 1 < config.input_filenames.len() {
+            write!(w, ", ")?;
+        }
+    }
+    writeln!(w, "],")?;
     json_str(w, i1, "mode", if config.paired { "paired-end" } else { "single-end" }, true)?;
     writeln!(w, "{}\"read_number\": {},", i1, read_number)?;
     json_str(w, i1, "command_line", &config.command_line, true)?;
@@ -756,6 +766,7 @@ mod tests {
             poly_g: false,
             command_line: "trim_galore sample.fq.gz".to_string(),
             input_filename: "sample.fq.gz".to_string(),
+            input_filenames: vec!["sample.fq.gz".to_string()],
         }
     }
 
@@ -803,7 +814,7 @@ mod tests {
         assert_eq!(json["tool"], "Trim Galore");
         assert_eq!(json["schema_version"], 1);
         assert_eq!(json["trim_galore_version"], "2.0.0");
-        assert_eq!(json["input_filename"], "sample.fq.gz");
+        assert_eq!(json["input_filenames"][0], "sample.fq.gz");
         assert_eq!(json["mode"], "single-end");
         assert_eq!(json["read_number"], 1);
 
@@ -860,6 +871,7 @@ mod tests {
         config.paired = true;
         config.adapter_r2 = Some("TGGAATTCTCGG".to_string());
         config.input_filename = "sample_R1.fq.gz".to_string();
+        config.input_filenames = vec!["sample_R1.fq.gz".to_string(), "sample_R2.fq.gz".to_string()];
 
         let stats = test_stats();
         let extra = JsonReportParams {
@@ -884,6 +896,10 @@ mod tests {
 
         assert_eq!(json["mode"], "paired-end");
         assert_eq!(json["read_number"], 1);
+        // Both filenames in the array
+        assert_eq!(json["input_filenames"][0], "sample_R1.fq.gz");
+        assert_eq!(json["input_filenames"][1], "sample_R2.fq.gz");
+        assert_eq!(json["input_filenames"].as_array().unwrap().len(), 2);
         // R1 uses the primary adapter
         assert_eq!(json["adapter_trimming"]["sequence"], "AGATCGGAAGAGC");
         // pair_validation is populated for R1 too
@@ -941,6 +957,7 @@ mod tests {
         let mut config = test_config();
         config.command_line = r#"trim_galore --fastqc_args "--nogroup" "my file.fq.gz""#.to_string();
         config.input_filename = "my file.fq.gz".to_string();
+        config.input_filenames = vec!["my file.fq.gz".to_string()];
 
         let stats = TrimStats::default();
         let extra = test_extra_params();
@@ -952,7 +969,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&buf)
             .expect("JSON with special characters must be valid");
 
-        assert_eq!(json["input_filename"], "my file.fq.gz");
+        assert_eq!(json["input_filenames"][0], "my file.fq.gz");
         // Command line with embedded quotes is escaped correctly
         assert!(json["command_line"].as_str().unwrap().contains("--nogroup"));
     }
