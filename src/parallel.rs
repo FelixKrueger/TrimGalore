@@ -341,6 +341,9 @@ fn process_pairs<W: Write>(
         if res_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
         if res_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
         if res_r2.rrbs_trimmed_5prime { stats_r2.rrbs_trimmed_5prime += 1; }
+        if config.rrbs && res_r2.clip_5prime_applied {
+            stats_r2.rrbs_r2_clipped_5prime += 1;
+        }
         if res_r1.poly_a_trimmed > 0 {
             stats_r1.poly_a_trimmed += 1;
             stats_r1.poly_a_bases_trimmed += res_r1.poly_a_trimmed;
