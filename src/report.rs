@@ -34,6 +34,8 @@ pub struct TrimStats {
     pub rrbs_trimmed_3prime: usize,
     /// RRBS non-directional: reads trimmed 2bp from 5' end (CAA/CGA)
     pub rrbs_trimmed_5prime: usize,
+    /// RRBS directional PE: R2 reads that had 5' clip applied (auto-set clip_r2=2)
+    pub rrbs_r2_clipped_5prime: usize,
     /// Reads with poly-A/poly-T tails trimmed
     pub poly_a_trimmed: usize,
     /// Total bases removed by poly-A/poly-T trimming
@@ -68,6 +70,7 @@ impl TrimStats {
         }
         self.rrbs_trimmed_3prime += other.rrbs_trimmed_3prime;
         self.rrbs_trimmed_5prime += other.rrbs_trimmed_5prime;
+        self.rrbs_r2_clipped_5prime += other.rrbs_r2_clipped_5prime;
         self.poly_a_trimmed += other.poly_a_trimmed;
         self.poly_a_bases_trimmed += other.poly_a_bases_trimmed;
         self.poly_g_trimmed += other.poly_g_trimmed;
@@ -539,7 +542,8 @@ pub fn write_json_report<W: Write>(
     // ── RRBS ─────────────────────────────────────────────────────
     writeln!(w, "{}\"rrbs\": {{", i1)?;
     json_int(w, i2, "trimmed_3prime", stats.rrbs_trimmed_3prime, true)?;
-    json_int(w, i2, "trimmed_5prime", stats.rrbs_trimmed_5prime, false)?;
+    json_int(w, i2, "trimmed_5prime", stats.rrbs_trimmed_5prime, true)?;
+    json_int(w, i2, "r2_clipped_5prime", stats.rrbs_r2_clipped_5prime, false)?;
     writeln!(w, "{}}},", i1)?;
 
     // ── Pair validation ──────────────────────────────────────────

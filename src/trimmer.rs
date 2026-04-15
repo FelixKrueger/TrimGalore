@@ -45,6 +45,7 @@ pub struct TrimResult {
     pub rrbs_trimmed_5prime: bool,
     pub poly_a_trimmed: usize, // number of bases trimmed (0 = no poly-A found)
     pub poly_g_trimmed: usize, // number of bases trimmed (0 = no poly-G found)
+    pub clip_5prime_applied: bool, // whether fixed 5' clip (clip_r1/clip_r2) was applied
 }
 
 /// Trim a single read in-place according to the configured pipeline.
@@ -188,8 +189,10 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
     let clip_5 = if is_r2 { config.clip_r2 } else { config.clip_r1 };
     let clip_3 = if is_r2 { config.three_prime_clip_r2 } else { config.three_prime_clip_r1 };
 
+    let mut clip_5prime_applied = false;
     if let Some(n) = clip_5 {
         let clipped = record.clip_5prime(n);
+        clip_5prime_applied = clipped.is_some();
         if config.rename {
             if let Some(seq) = clipped {
                 record.append_to_id(&format!(":clip5:{}", seq));
@@ -214,6 +217,7 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         rrbs_trimmed_5prime,
         poly_a_trimmed,
         poly_g_trimmed,
+        clip_5prime_applied,
     }
 }
 
@@ -340,6 +344,9 @@ pub fn run_paired_end(
                 if result_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
                 if result_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
                 if result_r2.rrbs_trimmed_5prime { stats_r2.rrbs_trimmed_5prime += 1; }
+                if config.rrbs && result_r2.clip_5prime_applied {
+                    stats_r2.rrbs_r2_clipped_5prime += 1;
+                }
                 if result_r1.poly_a_trimmed > 0 {
                     stats_r1.poly_a_trimmed += 1;
                     stats_r1.poly_a_bases_trimmed += result_r1.poly_a_trimmed;
