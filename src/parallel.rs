@@ -23,7 +23,7 @@ use std::sync::mpsc;
 use crate::fastq::{FastqReader, FastqRecord};
 use crate::filters::{self, FilterResult, PairFilterResult};
 use crate::report::{PairValidationStats, TrimStats};
-use crate::trimmer::{self, TrimConfig};
+use crate::trimmer::{self, TrimConfig, update_adapter_stats};
 
 /// Number of read pairs per batch sent to each worker.
 /// 4096 records × ~300 bytes ≈ 1.2 MB per batch — large enough to amortize
@@ -180,8 +180,14 @@ pub fn run_paired_end_parallel(
 
         let mut expected: u64 = 0;
         let mut pending: BTreeMap<u64, PairedBatchResult> = BTreeMap::new();
-        let mut total_r1 = TrimStats::default();
-        let mut total_r2 = TrimStats::default();
+        let adapter_count_r1 = config.adapters.len();
+        let adapter_count_r2 = if config.adapters_r2.is_empty() {
+            config.adapters.len()
+        } else {
+            config.adapters_r2.len()
+        };
+        let mut total_r1 = TrimStats::with_adapter_count(adapter_count_r1);
+        let mut total_r2 = TrimStats::with_adapter_count(adapter_count_r2);
         let mut total_pair = PairValidationStats::default();
 
         while let Ok(result) = result_rx.recv() {
@@ -230,8 +236,14 @@ fn process_paired_batch(
     unpaired_length_r1: usize,
     unpaired_length_r2: usize,
 ) -> Result<PairedBatchResult> {
-    let mut stats_r1 = TrimStats::default();
-    let mut stats_r2 = TrimStats::default();
+    let adapter_count_r1 = config.adapters.len();
+    let adapter_count_r2 = if config.adapters_r2.is_empty() {
+        config.adapters.len()
+    } else {
+        config.adapters_r2.len()
+    };
+    let mut stats_r1 = TrimStats::with_adapter_count(adapter_count_r1);
+    let mut stats_r2 = TrimStats::with_adapter_count(adapter_count_r2);
     let mut pair_stats = PairValidationStats::default();
 
     let cap = reads_r1.len() * 300;
@@ -323,22 +335,8 @@ fn process_pairs<W: Write>(
 
         stats_r1.bases_quality_trimmed += res_r1.quality_trimmed_bp;
         stats_r2.bases_quality_trimmed += res_r2.quality_trimmed_bp;
-        if res_r1.had_adapter {
-            stats_r1.reads_with_adapter += 1;
-            let len = res_r1.adapter_match_len;
-            if len >= stats_r1.adapter_length_counts.len() {
-                stats_r1.adapter_length_counts.resize(len + 1, 0);
-            }
-            stats_r1.adapter_length_counts[len] += 1;
-        }
-        if res_r2.had_adapter {
-            stats_r2.reads_with_adapter += 1;
-            let len = res_r2.adapter_match_len;
-            if len >= stats_r2.adapter_length_counts.len() {
-                stats_r2.adapter_length_counts.resize(len + 1, 0);
-            }
-            stats_r2.adapter_length_counts[len] += 1;
-        }
+        update_adapter_stats(stats_r1, &res_r1);
+        update_adapter_stats(stats_r2, &res_r2);
         if res_r1.rrbs_trimmed_3prime { stats_r1.rrbs_trimmed_3prime += 1; }
         if res_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
         if res_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
@@ -493,7 +491,7 @@ pub fn run_single_end_parallel(
         let mut out = File::create(output)?;
         let mut expected: u64 = 0;
         let mut pending: BTreeMap<u64, SingleBatchResult> = BTreeMap::new();
-        let mut total = TrimStats::default();
+        let mut total = TrimStats::with_adapter_count(config.adapters.len());
 
         while let Ok(result) = result_rx.recv() {
             pending.insert(result.seq, result);
@@ -521,7 +519,7 @@ fn process_single_batch(
     config: &TrimConfig,
     gzip: bool,
 ) -> Result<SingleBatchResult> {
-    let mut stats = TrimStats::default();
+    let mut stats = TrimStats::with_adapter_count(config.adapters.len());
     let cap = reads.len() * 300;
     let mut buf = Vec::with_capacity(cap);
 
@@ -555,14 +553,7 @@ fn process_reads<W: Write>(
 
         let result = trimmer::trim_read(record, config, false);
         stats.bases_quality_trimmed += result.quality_trimmed_bp;
-        if result.had_adapter {
-            stats.reads_with_adapter += 1;
-            let len = result.adapter_match_len;
-            if len >= stats.adapter_length_counts.len() {
-                stats.adapter_length_counts.resize(len + 1, 0);
-            }
-            stats.adapter_length_counts[len] += 1;
-        }
+        update_adapter_stats(stats, &result);
         if result.rrbs_trimmed_3prime { stats.rrbs_trimmed_3prime += 1; }
         if result.rrbs_trimmed_5prime { stats.rrbs_trimmed_5prime += 1; }
         if result.poly_a_trimmed > 0 {

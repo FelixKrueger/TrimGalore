@@ -62,8 +62,8 @@ fn main() -> Result<()> {
 
     if cli.paired {
         FastqReader::sanity_check(&cli.input[1])?;
-        let (_adapter_name, adapter_seq, adapter_r2_seq, config) = setup_trimming(&cli, &cli.input[0])?;
-        run_paired(&cli, &config, gzip, output_dir, cli.basename.as_deref(), &adapter_seq, &adapter_r2_seq)?;
+        let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &cli.input[0])?;
+        run_paired(&cli, &config, gzip, output_dir, cli.basename.as_deref(), &adapters_r1, &adapters_r2)?;
     } else {
         // Single-end: process each input file independently
         // (matches Perl TrimGalore behavior of looping over all positional args)
@@ -72,8 +72,8 @@ fn main() -> Result<()> {
                 eprintln!("\n--------------------------------------------------");
                 FastqReader::sanity_check(input)?;
             }
-            let (_adapter_name, adapter_seq, _, config) = setup_trimming(&cli, input)?;
-            run_single_file(&cli, input, &config, gzip, output_dir, &adapter_seq)?;
+            let (_label, adapters_r1, _, config) = setup_trimming(&cli, input)?;
+            run_single_file(&cli, input, &config, gzip, output_dir, &adapters_r1)?;
         }
     }
 
@@ -83,20 +83,39 @@ fn main() -> Result<()> {
 /// Set up adapter detection, poly-G scanning, and build TrimConfig for one input file.
 ///
 /// When adapter is user-specified, auto-detection is skipped. When auto-detecting,
-/// the poly-G scan piggybacks on the adapter scan. Returns (adapter_name, adapter_seq,
-/// adapter_r2_seq, TrimConfig).
-fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, String, Option<String>, trimmer::TrimConfig)> {
+/// the poly-G scan piggybacks on the adapter scan. Returns (adapter_label,
+/// adapters_r1, adapters_r2, TrimConfig).
+fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, String)>, Vec<(String, String)>, trimmer::TrimConfig)> {
     // Determine adapter
-    let (adapter_name, adapter_seq, adapter_r2_seq, autodetect_poly_g) = resolve_adapter(cli, input_file)?;
+    let (adapter_label, adapters_r1, adapters_r2, autodetect_poly_g) = resolve_adapter(cli, input_file)?;
 
-    eprintln!("Adapter: {} ({})", adapter_name, adapter_seq);
-    if let Some(ref a2) = adapter_r2_seq {
-        eprintln!("Adapter 2 (Read 2): {}", a2);
+    // Display adapter info
+    if adapters_r1.len() == 1 {
+        eprintln!("Adapter: {} ({})", adapter_label, adapters_r1[0].1);
+    } else {
+        eprintln!("Adapters ({}, {} sequences):", adapter_label, adapters_r1.len());
+        for (name, seq) in &adapters_r1 {
+            eprintln!("  {}: {}", name, seq);
+        }
+    }
+    if !adapters_r2.is_empty() {
+        if adapters_r2.len() == 1 {
+            eprintln!("Adapter 2 (Read 2): {}", adapters_r2[0].1);
+        } else {
+            eprintln!("Adapters R2 ({} sequences):", adapters_r2.len());
+            for (name, seq) in &adapters_r2 {
+                eprintln!("  {}: {}", name, seq);
+            }
+        }
+    }
+    if cli.times > 1 {
+        eprintln!("Adapter trimming rounds per read (-n): {}", cli.times);
     }
 
     // Resolve length cutoff: smallRNA adapter auto-reduces to 18bp
+    let first_adapter_seq = adapters_r1.first().map(|(_, s)| s.as_str()).unwrap_or("");
     let length_cutoff = cli.length.unwrap_or_else(|| {
-        if adapter_seq == "TGGAATTCTCGG" {
+        if first_adapter_seq == "TGGAATTCTCGG" {
             eprintln!("Reducing length cutoff to 18bp for small RNA-Seq reads because a cutoff of 20bp may remove some short species of small RNAs if they had been trimmed by 1,2 or 3bp");
             18
         } else {
@@ -174,9 +193,18 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, String, Optio
         eprintln!("Poly-G trimming: DISABLED (user-specified --no_poly_g)");
     }
 
+    // Convert string adapters to bytes for the trimmer config
+    let adapters_bytes: Vec<(String, Vec<u8>)> = adapters_r1.iter()
+        .map(|(name, seq)| (name.clone(), seq.as_bytes().to_vec()))
+        .collect();
+    let adapters_r2_bytes: Vec<(String, Vec<u8>)> = adapters_r2.iter()
+        .map(|(name, seq)| (name.clone(), seq.as_bytes().to_vec()))
+        .collect();
+
     let config = trimmer::TrimConfig {
-        adapter: adapter_seq.as_bytes().to_vec(),
-        adapter_r2: adapter_r2_seq.as_ref().map(|s| s.as_bytes().to_vec()),
+        adapters: adapters_bytes,
+        adapters_r2: adapters_r2_bytes,
+        times: cli.times,
         quality_cutoff: cli.effective_quality_cutoff(),
         phred_offset: cli.phred_offset(),
         error_rate: cli.error_rate,
@@ -199,49 +227,63 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, String, Optio
         discard_untrimmed: cli.discard_untrimmed,
     };
 
-    Ok((adapter_name, adapter_seq, adapter_r2_seq, config))
+    Ok((adapter_label, adapters_r1, adapters_r2, config))
 }
 
-/// Returns (adapter_name, adapter_seq, adapter_r2_seq, poly_g_from_autodetect).
+/// Returns (adapter_label, adapters_r1, adapters_r2, poly_g_from_autodetect).
+/// `adapter_label` is for display purposes (e.g., "Illumina", "user-specified").
+/// `adapters_r1`/`adapters_r2` are `(name, sequence)` pairs; r2 is empty if not set.
 /// The last element is Some((poly_g_count, reads_scanned)) when auto-detection ran,
 /// None when the adapter was user-specified or preset-selected (poly-G must be
 /// detected separately via `adapter::detect_poly_g()`).
-fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, String, Option<String>, Option<(usize, usize)>)> {
-    if let Some(ref seq) = cli.adapter {
-        let name = "user-specified".to_string();
-        let r2 = cli.adapter2.clone();
-        return Ok((name, seq.clone(), r2, None));
+fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, String)>, Vec<(String, String)>, Option<(usize, usize)>)> {
+    if let Some(ref spec) = cli.adapter {
+        let adapters_r1 = adapter::parse_adapter_spec(spec)?;
+        let adapters_r2 = match &cli.adapter2 {
+            Some(spec2) => adapter::parse_adapter_spec(spec2)?,
+            None => Vec::new(),
+        };
+        let label = "user-specified".to_string();
+        return Ok((label, adapters_r1, adapters_r2, None));
+    }
+
+    // Presets: single-adapter, no multi-adapter parsing needed
+    fn preset_vec(name: &str, seq: &str) -> Vec<(String, String)> {
+        vec![(name.to_string(), seq.to_string())]
+    }
+    fn preset_r2(preset: &adapter::AdapterPreset) -> Vec<(String, String)> {
+        preset.seq_r2.map(|s| vec![(format!("{}_r2", preset.name), s.to_string())]).unwrap_or_default()
     }
 
     if cli.nextera {
-        return Ok((adapter::NEXTERA.name.to_string(), adapter::NEXTERA.seq.to_string(), None, None));
+        return Ok((adapter::NEXTERA.name.to_string(), preset_vec(adapter::NEXTERA.name, adapter::NEXTERA.seq), Vec::new(), None));
     }
     if cli.small_rna {
         return Ok((
             adapter::SMALL_RNA.name.to_string(),
-            adapter::SMALL_RNA.seq.to_string(),
-            adapter::SMALL_RNA.seq_r2.map(|s| s.to_string()),
+            preset_vec(adapter::SMALL_RNA.name, adapter::SMALL_RNA.seq),
+            preset_r2(&adapter::SMALL_RNA),
             None,
         ));
     }
     if cli.stranded_illumina {
         return Ok((
             adapter::STRANDED_ILLUMINA.name.to_string(),
-            adapter::STRANDED_ILLUMINA.seq.to_string(),
-            None,
+            preset_vec(adapter::STRANDED_ILLUMINA.name, adapter::STRANDED_ILLUMINA.seq),
+            Vec::new(),
             None,
         ));
     }
     if cli.bgiseq {
         return Ok((
             adapter::BGISEQ.name.to_string(),
-            adapter::BGISEQ.seq.to_string(),
-            adapter::BGISEQ.seq_r2.map(|s| s.to_string()),
+            preset_vec(adapter::BGISEQ.name, adapter::BGISEQ.seq),
+            preset_r2(&adapter::BGISEQ),
             None,
         ));
     }
     if cli.illumina {
-        return Ok((adapter::ILLUMINA.name.to_string(), adapter::ILLUMINA.seq.to_string(), None, None));
+        return Ok((adapter::ILLUMINA.name.to_string(), preset_vec(adapter::ILLUMINA.name, adapter::ILLUMINA.seq), Vec::new(), None));
     }
 
     // Auto-detect (also piggybacks poly-G counting)
@@ -250,11 +292,12 @@ fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, String, Opti
     eprintln!("{}", detection.message);
 
     let poly_g_data = Some((detection.poly_g_count, detection.reads_scanned));
-    let r2 = detection.adapter.seq_r2.map(|s| s.to_string());
+    let adapters_r1 = preset_vec(detection.adapter.name, detection.adapter.seq);
+    let adapters_r2 = preset_r2(&detection.adapter);
     Ok((
         detection.adapter.name.to_string(),
-        detection.adapter.seq.to_string(),
-        r2,
+        adapters_r1,
+        adapters_r2,
         poly_g_data,
     ))
 }
@@ -265,7 +308,7 @@ fn run_single_file(
     config: &trimmer::TrimConfig,
     gzip: bool,
     output_dir: Option<&Path>,
-    adapter_seq: &str,
+    adapters_r1: &[(String, String)],
 ) -> Result<()> {
     let output_path = naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
     let report_path = naming::report_name(input, output_dir);
@@ -288,8 +331,8 @@ fn run_single_file(
     eprintln!("\n=== Summary ===\n");
     eprintln!("Total reads processed:           {:>10}", stats.total_reads);
     eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
-        stats.reads_with_adapter,
-        pct(stats.reads_with_adapter, stats.total_reads));
+        stats.total_reads_with_adapter,
+        pct(stats.total_reads_with_adapter, stats.total_reads));
     if stats.discarded_untrimmed > 0 {
         eprintln!("Reads discarded as untrimmed:    {:>10} ({:.1}%)",
             stats.discarded_untrimmed, pct(stats.discarded_untrimmed, stats.total_reads));
@@ -324,8 +367,9 @@ fn run_single_file(
         let report_cfg = report::TrimConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
             quality_cutoff: cli.effective_quality_cutoff(),
-            adapter: adapter_seq.to_string(),
-            adapter_r2: cli.adapter2.clone(),
+            adapters: adapters_r1.to_vec(),
+            adapters_r2: Vec::new(),
+            times: cli.times,
             error_rate: cli.error_rate,
             stringency: cli.stringency,
             length_cutoff: config.length_cutoff,
@@ -347,7 +391,7 @@ fn run_single_file(
         let file = File::create(&report_path)?;
         let mut w = BufWriter::new(file);
         report::write_report_header(&mut w, &report_cfg)?;
-        report::write_cutadapt_section(&mut w, &report_cfg, &stats)?;
+        report::write_cutadapt_compatible_section(&mut w, &report_cfg, &stats, 1)?;
         report::write_run_footer(&mut w, &report_cfg, &stats)?;
         eprintln!("\nReport: {}", report_path.display());
 
@@ -392,8 +436,8 @@ fn run_paired(
     gzip: bool,
     output_dir: Option<&Path>,
     basename: Option<&str>,
-    adapter_seq: &str,
-    adapter_r2_seq: &Option<String>,
+    adapters_r1: &[(String, String)],
+    adapters_r2: &[(String, String)],
 ) -> Result<()> {
     let input_r1 = &cli.input[0];
     let input_r2 = &cli.input[1];
@@ -468,14 +512,14 @@ fn run_paired(
     eprintln!("\n=== Summary (Read 1) ===\n");
     eprintln!("Total reads processed:           {:>10}", stats_r1.total_reads);
     eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
-        stats_r1.reads_with_adapter,
-        pct(stats_r1.reads_with_adapter, stats_r1.total_reads));
+        stats_r1.total_reads_with_adapter,
+        pct(stats_r1.total_reads_with_adapter, stats_r1.total_reads));
 
     eprintln!("\n=== Summary (Read 2) ===\n");
     eprintln!("Total reads processed:           {:>10}", stats_r2.total_reads);
     eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
-        stats_r2.reads_with_adapter,
-        pct(stats_r2.reads_with_adapter, stats_r2.total_reads));
+        stats_r2.total_reads_with_adapter,
+        pct(stats_r2.total_reads_with_adapter, stats_r2.total_reads));
 
     if stats_r1.poly_a_trimmed > 0 {
         eprintln!("R1 reads with poly-A trimmed:    {:>10} ({:.1}%)",
@@ -519,8 +563,9 @@ fn run_paired(
             let report_cfg = report::TrimConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 quality_cutoff: cli.effective_quality_cutoff(),
-                adapter: adapter_seq.to_string(),
-                adapter_r2: adapter_r2_seq.clone(),
+                adapters: adapters_r1.to_vec(),
+                adapters_r2: adapters_r2.to_vec(),
+                times: cli.times,
                 error_rate: cli.error_rate,
                 stringency: cli.stringency,
                 length_cutoff: config.length_cutoff,
@@ -542,7 +587,7 @@ fn run_paired(
             let file = File::create(&report_path)?;
             let mut w = BufWriter::new(file);
             report::write_report_header(&mut w, &report_cfg)?;
-            report::write_cutadapt_section(&mut w, &report_cfg, stats)?;
+            report::write_cutadapt_compatible_section(&mut w, &report_cfg, stats, (idx + 1) as u8)?;
             report::write_run_footer(&mut w, &report_cfg, stats)?;
             // Pair validation stats go in R2 report only (matches Perl behavior)
             if idx == 1 {

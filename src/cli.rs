@@ -190,6 +190,12 @@ pub struct Cli {
     #[clap(long = "no_poly_g", alias = "no-poly-g", alias = "no-polyG")]
     pub no_poly_g: bool,
 
+    /// Number of adapter trimming rounds per read. With multiple adapters,
+    /// this allows removing more than one adapter from the same read.
+    /// Default: 1. Typical multi-adapter usage: -n 3.
+    #[clap(short = 'n', long = "times", default_value = "1")]
+    pub times: usize,
+
     /// Discard reads that did not contain an adapter sequence. Only reads
     /// where at least one adapter match was found are written to output.
     /// For paired-end, the pair is discarded if neither read had an adapter.
@@ -307,6 +313,10 @@ impl Cli {
                     threshold
                 );
             }
+        }
+
+        if self.times == 0 || self.times > 10 {
+            anyhow::bail!("--times/-n must be between 1 and 10, got {}", self.times);
         }
 
         if self.cores == 0 {

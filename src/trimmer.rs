@@ -12,8 +12,12 @@ use crate::report::{TrimStats, PairValidationStats};
 
 /// Configuration for the trimming pipeline.
 pub struct TrimConfig {
-    pub adapter: Vec<u8>,
-    pub adapter_r2: Option<Vec<u8>>,
+    /// R1 adapter(s): (name, sequence_bytes). Single-element for normal usage.
+    pub adapters: Vec<(String, Vec<u8>)>,
+    /// R2 adapter(s): (name, sequence_bytes). Empty = use R1 adapters.
+    pub adapters_r2: Vec<(String, Vec<u8>)>,
+    /// Max rounds of adapter trimming per read (default: 1). `-n`/`--times`.
+    pub times: usize,
     pub quality_cutoff: u8,
     pub phred_offset: u8,
     pub error_rate: f64,
@@ -38,8 +42,10 @@ pub struct TrimConfig {
 
 /// Result of trimming a single read (carries per-read stats).
 pub struct TrimResult {
+    /// True if any adapter was found in any round.
     pub had_adapter: bool,
-    pub adapter_match_len: usize, // length of adapter overlap found (0 = none)
+    /// Per-round matches: (adapter_index, match_len). Empty if no adapter found.
+    pub adapter_matches: Vec<(usize, usize)>,
     pub quality_trimmed_bp: usize, // bases removed by quality trimming
     pub rrbs_trimmed_3prime: bool,
     pub rrbs_trimmed_5prime: bool,
@@ -80,31 +86,49 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
     }
     let quality_trimmed_bp = len_before_quality - record.seq.len();
 
-    // 2. Adapter trimming
-    let adapter = if is_r2 {
-        config.adapter_r2.as_deref().unwrap_or(&config.adapter)
+    // 2. Adapter trimming — multi-round best-of-N matching
+    let adapters = if is_r2 && !config.adapters_r2.is_empty() {
+        &config.adapters_r2
     } else {
-        &config.adapter
+        &config.adapters
     };
 
-    let mut adapter_match_len: usize = 0;
-    let had_adapter = if !adapter.is_empty() && !record.is_empty() {
-        let seq_len = record.seq.len();
-        if let Some(m) = alignment::find_3prime_adapter(
-            record.seq.as_bytes(),
-            adapter,
-            config.error_rate,
-            config.min_overlap,
-        ) {
-            adapter_match_len = seq_len - m.read_start;
-            record.truncate(m.read_start);
-            true
-        } else {
-            false
+    let mut adapter_matches: Vec<(usize, usize)> = Vec::new();
+
+    for _round in 0..config.times {
+        if record.is_empty() { break; }
+
+        let mut best: Option<(usize, alignment::AdapterMatch)> = None;
+        let seq_bytes = record.seq.as_bytes();
+
+        for (idx, (_name, adapter_seq)) in adapters.iter().enumerate() {
+            if adapter_seq.is_empty() { continue; }
+            if let Some(m) = alignment::find_3prime_adapter(
+                seq_bytes,
+                adapter_seq,
+                config.error_rate,
+                config.min_overlap,
+            ) {
+                match &best {
+                    None => best = Some((idx, m)),
+                    Some((_, prev)) if m.read_start < prev.read_start => {
+                        best = Some((idx, m));
+                    }
+                    _ => {}
+                }
+            }
         }
-    } else {
-        false
-    };
+
+        if let Some((idx, m)) = best {
+            let trim_len = record.seq.len() - m.read_start;
+            record.truncate(m.read_start);
+            adapter_matches.push((idx, trim_len));
+        } else {
+            break;
+        }
+    }
+
+    let had_adapter = !adapter_matches.is_empty();
 
     // 2.5. RRBS trimming (MspI 2bp end-repair artifact removal)
     let mut rrbs_trimmed_3prime = false;
@@ -211,13 +235,27 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
 
     TrimResult {
         had_adapter,
-        adapter_match_len,
+        adapter_matches,
         quality_trimmed_bp,
         rrbs_trimmed_3prime,
         rrbs_trimmed_5prime,
         poly_a_trimmed,
         poly_g_trimmed,
         clip_5prime_applied,
+    }
+}
+
+/// Update per-adapter stats from a trim result (handles multi-round matches).
+pub fn update_adapter_stats(stats: &mut TrimStats, result: &TrimResult) {
+    if result.had_adapter {
+        stats.total_reads_with_adapter += 1;
+        for &(idx, len) in &result.adapter_matches {
+            stats.reads_with_adapter[idx] += 1;
+            if len >= stats.adapter_length_counts[idx].len() {
+                stats.adapter_length_counts[idx].resize(len + 1, 0);
+            }
+            stats.adapter_length_counts[idx][len] += 1;
+        }
     }
 }
 
@@ -230,7 +268,7 @@ pub fn run_single_end(
     writer: &mut FastqWriter,
     config: &TrimConfig,
 ) -> Result<TrimStats> {
-    let mut stats = TrimStats::default();
+    let mut stats = TrimStats::with_adapter_count(config.adapters.len());
 
     while let Some(mut record) = reader.next_record()? {
         stats.total_reads += 1;
@@ -238,14 +276,7 @@ pub fn run_single_end(
 
         let result = trim_read(&mut record, config, false);
         stats.bases_quality_trimmed += result.quality_trimmed_bp;
-        if result.had_adapter {
-            stats.reads_with_adapter += 1;
-            let len = result.adapter_match_len;
-            if len >= stats.adapter_length_counts.len() {
-                stats.adapter_length_counts.resize(len + 1, 0);
-            }
-            stats.adapter_length_counts[len] += 1;
-        }
+        update_adapter_stats(&mut stats, &result);
         if result.rrbs_trimmed_3prime { stats.rrbs_trimmed_3prime += 1; }
         if result.rrbs_trimmed_5prime { stats.rrbs_trimmed_5prime += 1; }
         if result.poly_a_trimmed > 0 {
@@ -302,8 +333,14 @@ pub fn run_paired_end(
     unpaired_length_r1: usize,
     unpaired_length_r2: usize,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
-    let mut stats_r1 = TrimStats::default();
-    let mut stats_r2 = TrimStats::default();
+    let adapter_count_r1 = config.adapters.len();
+    let adapter_count_r2 = if config.adapters_r2.is_empty() {
+        config.adapters.len()
+    } else {
+        config.adapters_r2.len()
+    };
+    let mut stats_r1 = TrimStats::with_adapter_count(adapter_count_r1);
+    let mut stats_r2 = TrimStats::with_adapter_count(adapter_count_r2);
     let mut pair_stats = PairValidationStats::default();
 
     loop {
@@ -324,22 +361,8 @@ pub fn run_paired_end(
 
                 stats_r1.bases_quality_trimmed += result_r1.quality_trimmed_bp;
                 stats_r2.bases_quality_trimmed += result_r2.quality_trimmed_bp;
-                if result_r1.had_adapter {
-                    stats_r1.reads_with_adapter += 1;
-                    let len = result_r1.adapter_match_len;
-                    if len >= stats_r1.adapter_length_counts.len() {
-                        stats_r1.adapter_length_counts.resize(len + 1, 0);
-                    }
-                    stats_r1.adapter_length_counts[len] += 1;
-                }
-                if result_r2.had_adapter {
-                    stats_r2.reads_with_adapter += 1;
-                    let len = result_r2.adapter_match_len;
-                    if len >= stats_r2.adapter_length_counts.len() {
-                        stats_r2.adapter_length_counts.resize(len + 1, 0);
-                    }
-                    stats_r2.adapter_length_counts[len] += 1;
-                }
+                update_adapter_stats(&mut stats_r1, &result_r1);
+                update_adapter_stats(&mut stats_r2, &result_r2);
                 if result_r1.rrbs_trimmed_3prime { stats_r1.rrbs_trimmed_3prime += 1; }
                 if result_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
                 if result_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
@@ -445,4 +468,218 @@ pub fn run_paired_end(
     }
 
     Ok((stats_r1, stats_r2, pair_stats))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fastq::FastqRecord;
+
+    /// Build a minimal TrimConfig for adapter-trimming tests.
+    /// Quality cutoff 0 disables quality trimming so we test only adapter logic.
+    fn test_config_with_adapters(
+        adapters: Vec<(&str, &str)>,
+        times: usize,
+    ) -> TrimConfig {
+        TrimConfig {
+            adapters: adapters
+                .iter()
+                .map(|(name, seq)| (name.to_string(), seq.as_bytes().to_vec()))
+                .collect(),
+            adapters_r2: Vec::new(),
+            times,
+            quality_cutoff: 0,
+            phred_offset: 33,
+            error_rate: 0.1,
+            min_overlap: 1,
+            length_cutoff: 0,
+            max_length: None,
+            max_n: None,
+            trim_n: false,
+            clip_r1: None,
+            clip_r2: None,
+            three_prime_clip_r1: None,
+            three_prime_clip_r2: None,
+            rename: false,
+            nextseq: false,
+            rrbs: false,
+            non_directional: false,
+            is_paired: false,
+            poly_a: false,
+            poly_g: false,
+            discard_untrimmed: false,
+        }
+    }
+
+    fn make_record(seq: &str) -> FastqRecord {
+        FastqRecord {
+            id: "@test_read".to_string(),
+            seq: seq.to_string(),
+            qual: "I".repeat(seq.len()),
+        }
+    }
+
+    // ── Multi-adapter best-of-N tests ───────────────────────────
+
+    #[test]
+    fn test_trim_read_multi_adapter_best_wins() {
+        // Read: 20bp random + CTGTCTCTTATA (Nextera, 12bp) + 8bp padding + AGATCGGAAGAGC (Illumina, 13bp)
+        // Both adapters are present. Nextera starts earlier (position 20) so trims more → it should win.
+        let read_seq = "ACGTACGTACGTACGTACGTCTGTCTCTTATAGGGGGGGGAGATCGGAAGAGC";
+        //              |----20bp random----|--Nextera 12bp--|--8bp pad--|--Illumina 13bp--|
+        let config = test_config_with_adapters(
+            vec![
+                ("illumina", "AGATCGGAAGAGC"),
+                ("nextera", "CTGTCTCTTATA"),
+            ],
+            1,
+        );
+
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        assert_eq!(result.adapter_matches.len(), 1);
+        // Nextera (index 1) should win because it starts at position 20 (trims more)
+        assert_eq!(result.adapter_matches[0].0, 1); // adapter index = nextera
+        assert_eq!(record.seq.len(), 20); // trimmed at position 20
+    }
+
+    #[test]
+    fn test_trim_read_multi_adapter_single_match() {
+        // Read has only the Illumina adapter, not Nextera.
+        let read_seq = "ACGTACGTACGTACGTACGTACGTACGTAAGAGATCGGAAGAGC";
+        //              |------30bp random + partial-------|--Illumina--|
+        let config = test_config_with_adapters(
+            vec![
+                ("illumina", "AGATCGGAAGAGC"),
+                ("nextera", "CTGTCTCTTATA"),
+                ("smallrna", "TGGAATTCTCGG"),
+            ],
+            1,
+        );
+
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        assert_eq!(result.adapter_matches.len(), 1);
+        assert_eq!(result.adapter_matches[0].0, 0); // illumina is index 0
+    }
+
+    #[test]
+    fn test_trim_read_multi_adapter_none_match() {
+        // Read with no adapter sequences at all.
+        let read_seq = "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
+        let config = test_config_with_adapters(
+            vec![
+                ("illumina", "AGATCGGAAGAGC"),
+                ("nextera", "CTGTCTCTTATA"),
+            ],
+            1,
+        );
+
+        let mut record = make_record(read_seq);
+        let original_len = record.seq.len();
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(!result.had_adapter);
+        assert!(result.adapter_matches.is_empty());
+        assert_eq!(record.seq.len(), original_len); // unchanged
+    }
+
+    #[test]
+    fn test_trim_read_single_adapter_unchanged() {
+        // Regression test: single adapter behavior identical to before multi-adapter.
+        let read_seq = "ACGTACGTACGTACGTACGTAAGAGATCGGAAGAGC";
+        let config = test_config_with_adapters(
+            vec![("illumina", "AGATCGGAAGAGC")],
+            1,
+        );
+
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        assert_eq!(result.adapter_matches.len(), 1);
+        assert_eq!(result.adapter_matches[0].0, 0); // adapter index 0
+        // The adapter starts matching somewhere in the read; verify the read got shorter
+        assert!(record.seq.len() < read_seq.len());
+    }
+
+    // ── Multi-round (-n / --times) tests ────────────────────────
+
+    #[test]
+    fn test_trim_read_times_2() {
+        // Read: 20bp random + Nextera adapter + Illumina adapter (concatenated at 3' end).
+        // With -n 2 and BOTH adapters specified:
+        //   Round 1: best-of-N picks Nextera (starts at pos 20, trims more than Illumina at pos 32)
+        //            → truncates at pos 20, remaining = "ACGTACGTACGTACGTACGT"
+        //   Round 2: remaining 20bp has no adapter → stops.
+        //
+        // Alternative scenario with single adapter and -n 2:
+        // Use the same adapter twice in the read to test multi-round.
+        let adapter = "AGATCGGAAGAGC";
+        let read_seq = format!("ACGTACGTACGTACGT{}{}", adapter, adapter);
+        // = "ACGTACGTACGTACGTAGATCGGAAGAGCAGATCGGAAGAGC" (16 + 13 + 13 = 42bp)
+        let config = test_config_with_adapters(
+            vec![("illumina", adapter)],
+            2,
+        );
+
+        let mut record = make_record(&read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        // Round 1: adapter found at position 16 → trims to "ACGTACGTACGTACGT" (16bp)
+        // Round 2: 16bp with no adapter → stops
+        // So only 1 match (the first round trims BOTH copies at once since
+        // the alignment finds the leftmost match).
+        assert!(result.adapter_matches.len() >= 1);
+        assert_eq!(record.seq, "ACGTACGTACGTACGT");
+    }
+
+    #[test]
+    fn test_trim_read_times_stops_on_no_match() {
+        // -n 3, but only one adapter present → should stop after 1 productive round.
+        // Use min_overlap=3 (realistic default) and a read whose remaining portion
+        // after trimming is pure TTTT — no chance of accidental adapter matches.
+        let read_seq = "TTTTTTTTTTTTTTTTTTTTAAGAGATCGGAAGAGC";
+        let mut config = test_config_with_adapters(
+            vec![("illumina", "AGATCGGAAGAGC")],
+            3,
+        );
+        config.min_overlap = 3;
+
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        // Only 1 round should match — remaining TTTs can't match the adapter
+        assert_eq!(result.adapter_matches.len(), 1);
+        // Verify the read was trimmed to just the T stretch
+        assert!(!record.seq.contains("AGATCG"));
+    }
+
+    #[test]
+    fn test_trim_read_times_1_default() {
+        // -n 1 (default): even if the read has adapter appearing twice,
+        // only one round of trimming occurs.
+        // Construct: random + adapter + adapter (concatenated adapters)
+        let adapter = "AGATCGGAAGAGC";
+        let read_seq = format!("ACGTACGTACGTACGT{}{}", adapter, adapter);
+        let config = test_config_with_adapters(
+            vec![("illumina", adapter)],
+            1, // default: single round
+        );
+
+        let mut record = make_record(&read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        // Only 1 match despite adapter appearing twice
+        assert_eq!(result.adapter_matches.len(), 1);
+        // The first (leftmost) match wins, trimming at position 16
+        assert_eq!(record.seq, "ACGTACGTACGTACGT");
+    }
 }

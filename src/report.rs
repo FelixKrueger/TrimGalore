@@ -9,8 +9,10 @@ use std::io::Write;
 pub struct TrimStats {
     /// Total sequences processed
     pub total_reads: usize,
-    /// Reads with adapter detected
-    pub reads_with_adapter: usize,
+    /// Reads where at least one adapter matched in any round
+    pub total_reads_with_adapter: usize,
+    /// Per-adapter: number of trimming events (one read may count for multiple adapters across rounds)
+    pub reads_with_adapter: Vec<usize>,
     /// Total bases quality-trimmed
     pub bases_quality_trimmed: usize,
     /// Total basepairs in input reads (before any trimming)
@@ -28,8 +30,8 @@ pub struct TrimStats {
     pub too_many_n: usize,
     /// Reads written to output
     pub reads_written: usize,
-    /// Per-length adapter match counts (for the length distribution table)
-    pub adapter_length_counts: Vec<usize>,
+    /// Per-adapter length distributions: adapter_length_counts[adapter_idx][match_len] = count
+    pub adapter_length_counts: Vec<Vec<usize>>,
     /// RRBS: reads trimmed 2bp from 3' end (adapter contamination at MspI site)
     pub rrbs_trimmed_3prime: usize,
     /// RRBS non-directional: reads trimmed 2bp from 5' end (CAA/CGA)
@@ -49,10 +51,19 @@ pub struct TrimStats {
 }
 
 impl TrimStats {
+    /// Create a TrimStats pre-sized for `n` adapters.
+    pub fn with_adapter_count(n: usize) -> Self {
+        TrimStats {
+            reads_with_adapter: vec![0; n],
+            adapter_length_counts: vec![Vec::new(); n],
+            ..Default::default()
+        }
+    }
+
     /// Merge another batch's stats into this accumulator.
     pub fn merge(&mut self, other: &TrimStats) {
         self.total_reads += other.total_reads;
-        self.reads_with_adapter += other.reads_with_adapter;
+        self.total_reads_with_adapter += other.total_reads_with_adapter;
         self.bases_quality_trimmed += other.bases_quality_trimmed;
         self.total_bp_processed += other.total_bp_processed;
         self.total_bp_written += other.total_bp_written;
@@ -61,12 +72,22 @@ impl TrimStats {
         self.too_long += other.too_long;
         self.too_many_n += other.too_many_n;
         self.reads_written += other.reads_written;
-        // Merge adapter length distribution (element-wise addition)
-        if other.adapter_length_counts.len() > self.adapter_length_counts.len() {
-            self.adapter_length_counts.resize(other.adapter_length_counts.len(), 0);
+        // Merge per-adapter stats (element-wise addition across 2D vecs)
+        // Ensure self has enough adapter slots
+        if other.reads_with_adapter.len() > self.reads_with_adapter.len() {
+            self.reads_with_adapter.resize(other.reads_with_adapter.len(), 0);
+            self.adapter_length_counts.resize(other.adapter_length_counts.len(), Vec::new());
         }
-        for (i, &count) in other.adapter_length_counts.iter().enumerate() {
-            self.adapter_length_counts[i] += count;
+        for (i, &count) in other.reads_with_adapter.iter().enumerate() {
+            self.reads_with_adapter[i] += count;
+        }
+        for (i, other_lengths) in other.adapter_length_counts.iter().enumerate() {
+            if other_lengths.len() > self.adapter_length_counts[i].len() {
+                self.adapter_length_counts[i].resize(other_lengths.len(), 0);
+            }
+            for (j, &count) in other_lengths.iter().enumerate() {
+                self.adapter_length_counts[i][j] += count;
+            }
         }
         self.rrbs_trimmed_3prime += other.rrbs_trimmed_3prime;
         self.rrbs_trimmed_5prime += other.rrbs_trimmed_5prime;
@@ -113,8 +134,12 @@ impl PairValidationStats {
 pub struct TrimConfig {
     pub version: String,
     pub quality_cutoff: u8,
-    pub adapter: String,
-    pub adapter_r2: Option<String>,
+    /// R1 adapters: (name, sequence). Single-element for normal usage.
+    pub adapters: Vec<(String, String)>,
+    /// R2 adapters: (name, sequence). Empty = use R1 adapters.
+    pub adapters_r2: Vec<(String, String)>,
+    /// Max rounds of adapter trimming per read (-n/--times).
+    pub times: usize,
     pub error_rate: f64,
     pub stringency: usize,
     pub length_cutoff: usize,
@@ -148,9 +173,28 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
         writeln!(w, "Quality Phred score cutoff: {}", config.quality_cutoff)?;
     }
     writeln!(w, "Quality encoding type selected: ASCII+{}", config.phred_encoding)?;
-    writeln!(w, "Adapter sequence: '{}' (user-specified or auto-detected)", config.adapter)?;
-    if let Some(ref a2) = config.adapter_r2 {
-        writeln!(w, "Optional adapter 2 sequence: '{}'", a2)?;
+    if config.adapters.len() == 1 {
+        writeln!(w, "Adapter sequence: '{}' (user-specified or auto-detected)", config.adapters[0].1)?;
+    } else {
+        write!(w, "Adapter sequence(s):")?;
+        for (name, seq) in &config.adapters {
+            write!(w, " '{}' [{}]", seq, name)?;
+        }
+        writeln!(w, " (user-specified)")?;
+    }
+    if !config.adapters_r2.is_empty() {
+        if config.adapters_r2.len() == 1 {
+            writeln!(w, "Optional adapter 2 sequence (Read 2): '{}'", config.adapters_r2[0].1)?;
+        } else {
+            write!(w, "Adapter 2 sequence(s) (Read 2):")?;
+            for (name, seq) in &config.adapters_r2 {
+                write!(w, " '{}' [{}]", seq, name)?;
+            }
+            writeln!(w)?;
+        }
+    }
+    if config.times > 1 {
+        writeln!(w, "Trimming rounds per read (-n): {}", config.times)?;
     }
     writeln!(w, "Maximum trimming error rate: {}", config.error_rate)?;
     writeln!(w, "Minimum required adapter overlap (stringency): {} bp", config.stringency)?;
@@ -186,8 +230,8 @@ pub fn write_run_stats<W: Write>(w: &mut W, stats: &TrimStats) -> std::io::Resul
     writeln!(w)?;
     writeln!(w, "Total reads processed:              {:>10}", format_number(stats.total_reads))?;
     writeln!(w, "Reads with adapters:                {:>10} ({:.1}%)",
-        format_number(stats.reads_with_adapter),
-        percentage(stats.reads_with_adapter, stats.total_reads))?;
+        format_number(stats.total_reads_with_adapter),
+        percentage(stats.total_reads_with_adapter, stats.total_reads))?;
     writeln!(w)?;
 
     if stats.total_reads > 0 {
@@ -276,20 +320,29 @@ pub fn write_pair_validation_stats<W: Write>(
 /// which requires "This is cutadapt" in the first 100 lines, a "Command line
 /// parameters:" line for sample name extraction, bp statistics, and an adapter
 /// length distribution table.
-pub fn write_cutadapt_section<W: Write>(
+pub fn write_cutadapt_compatible_section<W: Write>(
     w: &mut W,
     config: &TrimConfig,
     stats: &TrimStats,
+    read_number: u8,
 ) -> std::io::Result<()> {
+    // Select adapter list for this read
+    let adapters = if read_number == 2 && !config.adapters_r2.is_empty() {
+        &config.adapters_r2
+    } else {
+        &config.adapters
+    };
+
     writeln!(w)?;
     // Native identifier for MultiQC with Trim Galore v2.0 support
     writeln!(w, "Trim Galore {} (Oxidized Edition) — adapter trimming built in", config.version)?;
     // Backwards compatibility: older MultiQC discovers reports via "This is cutadapt"
     writeln!(w, "This is cutadapt 4.0 (compatible; for MultiQC backwards compatibility)")?;
     // Command line — MultiQC extracts the sample name from the input filename here
+    let first_adapter_seq = adapters.first().map(|(_, s)| s.as_str()).unwrap_or("");
     writeln!(w, "Command line parameters: -j 1 -e {} -q {} -O {} -a {} {}",
         config.error_rate, config.quality_cutoff, config.stringency,
-        config.adapter, config.input_filename)?;
+        first_adapter_seq, config.input_filename)?;
     writeln!(w, "Processing reads on 1 core in single-end mode ...")?;
     writeln!(w)?;
 
@@ -298,8 +351,8 @@ pub fn write_cutadapt_section<W: Write>(
     writeln!(w)?;
     writeln!(w, "Total reads processed:           {:>10}", format_number(stats.total_reads))?;
     writeln!(w, "Reads with adapters:             {:>10} ({:.1}%)",
-        format_number(stats.reads_with_adapter),
-        percentage(stats.reads_with_adapter, stats.total_reads))?;
+        format_number(stats.total_reads_with_adapter),
+        percentage(stats.total_reads_with_adapter, stats.total_reads))?;
     if stats.discarded_untrimmed > 0 {
         writeln!(w, "Reads discarded as untrimmed:    {:>10} ({:.1}%)",
             format_number(stats.discarded_untrimmed),
@@ -326,36 +379,36 @@ pub fn write_cutadapt_section<W: Write>(
         percentage(stats.total_bp_after_trim, stats.total_bp_processed))?;
     writeln!(w)?;
 
-    // Adapter section — "=== Adapter 1 ===" triggers section parsing
-    writeln!(w, "=== Adapter 1 ===")?;
-    writeln!(w)?;
-    // "Sequence: ...; Type: regular 3'; Length: N; Trimmed: N times."
-    writeln!(w, "Sequence: {}; Type: regular 3'; Length: {}; Trimmed: {} times.",
-        config.adapter, config.adapter.len(), stats.reads_with_adapter)?;
-    writeln!(w)?;
+    // Per-adapter sections — "=== Adapter N ===" triggers MultiQC section parsing
+    for (idx, (_name, seq)) in adapters.iter().enumerate() {
+        let times_trimmed = stats.reads_with_adapter.get(idx).copied().unwrap_or(0);
+        let length_counts = stats.adapter_length_counts.get(idx);
 
-    // Allowed errors (cosmetic — MultiQC ignores this, but users may read it)
-    write_allowed_errors(w, config.adapter.len(), config.error_rate)?;
-    writeln!(w)?;
+        writeln!(w, "=== Adapter {} ===", idx + 1)?;
+        writeln!(w)?;
+        writeln!(w, "Sequence: {}; Type: regular 3'; Length: {}; Trimmed: {} times.",
+            seq, seq.len(), times_trimmed)?;
+        writeln!(w)?;
 
-    // Adapter length distribution table
-    // MultiQC parses: header with "length", "count", "expect"; then rows ^(\d+)\s+(\d+)\s+([\d\.]+)
-    writeln!(w, "Overview of removed sequences")?;
-    writeln!(w, "length\tcount\texpect\tmax.err\terror counts")?;
+        write_allowed_errors(w, seq.len(), config.error_rate)?;
+        writeln!(w)?;
 
-    for (length, &count) in stats.adapter_length_counts.iter().enumerate() {
-        if length == 0 || count == 0 {
-            continue;
+        writeln!(w, "Overview of removed sequences")?;
+        writeln!(w, "length\tcount\texpect\tmax.err\terror counts")?;
+
+        if let Some(counts) = length_counts {
+            for (length, &count) in counts.iter().enumerate() {
+                if length == 0 || count == 0 {
+                    continue;
+                }
+                let expect = stats.total_reads as f64 / 4f64.powi(length as i32);
+                let max_err = (length as f64 * config.error_rate).floor() as usize;
+                writeln!(w, "{}\t{}\t{:.1}\t{}\t{}", length, count, expect, max_err, count)?;
+            }
         }
-        // Expected: total_reads / 4^length (random match probability)
-        let expect = stats.total_reads as f64 / 4f64.powi(length as i32);
-        let max_err = (length as f64 * config.error_rate).floor() as usize;
-        // Simplified error counts: assume all matches have 0 errors
-        // (MultiQC only uses the first 3 columns)
-        writeln!(w, "{}\t{}\t{:.1}\t{}\t{}", length, count, expect, max_err, count)?;
+        writeln!(w)?;
+        writeln!(w)?;
     }
-    writeln!(w)?;
-    writeln!(w)?;
 
     Ok(())
 }
@@ -463,8 +516,20 @@ pub fn write_json_report<W: Write>(
     // ── Parameters ───────────────────────────────────────────────
     writeln!(w, "{}\"parameters\": {{", i1)?;
     writeln!(w, "{}\"quality_cutoff\": {},", i2, config.quality_cutoff)?;
-    json_str(w, i2, "adapter", &config.adapter, true)?;
-    json_opt_str(w, i2, "adapter_r2", config.adapter_r2.as_deref(), true)?;
+    // Adapters as array of objects
+    write!(w, "{}\"adapters\": [", i2)?;
+    for (i, (name, seq)) in config.adapters.iter().enumerate() {
+        write!(w, "{{\"name\": \"{}\", \"sequence\": \"{}\"}}", json_escape_string(name), json_escape_string(seq))?;
+        if i + 1 < config.adapters.len() { write!(w, ", ")?; }
+    }
+    writeln!(w, "],")?;
+    write!(w, "{}\"adapters_r2\": [", i2)?;
+    for (i, (name, seq)) in config.adapters_r2.iter().enumerate() {
+        write!(w, "{{\"name\": \"{}\", \"sequence\": \"{}\"}}", json_escape_string(name), json_escape_string(seq))?;
+        if i + 1 < config.adapters_r2.len() { write!(w, ", ")?; }
+    }
+    writeln!(w, "],")?;
+    json_int(w, i2, "times", config.times, true)?;
     json_float(w, i2, "error_rate", config.error_rate, true)?;
     json_int(w, i2, "stringency", config.stringency, true)?;
     json_int(w, i2, "length_cutoff", config.length_cutoff, true)?;
@@ -488,7 +553,7 @@ pub fn write_json_report<W: Write>(
     // ── Read processing ──────────────────────────────────────────
     writeln!(w, "{}\"read_processing\": {{", i1)?;
     json_int(w, i2, "total_reads", stats.total_reads, true)?;
-    json_int(w, i2, "reads_with_adapter", stats.reads_with_adapter, true)?;
+    json_int(w, i2, "reads_with_adapter", stats.total_reads_with_adapter, true)?;
     json_int(w, i2, "reads_written", stats.reads_written, true)?;
     json_int(w, i2, "reads_too_short", stats.too_short, true)?;
     json_int(w, i2, "reads_too_long", stats.too_long, true)?;
@@ -504,38 +569,48 @@ pub fn write_json_report<W: Write>(
     writeln!(w, "{}}},", i1)?;
 
     // ── Adapter trimming ─────────────────────────────────────────
-    // For R2, use the R2-specific adapter if set (Small RNA, BGI presets)
-    let adapter_seq = if read_number == 2 {
-        config.adapter_r2.as_deref().unwrap_or(&config.adapter)
+    // For R2, use the R2-specific adapter list if set
+    let adapters = if read_number == 2 && !config.adapters_r2.is_empty() {
+        &config.adapters_r2
     } else {
-        &config.adapter
+        &config.adapters
     };
-    writeln!(w, "{}\"adapter_trimming\": {{", i1)?;
-    json_str(w, i2, "sequence", adapter_seq, true)?;
-    json_str(w, i2, "type", "regular 3'", true)?;
-    json_int(w, i2, "length", adapter_seq.len(), true)?;
-    json_int(w, i2, "times_trimmed", stats.reads_with_adapter, true)?;
+    writeln!(w, "{}\"adapter_trimming\": [", i1)?;
+    for (adapter_idx, (name, seq)) in adapters.iter().enumerate() {
+        let times_trimmed = stats.reads_with_adapter.get(adapter_idx).copied().unwrap_or(0);
+        writeln!(w, "{}{{", i2)?;
+        json_str(w, i3, "name", name, true)?;
+        json_str(w, i3, "sequence", seq, true)?;
+        json_str(w, i3, "type", "regular 3'", true)?;
+        json_int(w, i3, "length", seq.len(), true)?;
+        json_int(w, i3, "times_trimmed", times_trimmed, true)?;
 
-    // Sparse length distribution: omit index 0 and zero-count entries
-    let entries: Vec<(usize, usize)> = stats
-        .adapter_length_counts
-        .iter()
-        .enumerate()
-        .filter(|&(i, &count)| i > 0 && count > 0)
-        .map(|(i, &count)| (i, count))
-        .collect();
+        // Sparse length distribution for this adapter
+        let length_counts = stats.adapter_length_counts.get(adapter_idx);
+        let entries: Vec<(usize, usize)> = length_counts
+            .map(|counts| {
+                counts.iter().enumerate()
+                    .filter(|&(i, &count)| i > 0 && count > 0)
+                    .map(|(i, &count)| (i, count))
+                    .collect()
+            })
+            .unwrap_or_default();
 
-    if entries.is_empty() {
-        writeln!(w, "{}\"length_distribution\": {{}}", i2)?;
-    } else {
-        writeln!(w, "{}\"length_distribution\": {{", i2)?;
-        for (idx, &(length, count)) in entries.iter().enumerate() {
-            let comma = if idx < entries.len() - 1 { "," } else { "" };
-            writeln!(w, "{}\"{}\": {}{}", i3, length, count, comma)?;
+        if entries.is_empty() {
+            writeln!(w, "{}\"length_distribution\": {{}}", i3)?;
+        } else {
+            writeln!(w, "{}\"length_distribution\": {{", i3)?;
+            let i4 = "        ";
+            for (entry_idx, &(length, count)) in entries.iter().enumerate() {
+                let comma = if entry_idx < entries.len() - 1 { "," } else { "" };
+                writeln!(w, "{}\"{}\": {}{}", i4, length, count, comma)?;
+            }
+            writeln!(w, "{}}}", i3)?;
         }
-        writeln!(w, "{}}}", i2)?;
+        let comma = if adapter_idx < adapters.len() - 1 { "," } else { "" };
+        writeln!(w, "{}}}{}", i2, comma)?;
     }
-    writeln!(w, "{}}},", i1)?;
+    writeln!(w, "{}],", i1)?;
 
     // ── Poly-A trimming ──────────────────────────────────────────
     writeln!(w, "{}\"poly_a_trimming\": {{", i1)?;
@@ -635,13 +710,6 @@ fn json_null<W: Write>(w: &mut W, indent: &str, key: &str, comma: bool) -> std::
 fn json_opt_int<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<usize>, comma: bool) -> std::io::Result<()> {
     match value {
         Some(v) => json_int(w, indent, key, v, comma),
-        None => json_null(w, indent, key, comma),
-    }
-}
-
-fn json_opt_str<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<&str>, comma: bool) -> std::io::Result<()> {
-    match value {
-        Some(v) => json_str(w, indent, key, v, comma),
         None => json_null(w, indent, key, comma),
     }
 }
@@ -749,8 +817,9 @@ mod tests {
         TrimConfig {
             version: "2.0.0".to_string(),
             quality_cutoff: 20,
-            adapter: "AGATCGGAAGAGC".to_string(),
-            adapter_r2: None,
+            adapters: vec![("adapter_1".to_string(), "AGATCGGAAGAGC".to_string())],
+            adapters_r2: Vec::new(),
+            times: 1,
             error_rate: 0.1,
             stringency: 1,
             length_cutoff: 20,
@@ -783,11 +852,12 @@ mod tests {
         }
     }
 
-    /// Helper to build TrimStats with some non-zero values.
+    /// Helper to build TrimStats with some non-zero values (single adapter).
     fn test_stats() -> TrimStats {
-        let mut stats = TrimStats::default();
+        let mut stats = TrimStats::with_adapter_count(1);
         stats.total_reads = 10000;
-        stats.reads_with_adapter = 5234;
+        stats.total_reads_with_adapter = 5234;
+        stats.reads_with_adapter = vec![5234];
         stats.reads_written = 9800;
         stats.too_short = 150;
         stats.too_long = 0;
@@ -795,7 +865,7 @@ mod tests {
         stats.total_bp_processed = 1_000_000;
         stats.bases_quality_trimmed = 50_000;
         stats.total_bp_written = 900_000;
-        stats.adapter_length_counts = vec![0, 1000, 500, 250, 0, 120];
+        stats.adapter_length_counts = vec![vec![0, 1000, 500, 250, 0, 120]];
         stats
     }
 
@@ -820,8 +890,9 @@ mod tests {
 
         // Parameters
         assert_eq!(json["parameters"]["quality_cutoff"], 20);
-        assert_eq!(json["parameters"]["adapter"], "AGATCGGAAGAGC");
-        assert!(json["parameters"]["adapter_r2"].is_null());
+        assert_eq!(json["parameters"]["adapters"][0]["sequence"], "AGATCGGAAGAGC");
+        assert_eq!(json["parameters"]["adapters_r2"].as_array().unwrap().len(), 0);
+        assert_eq!(json["parameters"]["times"], 1);
         assert_eq!(json["parameters"]["error_rate"], 0.1);
         assert_eq!(json["parameters"]["stringency"], 1);
         assert_eq!(json["parameters"]["length_cutoff"], 20);
@@ -841,14 +912,17 @@ mod tests {
         assert_eq!(json["basepair_processing"]["quality_trimmed_bp"], 50_000);
         assert_eq!(json["basepair_processing"]["total_bp_written"], 900_000);
 
-        // Adapter trimming
-        assert_eq!(json["adapter_trimming"]["sequence"], "AGATCGGAAGAGC");
-        assert_eq!(json["adapter_trimming"]["type"], "regular 3'");
-        assert_eq!(json["adapter_trimming"]["length"], 13);
-        assert_eq!(json["adapter_trimming"]["times_trimmed"], 5234);
+        // Adapter trimming — now an array
+        let at = &json["adapter_trimming"];
+        assert!(at.is_array());
+        assert_eq!(at.as_array().unwrap().len(), 1);
+        assert_eq!(at[0]["sequence"], "AGATCGGAAGAGC");
+        assert_eq!(at[0]["type"], "regular 3'");
+        assert_eq!(at[0]["length"], 13);
+        assert_eq!(at[0]["times_trimmed"], 5234);
 
         // Length distribution is sparse
-        let ld = &json["adapter_trimming"]["length_distribution"];
+        let ld = &at[0]["length_distribution"];
         assert_eq!(ld["1"], 1000);
         assert_eq!(ld["2"], 500);
         assert_eq!(ld["3"], 250);
@@ -869,7 +943,7 @@ mod tests {
     fn test_write_json_report_pe() {
         let mut config = test_config();
         config.paired = true;
-        config.adapter_r2 = Some("TGGAATTCTCGG".to_string());
+        config.adapters_r2 = vec![("smallrna_r2".to_string(), "TGGAATTCTCGG".to_string())];
         config.input_filename = "sample_R1.fq.gz".to_string();
         config.input_filenames = vec!["sample_R1.fq.gz".to_string(), "sample_R2.fq.gz".to_string()];
 
@@ -901,23 +975,32 @@ mod tests {
         assert_eq!(json["input_filenames"][1], "sample_R2.fq.gz");
         assert_eq!(json["input_filenames"].as_array().unwrap().len(), 2);
         // R1 uses the primary adapter
-        assert_eq!(json["adapter_trimming"]["sequence"], "AGATCGGAAGAGC");
+        assert_eq!(json["adapter_trimming"][0]["sequence"], "AGATCGGAAGAGC");
         // pair_validation is populated for R1 too
         assert_eq!(json["pair_validation"]["pairs_analyzed"], 10000);
         assert_eq!(json["pair_validation"]["pairs_removed"], 200);
         assert_eq!(json["pair_validation"]["r1_unpaired"], 10);
         assert_eq!(json["parameters"]["clip_r2"], 2);
 
-        // R2 report
+        // R2 report — uses R2-specific adapter
         config.input_filename = "sample_R2.fq.gz".to_string();
+        // R2 stats need their own adapter count matching adapters_r2
+        let mut stats_r2 = TrimStats::with_adapter_count(1);
+        stats_r2.total_reads = 10000;
+        stats_r2.total_reads_with_adapter = 4000;
+        stats_r2.reads_with_adapter = vec![4000];
+        stats_r2.reads_written = 9800;
+        stats_r2.total_bp_processed = 1_000_000;
+        stats_r2.total_bp_written = 900_000;
+
         let mut buf2 = Vec::new();
-        write_json_report(&mut buf2, &config, &stats, Some(&pair_stats), 2, &extra).unwrap();
+        write_json_report(&mut buf2, &config, &stats_r2, Some(&pair_stats), 2, &extra).unwrap();
         let json2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
 
         assert_eq!(json2["read_number"], 2);
         // R2 uses the R2-specific adapter
-        assert_eq!(json2["adapter_trimming"]["sequence"], "TGGAATTCTCGG");
-        assert_eq!(json2["adapter_trimming"]["length"], 12);
+        assert_eq!(json2["adapter_trimming"][0]["sequence"], "TGGAATTCTCGG");
+        assert_eq!(json2["adapter_trimming"][0]["length"], 12);
         // pair_validation also present in R2
         assert_eq!(json2["pair_validation"]["pairs_analyzed"], 10000);
     }
@@ -928,7 +1011,7 @@ mod tests {
         let extra = test_extra_params();
 
         // Empty adapter_length_counts → empty object
-        let mut stats = TrimStats::default();
+        let mut stats = TrimStats::with_adapter_count(1);
         stats.total_reads = 100;
         stats.reads_written = 100;
 
@@ -936,17 +1019,17 @@ mod tests {
         write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
 
-        let ld = &json["adapter_trimming"]["length_distribution"];
+        let ld = &json["adapter_trimming"][0]["length_distribution"];
         assert!(ld.is_object());
         assert_eq!(ld.as_object().unwrap().len(), 0);
 
         // Only non-zero entries appear
-        stats.adapter_length_counts = vec![0, 0, 0, 42, 0, 0, 0, 7];
+        stats.adapter_length_counts = vec![vec![0, 0, 0, 42, 0, 0, 0, 7]];
         let mut buf2 = Vec::new();
         write_json_report(&mut buf2, &config, &stats, None, 1, &extra).unwrap();
         let json2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
 
-        let ld2 = json2["adapter_trimming"]["length_distribution"].as_object().unwrap();
+        let ld2 = json2["adapter_trimming"][0]["length_distribution"].as_object().unwrap();
         assert_eq!(ld2.len(), 2);
         assert_eq!(ld2["3"], 42);
         assert_eq!(ld2["7"], 7);
@@ -959,7 +1042,7 @@ mod tests {
         config.input_filename = "my file.fq.gz".to_string();
         config.input_filenames = vec!["my file.fq.gz".to_string()];
 
-        let stats = TrimStats::default();
+        let stats = TrimStats::with_adapter_count(1);
         let extra = test_extra_params();
 
         let mut buf = Vec::new();
@@ -975,9 +1058,131 @@ mod tests {
     }
 
     #[test]
+    fn test_write_json_report_multi_adapter() {
+        // Test JSON report with 3 adapters, each with distinct per-adapter stats.
+        let mut config = test_config();
+        config.adapters = vec![
+            ("illumina".to_string(), "AGATCGGAAGAGC".to_string()),
+            ("nextera".to_string(), "CTGTCTCTTATA".to_string()),
+            ("smallrna".to_string(), "TGGAATTCTCGG".to_string()),
+        ];
+        config.times = 2;
+
+        let mut stats = TrimStats::with_adapter_count(3);
+        stats.total_reads = 10000;
+        stats.total_reads_with_adapter = 6000; // 6000 reads had >=1 adapter
+        stats.reads_with_adapter = vec![4000, 1500, 800]; // per-adapter trimming events
+        stats.reads_written = 9500;
+        stats.total_bp_processed = 1_000_000;
+        stats.total_bp_written = 850_000;
+        stats.adapter_length_counts = vec![
+            vec![0, 1000, 500, 250],   // illumina length distribution
+            vec![0, 0, 300, 200, 100], // nextera length distribution
+            vec![0, 400, 200],         // smallrna length distribution
+        ];
+
+        let extra = test_extra_params();
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf)
+            .expect("Multi-adapter JSON must be valid");
+
+        // Parameters: adapters array with 3 elements
+        let params_adapters = json["parameters"]["adapters"].as_array().unwrap();
+        assert_eq!(params_adapters.len(), 3);
+        assert_eq!(params_adapters[0]["name"], "illumina");
+        assert_eq!(params_adapters[0]["sequence"], "AGATCGGAAGAGC");
+        assert_eq!(params_adapters[1]["name"], "nextera");
+        assert_eq!(params_adapters[2]["name"], "smallrna");
+        assert_eq!(json["parameters"]["times"], 2);
+
+        // read_processing uses the aggregate total
+        assert_eq!(json["read_processing"]["reads_with_adapter"], 6000);
+
+        // adapter_trimming: array with 3 elements, each with per-adapter stats
+        let at = json["adapter_trimming"].as_array().unwrap();
+        assert_eq!(at.len(), 3);
+
+        // Adapter 0: illumina
+        assert_eq!(at[0]["name"], "illumina");
+        assert_eq!(at[0]["sequence"], "AGATCGGAAGAGC");
+        assert_eq!(at[0]["length"], 13);
+        assert_eq!(at[0]["times_trimmed"], 4000);
+        assert_eq!(at[0]["length_distribution"]["1"], 1000);
+        assert_eq!(at[0]["length_distribution"]["2"], 500);
+        assert_eq!(at[0]["length_distribution"]["3"], 250);
+
+        // Adapter 1: nextera
+        assert_eq!(at[1]["name"], "nextera");
+        assert_eq!(at[1]["sequence"], "CTGTCTCTTATA");
+        assert_eq!(at[1]["length"], 12);
+        assert_eq!(at[1]["times_trimmed"], 1500);
+        assert_eq!(at[1]["length_distribution"]["2"], 300);
+        assert_eq!(at[1]["length_distribution"]["3"], 200);
+        assert_eq!(at[1]["length_distribution"]["4"], 100);
+
+        // Adapter 2: smallrna
+        assert_eq!(at[2]["name"], "smallrna");
+        assert_eq!(at[2]["sequence"], "TGGAATTCTCGG");
+        assert_eq!(at[2]["length"], 12);
+        assert_eq!(at[2]["times_trimmed"], 800);
+        assert_eq!(at[2]["length_distribution"]["1"], 400);
+        assert_eq!(at[2]["length_distribution"]["2"], 200);
+    }
+
+    #[test]
+    fn test_stats_merge_multi_adapter() {
+        // Simulate two parallel workers producing per-adapter stats for 3 adapters,
+        // then merging them into the main accumulator.
+        let mut main_stats = TrimStats::with_adapter_count(3);
+
+        // Worker A: saw 100 reads, adapter 0 matched 50 times, adapter 2 matched 10 times
+        let mut worker_a = TrimStats::with_adapter_count(3);
+        worker_a.total_reads = 100;
+        worker_a.total_reads_with_adapter = 55;
+        worker_a.reads_with_adapter = vec![50, 0, 10];
+        worker_a.adapter_length_counts = vec![
+            vec![0, 20, 30],     // adapter 0: 20 events at len=1, 30 at len=2
+            vec![],              // adapter 1: no matches
+            vec![0, 0, 0, 5, 5], // adapter 2: 5 events at len=3, 5 at len=4
+        ];
+
+        // Worker B: saw 80 reads, adapter 0 matched 30 times, adapter 1 matched 15 times
+        let mut worker_b = TrimStats::with_adapter_count(3);
+        worker_b.total_reads = 80;
+        worker_b.total_reads_with_adapter = 40;
+        worker_b.reads_with_adapter = vec![30, 15, 0];
+        worker_b.adapter_length_counts = vec![
+            vec![0, 10, 15, 5],  // adapter 0: longer length distribution than worker A
+            vec![0, 0, 8, 7],    // adapter 1: 8 at len=2, 7 at len=3
+            vec![],              // adapter 2: no matches
+        ];
+
+        main_stats.merge(&worker_a);
+        main_stats.merge(&worker_b);
+
+        // Totals
+        assert_eq!(main_stats.total_reads, 180);
+        assert_eq!(main_stats.total_reads_with_adapter, 95);
+
+        // Per-adapter event counts
+        assert_eq!(main_stats.reads_with_adapter, vec![80, 15, 10]);
+
+        // Adapter 0 length distribution: worker_a has [0,20,30], worker_b has [0,10,15,5]
+        // Merged: [0, 30, 45, 5]
+        assert_eq!(main_stats.adapter_length_counts[0], vec![0, 30, 45, 5]);
+
+        // Adapter 1: worker_a has [], worker_b has [0,0,8,7] → [0,0,8,7]
+        assert_eq!(main_stats.adapter_length_counts[1], vec![0, 0, 8, 7]);
+
+        // Adapter 2: worker_a has [0,0,0,5,5], worker_b has [] → [0,0,0,5,5]
+        assert_eq!(main_stats.adapter_length_counts[2], vec![0, 0, 0, 5, 5]);
+    }
+
+    #[test]
     fn test_write_json_report_all_zero_stats() {
         let config = test_config();
-        let stats = TrimStats::default(); // all zeros
+        let stats = TrimStats::with_adapter_count(1); // all zeros
         let extra = test_extra_params();
 
         let mut buf = Vec::new();
@@ -989,6 +1194,6 @@ mod tests {
         assert_eq!(json["read_processing"]["total_reads"], 0);
         assert_eq!(json["read_processing"]["reads_written"], 0);
         assert_eq!(json["basepair_processing"]["total_bp_processed"], 0);
-        assert_eq!(json["adapter_trimming"]["times_trimmed"], 0);
+        assert_eq!(json["adapter_trimming"][0]["times_trimmed"], 0);
     }
 }

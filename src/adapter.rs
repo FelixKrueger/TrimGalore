@@ -3,8 +3,9 @@
 //! Provides built-in adapter sequences for common sequencing platforms
 //! and auto-detection by scanning the first 1M reads.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crate::fastq::FastqReader;
+use std::io::BufRead;
 use std::path::Path;
 
 /// Built-in adapter presets.
@@ -257,6 +258,108 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+/// Parse a raw adapter CLI string into a list of named adapter sequences.
+///
+/// Supported formats:
+///   - Plain sequence: `"AGATCGGAAGAGC"` → `[("adapter_1", "AGATCGGAAGAGC")]`
+///   - Embedded multi: `" SEQ1 -a SEQ2 -a SEQ3"` → 3 entries (leading space + `-a` separators)
+///   - FASTA file: `"file:path/to/adapters.fa"` → entries from FASTA
+pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
+    // Case 1: FASTA file reference
+    if let Some(path) = raw.strip_prefix("file:") {
+        return read_fasta_adapters(path.trim());
+    }
+
+    // Case 2: Embedded multi-adapter (contains " -a " separator)
+    if raw.contains(" -a ") {
+        let parts: Vec<&str> = raw.split(" -a ").collect();
+        let mut adapters = Vec::with_capacity(parts.len());
+        for (_i, part) in parts.iter().enumerate() {
+            let seq = part.trim().to_uppercase();
+            if seq.is_empty() {
+                continue;
+            }
+            validate_adapter_sequence(&seq)?;
+            adapters.push((format!("adapter_{}", adapters.len() + 1), seq));
+        }
+        if adapters.is_empty() {
+            anyhow::bail!("No valid adapter sequences found in multi-adapter specification");
+        }
+        return Ok(adapters);
+    }
+
+    // Case 3: Single adapter sequence
+    let seq = raw.trim().to_uppercase();
+    if seq.is_empty() {
+        anyhow::bail!("Empty adapter sequence");
+    }
+    validate_adapter_sequence(&seq)?;
+    Ok(vec![("adapter_1".to_string(), seq)])
+}
+
+/// Read adapter sequences from a FASTA file.
+///
+/// Returns `Vec<(name, sequence)>` where name is the FASTA header (without `>`).
+/// Sequences are uppercased and whitespace-stripped.
+pub fn read_fasta_adapters<P: AsRef<Path>>(path: P) -> Result<Vec<(String, String)>> {
+    let path = path.as_ref();
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("Cannot open adapter FASTA file: {}", path.display()))?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut adapters: Vec<(String, String)> = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_seq = String::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(header) = line.strip_prefix('>') {
+            // Flush previous entry
+            if let Some(name) = current_name.take() {
+                if current_seq.is_empty() {
+                    anyhow::bail!("Empty sequence for adapter '{}' in {}", name, path.display());
+                }
+                validate_adapter_sequence(&current_seq)?;
+                adapters.push((name, current_seq.clone()));
+                current_seq.clear();
+            }
+            current_name = Some(header.trim().to_string());
+        } else {
+            current_seq.push_str(&line.to_uppercase());
+        }
+    }
+
+    // Flush last entry
+    if let Some(name) = current_name {
+        if current_seq.is_empty() {
+            anyhow::bail!("Empty sequence for adapter '{}' in {}", name, path.display());
+        }
+        validate_adapter_sequence(&current_seq)?;
+        adapters.push((name, current_seq));
+    }
+
+    if adapters.is_empty() {
+        anyhow::bail!("No adapter sequences found in FASTA file: {}", path.display());
+    }
+
+    Ok(adapters)
+}
+
+/// Validate that an adapter sequence contains only valid DNA characters.
+fn validate_adapter_sequence(seq: &str) -> Result<()> {
+    if !seq.bytes().all(|b| matches!(b, b'A' | b'C' | b'G' | b'T' | b'N' | b'X')) {
+        anyhow::bail!(
+            "Adapter sequence must contain only DNA characters (A, C, G, T, N, X), got: '{}'",
+            seq
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +401,83 @@ mod tests {
         assert!(ILLUMINA.seq_r2.is_none());
         assert!(NEXTERA.seq_r2.is_none());
         assert!(STRANDED_ILLUMINA.seq_r2.is_none());
+    }
+
+    #[test]
+    fn test_parse_single_adapter() {
+        let result = parse_adapter_spec("AGATCGGAAGAGC").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].1, "AGATCGGAAGAGC");
+    }
+
+    #[test]
+    fn test_parse_single_adapter_lowercase() {
+        let result = parse_adapter_spec("agatcggaagagc").unwrap();
+        assert_eq!(result[0].1, "AGATCGGAAGAGC");
+    }
+
+    #[test]
+    fn test_parse_multi_adapter_embedded() {
+        let result = parse_adapter_spec(" AGCTAGCG -a TCTCTTATAT -a TTTATTCGGATTTAT").unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], ("adapter_1".to_string(), "AGCTAGCG".to_string()));
+        assert_eq!(result[1], ("adapter_2".to_string(), "TCTCTTATAT".to_string()));
+        assert_eq!(result[2], ("adapter_3".to_string(), "TTTATTCGGATTTAT".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fasta_adapter() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("tg_test_fasta");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("adapters.fa");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, ">Illumina\nAGATCGGAAGAGC").unwrap();
+        writeln!(f, ">Nextera\nCTGTCTCTTATA").unwrap();
+
+        let result = read_fasta_adapters(&path).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("Illumina".to_string(), "AGATCGGAAGAGC".to_string()));
+        assert_eq!(result[1], ("Nextera".to_string(), "CTGTCTCTTATA".to_string()));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_parse_fasta_invalid_bases() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("tg_test_fasta_invalid");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.fa");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, ">bad\nAGCTZZZ").unwrap();
+
+        let result = read_fasta_adapters(&path);
+        assert!(result.is_err());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_parse_file_not_found() {
+        let result = parse_adapter_spec("file:/nonexistent/adapters.fa");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_adapter_with_file_prefix() {
+        // Should dispatch to FASTA reader, which will fail on missing file
+        let result = parse_adapter_spec("file:no_such_file.fa");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_adapter_sequence_valid() {
+        assert!(validate_adapter_sequence("ACGTNX").is_ok());
+    }
+
+    #[test]
+    fn test_validate_adapter_sequence_invalid() {
+        assert!(validate_adapter_sequence("ACGTZ").is_err());
     }
 }
