@@ -180,14 +180,8 @@ pub fn run_paired_end_parallel(
 
         let mut expected: u64 = 0;
         let mut pending: BTreeMap<u64, PairedBatchResult> = BTreeMap::new();
-        let adapter_count_r1 = config.adapters.len();
-        let adapter_count_r2 = if config.adapters_r2.is_empty() {
-            config.adapters.len()
-        } else {
-            config.adapters_r2.len()
-        };
-        let mut total_r1 = TrimStats::with_adapter_count(adapter_count_r1);
-        let mut total_r2 = TrimStats::with_adapter_count(adapter_count_r2);
+        let mut total_r1 = TrimStats::with_adapter_count(config.adapters.len());
+        let mut total_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
         let mut total_pair = PairValidationStats::default();
 
         while let Ok(result) = result_rx.recv() {
@@ -236,14 +230,8 @@ fn process_paired_batch(
     unpaired_length_r1: usize,
     unpaired_length_r2: usize,
 ) -> Result<PairedBatchResult> {
-    let adapter_count_r1 = config.adapters.len();
-    let adapter_count_r2 = if config.adapters_r2.is_empty() {
-        config.adapters.len()
-    } else {
-        config.adapters_r2.len()
-    };
-    let mut stats_r1 = TrimStats::with_adapter_count(adapter_count_r1);
-    let mut stats_r2 = TrimStats::with_adapter_count(adapter_count_r2);
+    let mut stats_r1 = TrimStats::with_adapter_count(config.adapters.len());
+    let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
     let mut pair_stats = PairValidationStats::default();
 
     let cap = reads_r1.len() * 300;
@@ -367,6 +355,10 @@ fn process_pairs<W: Write>(
             pair_stats.pairs_removed += 1;
             continue;
         }
+
+        // Track bp after trimming but before pair/length filtering (Cutadapt-compatible stat)
+        stats_r1.total_bp_after_trim += r1.seq.len();
+        stats_r2.total_bp_after_trim += r2.seq.len();
 
         match filters::filter_paired_end(
             r1, r2,
@@ -572,6 +564,9 @@ fn process_reads<W: Write>(
             stats.discarded_untrimmed += 1;
             continue;
         }
+
+        // Track bp after trimming but before length filtering (Cutadapt-compatible stat)
+        stats.total_bp_after_trim += record.seq.len();
 
         match filters::filter_single_end(
             record, config.length_cutoff, config.max_length, config.max_n.clone(),

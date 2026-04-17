@@ -19,6 +19,20 @@ pub struct AdapterPreset {
     pub seq_r2: Option<&'static str>,
 }
 
+impl AdapterPreset {
+    /// Convert this preset's primary adapter to a `(name, sequence)` vec for the multi-adapter pipeline.
+    pub fn to_adapter_vec(&self) -> Vec<(String, String)> {
+        vec![(self.name.to_string(), self.seq.to_string())]
+    }
+
+    /// Convert this preset's R2-specific adapter (if any) to a `(name, sequence)` vec.
+    pub fn to_r2_vec(&self) -> Vec<(String, String)> {
+        self.seq_r2
+            .map(|s| vec![(format!("{}_r2", self.name), s.to_string())])
+            .unwrap_or_default()
+    }
+}
+
 /// All built-in adapter presets.
 pub const ILLUMINA: AdapterPreset = AdapterPreset {
     name: "Illumina",
@@ -274,7 +288,7 @@ pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
     if raw.contains(" -a ") {
         let parts: Vec<&str> = raw.split(" -a ").collect();
         let mut adapters = Vec::with_capacity(parts.len());
-        for (_i, part) in parts.iter().enumerate() {
+        for part in &parts {
             let seq = part.trim().to_uppercase();
             if seq.is_empty() {
                 continue;

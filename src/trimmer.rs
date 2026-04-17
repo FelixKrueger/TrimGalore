@@ -40,6 +40,13 @@ pub struct TrimConfig {
     pub discard_untrimmed: bool,
 }
 
+impl TrimConfig {
+    /// Number of adapters used for R2 (falls back to R1 adapter count when no R2-specific adapters are set).
+    pub fn r2_adapter_count(&self) -> usize {
+        if self.adapters_r2.is_empty() { self.adapters.len() } else { self.adapters_r2.len() }
+    }
+}
+
 /// Result of trimming a single read (carries per-read stats).
 pub struct TrimResult {
     /// True if any adapter was found in any round.
@@ -333,14 +340,8 @@ pub fn run_paired_end(
     unpaired_length_r1: usize,
     unpaired_length_r2: usize,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
-    let adapter_count_r1 = config.adapters.len();
-    let adapter_count_r2 = if config.adapters_r2.is_empty() {
-        config.adapters.len()
-    } else {
-        config.adapters_r2.len()
-    };
-    let mut stats_r1 = TrimStats::with_adapter_count(adapter_count_r1);
-    let mut stats_r2 = TrimStats::with_adapter_count(adapter_count_r2);
+    let mut stats_r1 = TrimStats::with_adapter_count(config.adapters.len());
+    let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
     let mut pair_stats = PairValidationStats::default();
 
     loop {

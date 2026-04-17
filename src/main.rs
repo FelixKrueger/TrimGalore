@@ -247,29 +247,22 @@ fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String,
         return Ok((label, adapters_r1, adapters_r2, None));
     }
 
-    // Presets: single-adapter, no multi-adapter parsing needed
-    fn preset_vec(name: &str, seq: &str) -> Vec<(String, String)> {
-        vec![(name.to_string(), seq.to_string())]
-    }
-    fn preset_r2(preset: &adapter::AdapterPreset) -> Vec<(String, String)> {
-        preset.seq_r2.map(|s| vec![(format!("{}_r2", preset.name), s.to_string())]).unwrap_or_default()
-    }
-
+    // Presets: single-adapter, use AdapterPreset methods
     if cli.nextera {
-        return Ok((adapter::NEXTERA.name.to_string(), preset_vec(adapter::NEXTERA.name, adapter::NEXTERA.seq), Vec::new(), None));
+        return Ok((adapter::NEXTERA.name.to_string(), adapter::NEXTERA.to_adapter_vec(), Vec::new(), None));
     }
     if cli.small_rna {
         return Ok((
             adapter::SMALL_RNA.name.to_string(),
-            preset_vec(adapter::SMALL_RNA.name, adapter::SMALL_RNA.seq),
-            preset_r2(&adapter::SMALL_RNA),
+            adapter::SMALL_RNA.to_adapter_vec(),
+            adapter::SMALL_RNA.to_r2_vec(),
             None,
         ));
     }
     if cli.stranded_illumina {
         return Ok((
             adapter::STRANDED_ILLUMINA.name.to_string(),
-            preset_vec(adapter::STRANDED_ILLUMINA.name, adapter::STRANDED_ILLUMINA.seq),
+            adapter::STRANDED_ILLUMINA.to_adapter_vec(),
             Vec::new(),
             None,
         ));
@@ -277,13 +270,13 @@ fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String,
     if cli.bgiseq {
         return Ok((
             adapter::BGISEQ.name.to_string(),
-            preset_vec(adapter::BGISEQ.name, adapter::BGISEQ.seq),
-            preset_r2(&adapter::BGISEQ),
+            adapter::BGISEQ.to_adapter_vec(),
+            adapter::BGISEQ.to_r2_vec(),
             None,
         ));
     }
     if cli.illumina {
-        return Ok((adapter::ILLUMINA.name.to_string(), preset_vec(adapter::ILLUMINA.name, adapter::ILLUMINA.seq), Vec::new(), None));
+        return Ok((adapter::ILLUMINA.name.to_string(), adapter::ILLUMINA.to_adapter_vec(), Vec::new(), None));
     }
 
     // Auto-detect (also piggybacks poly-G counting)
@@ -292,8 +285,8 @@ fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String,
     eprintln!("{}", detection.message);
 
     let poly_g_data = Some((detection.poly_g_count, detection.reads_scanned));
-    let adapters_r1 = preset_vec(detection.adapter.name, detection.adapter.seq);
-    let adapters_r2 = preset_r2(&detection.adapter);
+    let adapters_r1 = detection.adapter.to_adapter_vec();
+    let adapters_r2 = detection.adapter.to_r2_vec();
     Ok((
         detection.adapter.name.to_string(),
         adapters_r1,
