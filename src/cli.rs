@@ -165,8 +165,9 @@ pub struct Cli {
     #[clap(long = "fastqc_args", allow_hyphen_values = true)]
     pub fastqc_args: Option<String>,
 
-    /// Number of compression threads for gzip output (default: 1).
-    /// Values > 1 enable parallel gzip compression for faster I/O.
+    /// Number of worker threads for parallel processing (default: 1).
+    /// Values > 1 run trimming and gzip compression across multiple threads,
+    /// giving near-linear speedup on multi-core systems.
     #[clap(short = 'j', long = "cores", default_value = "1")]
     pub cores: usize,
 
