@@ -167,7 +167,8 @@ pub struct Cli {
 
     /// Number of worker threads for parallel processing (default: 1).
     /// Values > 1 run trimming and gzip compression across multiple threads.
-    /// Near-linear speedup up to ~16 cores; diminishing returns beyond ~20.
+    /// Near-linear speedup up to ~16 cores; diminishing returns beyond ~20
+    /// (typically I/O-bound at that point, not algorithmic).
     #[clap(short = 'j', long = "cores", default_value = "1")]
     pub cores: usize,
 
