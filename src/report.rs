@@ -815,7 +815,7 @@ mod tests {
     /// Helper to build a minimal TrimConfig for testing.
     fn test_config() -> TrimConfig {
         TrimConfig {
-            version: "2.0.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             quality_cutoff: 20,
             adapters: vec![("adapter_1".to_string(), "AGATCGGAAGAGC".to_string())],
             adapters_r2: Vec::new(),
@@ -883,7 +883,7 @@ mod tests {
 
         assert_eq!(json["tool"], "Trim Galore");
         assert_eq!(json["schema_version"], 1);
-        assert_eq!(json["trim_galore_version"], "2.0.0");
+        assert_eq!(json["trim_galore_version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(json["input_filenames"][0], "sample.fq.gz");
         assert_eq!(json["mode"], "single-end");
         assert_eq!(json["read_number"], 1);

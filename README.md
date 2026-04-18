@@ -25,6 +25,16 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 
 ## Installation
 
+> [!IMPORTANT]
+> **Beta testing v2.1.0-beta.1.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
+>
+> ```bash
+> cargo install trim-galore --version 2.1.0-beta.1
+> docker pull ghcr.io/felixkrueger/trimgalore:beta
+> ```
+>
+> Feedback on the beta is welcome — open an issue with the `beta-feedback` label. This section will be removed at v2.1.0 GA.
+
 ### From crates.io
 
 Requires the [Rust toolchain](https://rustup.rs/) (1.85+):
@@ -66,7 +76,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore trim_galore input.fastq.gz
 ```
 
-The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.0.0`) are published on release.
+The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.1.0`) are published on release.
 
 ### Prebuilt binaries
 

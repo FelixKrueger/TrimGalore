@@ -1,6 +1,26 @@
 # Trim Galore Changelog
 
 
+### Version 2.1.0 (Beta, Release on DD Mon 2026)
+
+**Major release — Rust rewrite (Oxidized Edition).** Single-binary drop-in replacement for the Perl Trim Galore. Same CLI, same outputs, plus a JSON MultiQC-native report and multi-adapter support. Built from `src/main.rs` (Cargo crate at repo root); the historical Perl script will be preserved at `legacy/trim_galore` once v2.1.0 GA ships (retained in the `0.6.11` tag during the beta window).
+
+**Note on v2.0.0:** v2.0.0 was a pre-release cut inadvertently published to crates.io on DD Mon 2026. It will be yanked when v2.1.0 GA ships. Users should install v2.1.0 or later.
+
+#### Features (since v2.0.0)
+- Multi-adapter support for both R1 and R2 via repeated `-a`/`-a2` flags and `file:adapters.fa` (c36b7fe)
+- `--discard-untrimmed` flag (b0db3db)
+- Multi-file single-end input (b0db3db)
+- JSON trimming report for MultiQC native parsing (efedb95)
+- MultiQC-compatible Cutadapt section in text trimming reports (121b821)
+
+#### Bug fixes (since v2.0.0)
+- Parallel-path `total_bp_after_trim` and `r2_clipped_5prime` stats now tracked correctly (82d1e34, 3996fc5)
+- Cutadapt-section report values match v0.6.x MultiQC-parsed values (eedbc66)
+- `--fastqc_args` accepts hyphenated values like `--nogroup` (def0344)
+- Multi-member gzip FASTQ files decode correctly (9dcf519)
+- Adapter auto-detection scans exactly 1M reads (9129650)
+
 ### Version 0.6.11 (Release on 24 Feb 2026)
 
 - Added option `--rename` to write clipped bases to the read ID. Works in all modes with options `--clip_(r1/r2)` and `--three_prime_clip_(r1/r2)`, as well as `--hardtrim5` and `--hardtrim3`. Requested in [this issue](https://github.com/FelixKrueger/TrimGalore/issues/166).
