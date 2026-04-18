@@ -1,6 +1,6 @@
 # Trim Galore
 
-Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS and bisulfite-seq libraries.
+Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS libraries.
 
 [![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=optimus_prime)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/trim-galore)](https://crates.io/crates/trim-galore)
@@ -15,7 +15,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **Multi-adapter support** — specify multiple adapters via `-a " SEQ1 -a SEQ2"` or `-a "file:adapters.fa"`, with optional multi-round trimming (`-n`)
 - **Quality trimming** — Phred-based trimming from the 3' end (BWA algorithm)
 - **Paired-end** — single-pass processing of both reads with automatic pair validation
-- **RRBS / bisulfite-seq** — MspI end-repair artifact removal, directional and non-directional libraries
+- **RRBS** — MspI end-repair artifact removal, directional and non-directional libraries
 - **NextSeq / 2-colour trimming** — poly-G removal for NovaSeq, NextSeq, and NovaSeq X
 - **Poly-A / poly-G trimming** — built-in tail trimming without external tools
 - **Parallel compression** — `--cores N` for faster gzip I/O on multi-core systems
