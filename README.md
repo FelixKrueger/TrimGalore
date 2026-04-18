@@ -11,7 +11,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 
 ## Features
 
-- **Adapter auto-detection** — automatically identifies Illumina, Nextera, Small RNA, Stranded, and BGI adapters
+- **Adapter auto-detection** — automatically identifies Illumina, Nextera, and Small RNA adapters from the first 1M reads. Stranded Illumina and BGI/DNBSEQ adapters are selectable via explicit flags (`--stranded_illumina`, `--bgiseq`)
 - **Multi-adapter support** — specify multiple adapters via `-a " SEQ1 -a SEQ2"` or `-a "file:adapters.fa"`, with optional multi-round trimming (`-n`)
 - **Quality trimming** — Phred-based trimming from the 3' end (BWA algorithm)
 - **Paired-end** — single-pass processing of both reads with automatic pair validation

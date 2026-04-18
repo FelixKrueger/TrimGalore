@@ -10,7 +10,7 @@ A complete **Rust rewrite of Trim Galore** that produces **byte-identical output
 
 | Feature | Status |
 |---------|--------|
-| Adapter auto-detection (Illumina/Nextera/smallRNA/BGI/Stranded) | Done |
+| Adapter auto-detection (Illumina/Nextera/smallRNA; `--stranded_illumina` / `--bgiseq` as explicit-flag presets) | Done |
 | Quality trimming (BWA algorithm, Phred33/64) | Done |
 | Adapter trimming (semi-global alignment with error rate) | Done |
 | Paired-end single-pass processing | Done |
