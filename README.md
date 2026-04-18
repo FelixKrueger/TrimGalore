@@ -18,7 +18,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **RRBS** — MspI end-repair artifact removal, directional and non-directional libraries
 - **Poly-G trimming** — sequence-based removal of no-signal G-runs at the 3' end of Read 1 (and poly-C at the 5' end of Read 2) from 2-colour instruments (NovaSeq, NextSeq, NovaSeq X). Auto-detected from the data; opt-out with `--no_poly_g`
 - **NextSeq / 2-colour quality trim** — `--nextseq N` / `--2colour N` applies 2-colour-aware quality trimming (opt-in; replaces `-q`)
-- **Poly-A trimming** — built-in removal of poly-A tails without external tools
+- **Poly-A trimming** — built-in removal of poly-A tails without external tools; recommended for mRNA-seq / poly-A-selected RNA-seq libraries
 - **Parallel compression** — `--cores N` for faster gzip I/O on multi-core systems
 - **FastQC integration** — optional post-trimming quality reports (FastQC v0.12.1 bundled in the Docker image; for `cargo`/source installs, requires FastQC on `$PATH`)
 - **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
