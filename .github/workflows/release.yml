@@ -1,9 +1,27 @@
 name: Release
 
+# ------------------------------------------------------------------
+# Release invariant:
+#   Never push `v*` tags manually. This workflow creates and pushes
+#   the tag itself during the create-tag-and-release job; an external
+#   `git push origin v...` collides with the workflow's tag push and
+#   can leave the release in a half-created state.
+#
+#   For dry-run validation before a real release, dispatch this
+#   workflow with `dry_run: true` — all destructive side effects
+#   (crates.io publish, tag push, Docker registry push, GitHub
+#   release creation) are suppressed.
+# ------------------------------------------------------------------
+
 on:
   push:
     branches: [optimus_prime, master]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — build, test, and validate without publishing to crates.io, pushing tags, pushing Docker images, or creating a GH release.'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       is_release: ${{ steps.check.outputs.is_release }}
+      is_prerelease: ${{ steps.check.outputs.is_prerelease }}
+      is_dry_run: ${{ steps.check.outputs.is_dry_run }}
       version: ${{ steps.check.outputs.version }}
       version_major: ${{ steps.check.outputs.version_major }}
       version_minor: ${{ steps.check.outputs.version_minor }}
@@ -39,36 +59,50 @@ jobs:
         id: check
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Release must be triggered from master
-            if [ "${{ github.ref_name }}" != "master" ]; then
-              echo "::error::Release must be triggered from master branch, not ${{ github.ref_name }}"
+            RAW_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+            IS_PRERELEASE="false"
+            [[ "$RAW_VERSION" == *-* ]] && IS_PRERELEASE="true"
+
+            if [ "${{ github.ref_name }}" = "master" ]; then
+              : # always allowed (GA)
+            elif [ "${{ github.ref_name }}" = "optimus_prime" ] && [ "$IS_PRERELEASE" = "true" ]; then
+              : # allowed for prereleases only
+            else
+              echo "::error::Release must be from master (GA) or optimus_prime (prerelease only); got ${{ github.ref_name }} with version $RAW_VERSION"
               exit 1
             fi
 
-            VERSION="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
-            RAW="${VERSION#v}"
-            MAJOR=$(echo "$RAW" | cut -d. -f1)
-            MINOR="${MAJOR}.$(echo "$RAW" | cut -d. -f2)"
+            VERSION="v$RAW_VERSION"
+            MAJOR=$(echo "$RAW_VERSION" | cut -d. -f1)
+            MINOR="${MAJOR}.$(echo "$RAW_VERSION" | cut -d. -f2)"
 
             echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+            echo "is_dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "version_major=$MAJOR" >> "$GITHUB_OUTPUT"
             echo "version_minor=$MINOR" >> "$GITHUB_OUTPUT"
 
-            if git tag -l "$VERSION" | grep -q .; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::warning::Dry run mode: no crates.io publish, no tag push, no Docker push, no GH release"
+            fi
+
+            if [ "${{ inputs.dry_run }}" != "true" ] && git tag -l "$VERSION" | grep -q .; then
               echo "::error::Tag $VERSION already exists"
               exit 1
             fi
 
             LOCK_VERSION=$(awk '/^name = "trim-galore"/{found=1} found && /^version =/{print; exit}' Cargo.lock | sed 's/.*"\(.*\)"/\1/')
-            if [ "$LOCK_VERSION" != "$RAW" ]; then
-              echo "::error::Cargo.lock version ($LOCK_VERSION) does not match Cargo.toml version ($RAW)"
+            if [ "$LOCK_VERSION" != "$RAW_VERSION" ]; then
+              echo "::error::Cargo.lock version ($LOCK_VERSION) does not match Cargo.toml version ($RAW_VERSION)"
               exit 1
             fi
 
-            echo "Detected release: $VERSION"
+            echo "Detected release: $VERSION (prerelease=$IS_PRERELEASE, dry_run=${{ inputs.dry_run }})"
           else
             echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "is_dry_run=false" >> "$GITHUB_OUTPUT"
             echo "version=" >> "$GITHUB_OUTPUT"
             echo "Not a release run"
           fi
@@ -199,17 +233,19 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=ghcr.io/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ needs.check-release.outputs.is_dry_run != 'true' }}
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,scope=${{ matrix.platform }},mode=max
 
       - name: Export digest
+        if: needs.check-release.outputs.is_dry_run != 'true'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
+        if: needs.check-release.outputs.is_dry_run != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digests-${{ matrix.runner }}
@@ -229,6 +265,7 @@ jobs:
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
       - name: Download digests
+        if: needs.check-release.outputs.is_dry_run != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: digests-*
@@ -242,9 +279,10 @@ jobs:
           images: ghcr.io/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ needs.check-release.outputs.version }},enable=${{ needs.check-release.outputs.is_release == 'true' }}
-            type=raw,value=${{ needs.check-release.outputs.version_minor }},enable=${{ needs.check-release.outputs.is_release == 'true' }}
-            type=raw,value=${{ needs.check-release.outputs.version_major }},enable=${{ needs.check-release.outputs.is_release == 'true' }}
-            type=raw,value=latest,enable=${{ needs.check-release.outputs.is_release == 'true' }}
+            type=raw,value=${{ needs.check-release.outputs.version_minor }},enable=${{ needs.check-release.outputs.is_release == 'true' && needs.check-release.outputs.is_prerelease == 'false' }}
+            type=raw,value=${{ needs.check-release.outputs.version_major }},enable=${{ needs.check-release.outputs.is_release == 'true' && needs.check-release.outputs.is_prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.check-release.outputs.is_release == 'true' && needs.check-release.outputs.is_prerelease == 'false' }}
+            type=raw,value=beta,enable=${{ needs.check-release.outputs.is_release == 'true' && needs.check-release.outputs.is_prerelease == 'true' }}
             type=raw,value=dev
 
       - name: Set up Docker Buildx
@@ -258,18 +296,26 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest list and push
+        if: needs.check-release.outputs.is_dry_run != 'true'
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
+      - name: Dry-run manifest preview
+        if: needs.check-release.outputs.is_dry_run == 'true'
+        run: |
+          echo "Would create multi-arch manifest with tags:"
+          jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON"
+
   # ------------------------------------------------------------------
   # 3a. Smoke test the Docker image
   # ------------------------------------------------------------------
   smoke-test-docker:
     name: Smoke test Docker
-    needs: [docker-merge]
+    needs: [check-release, docker-merge]
+    if: needs.check-release.outputs.is_dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Lowercase image name
@@ -294,25 +340,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create tag
+        if: needs.check-release.outputs.is_dry_run != 'true'
         run: |
           git tag "${{ needs.check-release.outputs.version }}"
           git push origin "${{ needs.check-release.outputs.version }}"
 
       - name: Create release
+        if: needs.check-release.outputs.is_dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE_FLAG: ${{ needs.check-release.outputs.is_prerelease == 'true' && '--prerelease' || '' }}
         run: |
           gh release create "${{ needs.check-release.outputs.version }}" \
             --target "${{ github.sha }}" \
             --title "Trim Galore ${{ needs.check-release.outputs.version }}" \
-            --generate-notes
+            --generate-notes $PRERELEASE_FLAG
 
   # ------------------------------------------------------------------
   # 5. Upload binaries to the release
   # ------------------------------------------------------------------
   upload-binaries:
     name: Upload binaries
-    if: needs.check-release.outputs.is_release == 'true'
+    if: needs.check-release.outputs.is_release == 'true' && needs.check-release.outputs.is_dry_run != 'true'
     needs: [check-release, create-tag-and-release, build-binaries]
     runs-on: ubuntu-latest
     steps:
@@ -338,7 +387,7 @@ jobs:
   # ------------------------------------------------------------------
   publish-crate:
     name: Publish to crates.io
-    if: needs.check-release.outputs.is_release == 'true'
+    if: needs.check-release.outputs.is_release == 'true' && needs.check-release.outputs.is_dry_run != 'true'
     needs: [check-release, upload-binaries]
     runs-on: ubuntu-latest
     permissions:
