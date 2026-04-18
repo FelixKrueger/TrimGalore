@@ -16,8 +16,9 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **Quality trimming** — Phred-based trimming from the 3' end (BWA algorithm)
 - **Paired-end** — single-pass processing of both reads with automatic pair validation
 - **RRBS** — MspI end-repair artifact removal, directional and non-directional libraries
-- **NextSeq / 2-colour trimming** — poly-G removal for NovaSeq, NextSeq, and NovaSeq X
-- **Poly-A / poly-G trimming** — built-in tail trimming without external tools
+- **Poly-G trimming** — sequence-based removal of no-signal G-runs at the 3' end of Read 1 (and poly-C at the 5' end of Read 2) from 2-colour instruments (NovaSeq, NextSeq, NovaSeq X). Auto-detected from the data; opt-out with `--no_poly_g`
+- **NextSeq / 2-colour quality trim** — `--nextseq N` / `--2colour N` applies 2-colour-aware quality trimming (opt-in; replaces `-q`)
+- **Poly-A trimming** — built-in removal of poly-A tails without external tools
 - **Parallel compression** — `--cores N` for faster gzip I/O on multi-core systems
 - **FastQC integration** — optional post-trimming quality reports
 - **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
