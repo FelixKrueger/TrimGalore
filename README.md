@@ -80,7 +80,7 @@ The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.1.0
 
 ### Prebuilt binaries
 
-Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Intel, Apple Silicon) are available on the [Releases](https://github.com/FelixKrueger/TrimGalore/releases) page.
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon) are available on the [Releases](https://github.com/FelixKrueger/TrimGalore/releases) page. Intel Mac users: install via `cargo install trim-galore` (local build) or use the Docker `amd64` image.
 
 ## Usage
 
