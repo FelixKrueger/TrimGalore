@@ -166,8 +166,8 @@ pub struct Cli {
     pub fastqc_args: Option<String>,
 
     /// Number of worker threads for parallel processing (default: 1).
-    /// Values > 1 run trimming and gzip compression across multiple threads,
-    /// giving near-linear speedup on multi-core systems.
+    /// Values > 1 run trimming and gzip compression across multiple threads.
+    /// Near-linear speedup up to ~16 cores; diminishing returns beyond ~20.
     #[clap(short = 'j', long = "cores", default_value = "1")]
     pub cores: usize,
 

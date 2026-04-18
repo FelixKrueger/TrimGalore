@@ -92,7 +92,8 @@ trim_galore input.fastq.gz
 # Paired-end
 trim_galore --paired file_R1.fastq.gz file_R2.fastq.gz
 
-# With parallel compression (recommended for large files)
+# Parallel processing (recommended for large files)
+# Near-linear speedup up to ~16 cores; diminishing returns beyond ~20.
 trim_galore --cores 8 --paired file_R1.fastq.gz file_R2.fastq.gz
 
 # RRBS mode
