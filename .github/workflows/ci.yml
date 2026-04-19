@@ -77,9 +77,13 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-repro-
       - name: Build twice with same SOURCE_DATE_EPOCH, assert bit-identical
         run: |
-          SOURCE_DATE_EPOCH=1700000000 cargo clean && cargo build --release
+          # `export` (not `VAR=x cmd1 && cmd2`) — the shell-prefix form only
+          # scopes the var to cmd1, so `cargo build` after the `&&` would fall
+          # back to wall-clock time and break bit-identity.
+          export SOURCE_DATE_EPOCH=1700000000
+          cargo clean && cargo build --release
           sha256sum target/release/trim_galore | awk '{print $1}' > /tmp/sha_a
-          SOURCE_DATE_EPOCH=1700000000 cargo clean && cargo build --release
+          cargo clean && cargo build --release
           sha256sum target/release/trim_galore | awk '{print $1}' > /tmp/sha_b
           diff /tmp/sha_a /tmp/sha_b
       - name: Malformed SOURCE_DATE_EPOCH hard-fails build
