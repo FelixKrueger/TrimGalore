@@ -17,7 +17,10 @@
   (byte-equal path comparison; does not follow symlinks or canonicalise —
   matches v0.6.x behaviour).
 - Paired-end invocations pre-flight-check for output-path collisions across
-  pairs and abort before writing rather than silently overwriting.
+  pairs and abort before writing rather than silently overwriting. Comparison
+  is case-insensitive (ASCII) so filenames differing only in letter-case are
+  caught on APFS/NTFS (macOS/Windows default) as well as ext4 (Linux). Fixes
+  issue #216.
 
 
 ### Version 2.1.0 (Beta, Release on 18 Apr 2026)

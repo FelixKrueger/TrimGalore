@@ -197,6 +197,27 @@ jobs:
           # Fail-fast sanity: no fastq outputs should have been written.
           test -z "$(ls /tmp/op_coll/out/*.fq.gz 2>/dev/null)"
 
+      - name: Validate paired-end collision pre-flight catches case-only aliases (issue #216)
+        run: |
+          # Two pairs whose R1/R2 filenames differ ONLY in letter-case would
+          # alias the same physical file on APFS/NTFS and silently overwrite.
+          # The ASCII-case-folded hash key must catch this on any filesystem.
+          rm -rf /tmp/op_case; mkdir -p /tmp/op_case/out
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_case/Sample_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_case/Sample_R2.fastq.gz
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_case/SAMPLE_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_case/SAMPLE_R2.fastq.gz
+          set +e
+          ./target/release/trim_galore --paired -o /tmp/op_case/out \
+            /tmp/op_case/Sample_R1.fastq.gz /tmp/op_case/Sample_R2.fastq.gz \
+            /tmp/op_case/SAMPLE_R1.fastq.gz /tmp/op_case/SAMPLE_R2.fastq.gz 2>&1 | tee /tmp/case.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "Output path collision" /tmp/case.log
+          grep -q "case-insensitive match" /tmp/case.log
+          test -z "$(ls /tmp/op_case/out/*.fq.gz 2>/dev/null)"
+
       - name: Validate multi-pair with --cores 1 (sequential path)
         run: |
           rm -rf /tmp/op_multi_seq; mkdir -p /tmp/op_multi_seq

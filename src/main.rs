@@ -62,10 +62,17 @@ fn main() -> Result<()> {
 
     if cli.paired {
         // Pre-flight: detect output-path collisions across pairs before any I/O.
-        // Compares full PathBufs (not just file_name) so two pairs from different
-        // source dirs with `-o` unset do NOT falsely collide.
-        let mut out_paths: std::collections::HashSet<std::path::PathBuf> =
+        // Hash key is the full path, case-folded (ASCII lowercase) so that paths
+        // differing only in letter-case — which alias the same file on APFS/NTFS
+        // — collide here rather than silently overwriting on disk (issue #216).
+        // Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
+        // false-positive, but the penalty is a loud early error rather than
+        // silent data loss.
+        let mut out_paths: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        let norm = |p: &std::path::Path| -> String {
+            p.to_string_lossy().to_ascii_lowercase()
+        };
         for chunk in cli.input.chunks(2) {
             let (o1, o2) = naming::paired_end_output_names(
                 &chunk[0], &chunk[1], output_dir,
@@ -81,9 +88,10 @@ fn main() -> Result<()> {
                 candidates.push(u2);
             }
             for p in candidates {
-                if !out_paths.insert(p.clone()) {
+                if !out_paths.insert(norm(&p)) {
                     anyhow::bail!(
-                        "Output path collision: {} would be written twice. \
+                        "Output path collision: {} would be written twice \
+                         (case-insensitive match, for APFS/NTFS safety). \
                          Check that input pairs produce distinct output paths \
                          (e.g., different source directories or `--output-dir`).",
                         p.display()
