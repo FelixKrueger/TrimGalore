@@ -162,7 +162,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
         .enumerate()
         .map(|(i, &c)| (i, adapters[i].0, c))
         .collect();
-    sorted_counts.sort_by(|a, b| b.2.cmp(&a.2));
+    sorted_counts.sort_by_key(|entry| std::cmp::Reverse(entry.2));
 
     // Check if adapter trimming should be suppressed
     let suppressed = if let Some(threshold) = consider_already_trimmed {
