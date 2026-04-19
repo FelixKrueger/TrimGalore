@@ -4,7 +4,10 @@ on:
   push:
     branches: [master, dev, optimus_prime]
   pull_request:
-    branches: [master]
+    # Trigger on PRs targeting any active integration branch — `optimus_prime`
+    # is the active dev branch for the Oxidized Edition; `master` stays listed
+    # for the Perl release line.
+    branches: [master, optimus_prime]
   # Weekly cron so the `audit` job surfaces new RustSec advisories even during
   # quiet weeks (no pushes / PRs).  Non-audit jobs skip on schedule via the
   # per-job `if: github.event_name != 'schedule'` guard below.
