@@ -11,9 +11,9 @@
 //! core count, because the dominant cost (gzip compression, ~60% of runtime)
 //! is distributed across workers instead of funneled through one thread.
 
-use anyhow::{bail, Result};
-use flate2::write::GzEncoder;
+use anyhow::{Result, bail};
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Write;
@@ -55,6 +55,7 @@ struct PairedBatchResult {
 ///
 /// Total threads: N + 4. Each worker independently handles trim + compress,
 /// so the dominant bottleneck (gzip compression) scales linearly with N.
+#[allow(clippy::too_many_arguments)]
 pub fn run_paired_end_parallel(
     input_r1: &Path,
     input_r2: &Path,
@@ -92,8 +93,14 @@ pub fn run_paired_end_parallel(
             s.spawn(move || {
                 while let Ok(Some((seq, mut r1s, mut r2s))) = rx.recv() {
                     match process_paired_batch(
-                        seq, &mut r1s, &mut r2s, config, gzip,
-                        retain_unpaired, unpaired_length_r1, unpaired_length_r2,
+                        seq,
+                        &mut r1s,
+                        &mut r2s,
+                        config,
+                        gzip,
+                        retain_unpaired,
+                        unpaired_length_r1,
+                        unpaired_length_r2,
                     ) {
                         Ok(result) => {
                             if rtx.send(result).is_err() {
@@ -130,12 +137,10 @@ pub fn run_paired_end_parallel(
                         batch_r1.push(r1);
                         batch_r2.push(r2);
                         if batch_r1.len() >= BATCH_SIZE {
-                            let br1 = std::mem::replace(
-                                &mut batch_r1, Vec::with_capacity(BATCH_SIZE),
-                            );
-                            let br2 = std::mem::replace(
-                                &mut batch_r2, Vec::with_capacity(BATCH_SIZE),
-                            );
+                            let br1 =
+                                std::mem::replace(&mut batch_r1, Vec::with_capacity(BATCH_SIZE));
+                            let br2 =
+                                std::mem::replace(&mut batch_r2, Vec::with_capacity(BATCH_SIZE));
                             let idx = (seq as usize) % txs.len();
                             if txs[idx].send(Some((seq, br1, br2))).is_err() {
                                 break;
@@ -220,6 +225,7 @@ pub fn run_paired_end_parallel(
 }
 
 /// Process a batch of paired reads: trim, filter, compress into gzip blocks.
+#[allow(clippy::too_many_arguments)]
 fn process_paired_batch(
     batch_seq: u64,
     reads_r1: &mut [FastqRecord],
@@ -258,26 +264,51 @@ fn process_paired_batch(
             };
 
             process_pairs(
-                reads_r1, reads_r2, config,
-                &mut stats_r1, &mut stats_r2, &mut pair_stats,
-                &mut gz_r1, &mut gz_r2,
-                gz_up_r1.as_mut(), gz_up_r2.as_mut(),
-                unpaired_length_r1, unpaired_length_r2,
+                reads_r1,
+                reads_r2,
+                config,
+                &mut stats_r1,
+                &mut stats_r2,
+                &mut pair_stats,
+                &mut gz_r1,
+                &mut gz_r2,
+                gz_up_r1.as_mut(),
+                gz_up_r2.as_mut(),
+                unpaired_length_r1,
+                unpaired_length_r2,
             )?;
 
             gz_r1.finish()?;
             gz_r2.finish()?;
-            if let Some(gz) = gz_up_r1 { gz.finish()?; }
-            if let Some(gz) = gz_up_r2 { gz.finish()?; }
+            if let Some(gz) = gz_up_r1 {
+                gz.finish()?;
+            }
+            if let Some(gz) = gz_up_r2 {
+                gz.finish()?;
+            }
         }
     } else {
         process_pairs(
-            reads_r1, reads_r2, config,
-            &mut stats_r1, &mut stats_r2, &mut pair_stats,
-            &mut buf_r1, &mut buf_r2,
-            if retain_unpaired { Some(&mut buf_up_r1) } else { None },
-            if retain_unpaired { Some(&mut buf_up_r2) } else { None },
-            unpaired_length_r1, unpaired_length_r2,
+            reads_r1,
+            reads_r2,
+            config,
+            &mut stats_r1,
+            &mut stats_r2,
+            &mut pair_stats,
+            &mut buf_r1,
+            &mut buf_r2,
+            if retain_unpaired {
+                Some(&mut buf_up_r1)
+            } else {
+                None
+            },
+            if retain_unpaired {
+                Some(&mut buf_up_r2)
+            } else {
+                None
+            },
+            unpaired_length_r1,
+            unpaired_length_r2,
         )?;
     }
 
@@ -297,6 +328,7 @@ fn process_paired_batch(
 ///
 /// Generic over `W: Write` so it works with both `GzEncoder` (gzip output)
 /// and `Vec<u8>` (plain text output) without runtime dispatch.
+#[allow(clippy::too_many_arguments)]
 fn process_pairs<W: Write>(
     reads_r1: &mut [FastqRecord],
     reads_r2: &mut [FastqRecord],
@@ -325,10 +357,18 @@ fn process_pairs<W: Write>(
         stats_r2.bases_quality_trimmed += res_r2.quality_trimmed_bp;
         update_adapter_stats(stats_r1, &res_r1);
         update_adapter_stats(stats_r2, &res_r2);
-        if res_r1.rrbs_trimmed_3prime { stats_r1.rrbs_trimmed_3prime += 1; }
-        if res_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
-        if res_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
-        if res_r2.rrbs_trimmed_5prime { stats_r2.rrbs_trimmed_5prime += 1; }
+        if res_r1.rrbs_trimmed_3prime {
+            stats_r1.rrbs_trimmed_3prime += 1;
+        }
+        if res_r1.rrbs_trimmed_5prime {
+            stats_r1.rrbs_trimmed_5prime += 1;
+        }
+        if res_r2.rrbs_trimmed_3prime {
+            stats_r2.rrbs_trimmed_3prime += 1;
+        }
+        if res_r2.rrbs_trimmed_5prime {
+            stats_r2.rrbs_trimmed_5prime += 1;
+        }
         if config.rrbs && res_r2.clip_5prime_applied {
             stats_r2.rrbs_r2_clipped_5prime += 1;
         }
@@ -361,9 +401,13 @@ fn process_pairs<W: Write>(
         stats_r2.total_bp_after_trim += r2.seq.len();
 
         match filters::filter_paired_end(
-            r1, r2,
-            config.length_cutoff, config.max_length, config.max_n.clone(),
-            unpaired_length_r1, unpaired_length_r2,
+            r1,
+            r2,
+            config.length_cutoff,
+            config.max_length,
+            config.max_n.clone(),
+            unpaired_length_r1,
+            unpaired_length_r2,
         ) {
             PairFilterResult::Pass => {
                 stats_r1.total_bp_written += r1.seq.len();
@@ -443,7 +487,9 @@ pub fn run_single_end_parallel(
                 while let Ok(Some((seq, mut reads))) = rx.recv() {
                     match process_single_batch(seq, &mut reads, config, gzip) {
                         Ok(result) => {
-                            if rtx.send(result).is_err() { break; }
+                            if rtx.send(result).is_err() {
+                                break;
+                            }
                         }
                         Err(e) => {
                             eprintln!("Worker error: {}", e);
@@ -467,7 +513,9 @@ pub fn run_single_end_parallel(
                 if batch.len() >= BATCH_SIZE {
                     let full = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
                     let idx = (seq as usize) % txs.len();
-                    if txs[idx].send(Some((seq, full))).is_err() { break; }
+                    if txs[idx].send(Some((seq, full))).is_err() {
+                        break;
+                    }
                     seq += 1;
                 }
             }
@@ -549,8 +597,12 @@ fn process_reads<W: Write>(
         let result = trimmer::trim_read(record, config, false);
         stats.bases_quality_trimmed += result.quality_trimmed_bp;
         update_adapter_stats(stats, &result);
-        if result.rrbs_trimmed_3prime { stats.rrbs_trimmed_3prime += 1; }
-        if result.rrbs_trimmed_5prime { stats.rrbs_trimmed_5prime += 1; }
+        if result.rrbs_trimmed_3prime {
+            stats.rrbs_trimmed_3prime += 1;
+        }
+        if result.rrbs_trimmed_5prime {
+            stats.rrbs_trimmed_5prime += 1;
+        }
         if result.poly_a_trimmed > 0 {
             stats.poly_a_trimmed += 1;
             stats.poly_a_bases_trimmed += result.poly_a_trimmed;
@@ -569,7 +621,10 @@ fn process_reads<W: Write>(
         stats.total_bp_after_trim += record.seq.len();
 
         match filters::filter_single_end(
-            record, config.length_cutoff, config.max_length, config.max_n.clone(),
+            record,
+            config.length_cutoff,
+            config.max_length,
+            config.max_n.clone(),
         ) {
             FilterResult::Pass => {
                 stats.total_bp_written += record.seq.len();

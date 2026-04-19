@@ -182,23 +182,19 @@ mod tests {
     fn test_paired_n_filter_no_rescue() {
         let r1 = make_record("ACGTACGT");
         let r2 = make_record("NNNNNNNN"); // All N
-        let result = filter_paired_end(
-            &r1, &r2, 5, None, Some(MaxNFilter::Count(2)), 35, 35,
-        );
+        let result = filter_paired_end(&r1, &r2, 5, None, Some(MaxNFilter::Count(2)), 35, 35);
         assert_eq!(result, PairFilterResult::TooManyN);
     }
 
     #[test]
     fn test_paired_length_rescue() {
         let r1 = make_record("ACGTACGTACGT"); // 12bp, long enough
-        let r2 = make_record("AC");            // 2bp, too short
-        let result = filter_paired_end(
-            &r1, &r2, 5, None, None, 10, 10,
-        );
+        let r2 = make_record("AC"); // 2bp, too short
+        let result = filter_paired_end(&r1, &r2, 5, None, None, 10, 10);
         match result {
             PairFilterResult::TooShort { r1_ok, r2_ok } => {
-                assert!(r1_ok);   // R1 is rescuable (>= unpaired_length_r1)
-                assert!(!r2_ok);  // R2 is too short even for unpaired
+                assert!(r1_ok); // R1 is rescuable (>= unpaired_length_r1)
+                assert!(!r2_ok); // R2 is too short even for unpaired
             }
             _ => panic!("Expected TooShort"),
         }

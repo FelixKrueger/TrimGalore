@@ -21,11 +21,15 @@ pub fn single_end_output_name(
     basename: Option<&str>,
     gzip: bool,
 ) -> PathBuf {
-    let stem = basename.map(|b| b.to_string()).unwrap_or_else(|| {
-        strip_fastq_extensions(input)
-    });
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input));
 
-    let ext = if gzip { "_trimmed.fq.gz" } else { "_trimmed.fq" };
+    let ext = if gzip {
+        "_trimmed.fq.gz"
+    } else {
+        "_trimmed.fq"
+    };
     let filename = format!("{}{}", stem, ext);
 
     match output_dir {
@@ -161,11 +165,17 @@ mod tests {
 
     #[test]
     fn test_strip_fastq_extensions() {
-        assert_eq!(strip_fastq_extensions(Path::new("sample.fastq.gz")), "sample");
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample.fastq.gz")),
+            "sample"
+        );
         assert_eq!(strip_fastq_extensions(Path::new("sample.fq.gz")), "sample");
         assert_eq!(strip_fastq_extensions(Path::new("sample.fastq")), "sample");
         assert_eq!(strip_fastq_extensions(Path::new("sample.fq")), "sample");
-        assert_eq!(strip_fastq_extensions(Path::new("sample_R1.fq.gz")), "sample_R1");
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample_R1.fq.gz")),
+            "sample_R1"
+        );
     }
 
     #[test]
@@ -205,9 +215,15 @@ mod tests {
     fn test_json_report_name() {
         let input = Path::new("/data/sample.fq.gz");
         let out = json_report_name(input, None);
-        assert_eq!(out, PathBuf::from("/data/sample.fq.gz_trimming_report.json"));
+        assert_eq!(
+            out,
+            PathBuf::from("/data/sample.fq.gz_trimming_report.json")
+        );
 
         let out = json_report_name(input, Some(Path::new("/output")));
-        assert_eq!(out, PathBuf::from("/output/sample.fq.gz_trimming_report.json"));
+        assert_eq!(
+            out,
+            PathBuf::from("/output/sample.fq.gz_trimming_report.json")
+        );
     }
 }

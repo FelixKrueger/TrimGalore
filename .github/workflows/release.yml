@@ -11,6 +11,15 @@ name: Release
 #   workflow with `dry_run: true` — all destructive side effects
 #   (crates.io publish, tag push, Docker registry push, GitHub
 #   release creation) are suppressed.
+#
+# Lint-gating note:
+#   This workflow intentionally does NOT gate on the `lint` job from
+#   ci.yml.  Releases are cut from commits that have already passed
+#   ci.yml on the PR-merge path, so re-running lint here would duplicate
+#   work without adding signal.  A hotfix tag pushed outside the normal
+#   PR path could bypass the gate — mitigation is the social convention
+#   that all release-bearing merges go through a PR.  Revisit if the
+#   release automation rewires.
 # ------------------------------------------------------------------
 
 on:

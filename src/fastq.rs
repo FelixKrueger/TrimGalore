@@ -3,10 +3,10 @@
 //! Provides gzip-aware reading and writing of FASTQ records with 64KB buffers
 //! for efficient I/O throughput.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use gzp::deflate::Gzip;
 use gzp::par::compress::ParCompressBuilder;
 use std::fs::File;
@@ -162,11 +162,11 @@ impl FastqReader {
         let file = File::open(path)
             .with_context(|| format!("Failed to open input file: {}", path.display()))?;
 
-        let reader: Box<dyn BufRead> = if path
-            .extension()
-            .is_some_and(|ext| ext == "gz")
-        {
-            Box::new(BufReader::with_capacity(BUF_SIZE, MultiGzDecoder::new(file)))
+        let reader: Box<dyn BufRead> = if path.extension().is_some_and(|ext| ext == "gz") {
+            Box::new(BufReader::with_capacity(
+                BUF_SIZE,
+                MultiGzDecoder::new(file),
+            ))
         } else {
             Box::new(BufReader::with_capacity(BUF_SIZE, file))
         };
@@ -250,11 +250,11 @@ impl FastqReader {
         let file = File::open(path)
             .with_context(|| format!("Failed to open input file: {}", path.display()))?;
 
-        let reader: Box<dyn BufRead + Send> = if path
-            .extension()
-            .is_some_and(|ext| ext == "gz")
-        {
-            Box::new(BufReader::with_capacity(BUF_SIZE, MultiGzDecoder::new(file)))
+        let reader: Box<dyn BufRead + Send> = if path.extension().is_some_and(|ext| ext == "gz") {
+            Box::new(BufReader::with_capacity(
+                BUF_SIZE,
+                MultiGzDecoder::new(file),
+            ))
         } else {
             Box::new(BufReader::with_capacity(BUF_SIZE, file))
         };
@@ -331,7 +331,12 @@ impl FastqReader {
 
                 Ok(Some(FastqRecord { id, seq, qual }))
             }
-            ReaderSource::Threaded { rx, buffer, buf_pos, .. } => {
+            ReaderSource::Threaded {
+                rx,
+                buffer,
+                buf_pos,
+                ..
+            } => {
                 // Return next record from current batch buffer
                 if *buf_pos < buffer.len() {
                     let idx = *buf_pos;
@@ -339,7 +344,11 @@ impl FastqReader {
                     // Take the record out, replacing with a dummy to avoid clone
                     let record = std::mem::replace(
                         &mut buffer[idx],
-                        FastqRecord { id: String::new(), seq: String::new(), qual: String::new() },
+                        FastqRecord {
+                            id: String::new(),
+                            seq: String::new(),
+                            qual: String::new(),
+                        },
                     );
                     return Ok(Some(record));
                 }
@@ -354,7 +363,11 @@ impl FastqReader {
                             // Return first record from new batch
                             let record = std::mem::replace(
                                 &mut buffer[0],
-                                FastqRecord { id: String::new(), seq: String::new(), qual: String::new() },
+                                FastqRecord {
+                                    id: String::new(),
+                                    seq: String::new(),
+                                    qual: String::new(),
+                                },
                             );
                             Ok(Some(record))
                         }
@@ -416,8 +429,9 @@ impl FastqWriter {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             if !parent.exists() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("Failed to create output directory: {}", parent.display()))?;
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("Failed to create output directory: {}", parent.display())
+                })?;
             }
         }
 
@@ -430,7 +444,12 @@ impl FastqWriter {
                 Box::new(
                     ParCompressBuilder::<Gzip>::new()
                         .num_threads(cores)
-                        .with_context(|| format!("Failed to create parallel compressor with {} threads", cores))?
+                        .with_context(|| {
+                            format!(
+                                "Failed to create parallel compressor with {} threads",
+                                cores
+                            )
+                        })?
                         .compression_level(Compression::new(6))
                         .from_writer(file),
                 )

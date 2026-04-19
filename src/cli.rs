@@ -8,7 +8,15 @@ use std::path::PathBuf;
 /// Drop-in replacement for Trim Galore, rewritten in Rust. Produces byte-identical
 /// output, compatible with MultiQC and existing pipelines.
 #[derive(Parser, Debug)]
-#[clap(name = "trim_galore", version = concat!(env!("CARGO_PKG_VERSION"), " (Oxidized Edition)"), about)]
+#[clap(
+    name = "trim_galore",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (Oxidized Edition)"),
+    long_version = concat!(
+        env!("CARGO_PKG_VERSION"), " (Oxidized Edition)\n",
+        env!("VERSION_BODY")
+    ),
+    about
+)]
 pub struct Cli {
     /// Input FASTQ file(s). For paired-end, provide two files.
     #[clap(required = true)]
@@ -184,8 +192,12 @@ pub struct Cli {
     /// called as high-quality G. By default, poly-G trimming is auto-detected
     /// from the data. Use this flag to force-enable it.
     /// This is independent from --nextseq (quality-based G-trimming).
-    #[clap(long = "poly_g", alias = "poly-g", alias = "polyG",
-           conflicts_with = "no_poly_g")]
+    #[clap(
+        long = "poly_g",
+        alias = "poly-g",
+        alias = "polyG",
+        conflicts_with = "no_poly_g"
+    )]
     pub poly_g: bool,
 
     /// Disable poly-G auto-detection and trimming.
@@ -205,7 +217,6 @@ pub struct Cli {
     pub discard_untrimmed: bool,
 
     // --- Specialty modes (run-and-exit, bypass normal trimming) ---
-
     /// Hard-trim to keep only the first N bases from the 5' end.
     /// Bypasses adapter/quality trimming entirely.
     #[clap(long = "hardtrim5")]
@@ -238,7 +249,6 @@ pub struct Cli {
     pub demux: Option<PathBuf>,
 
     // --- Deprecated flags (accepted for backwards compatibility, no-ops) ---
-
     /// [Deprecated] Output is gzipped by default in v2.0. Use --dont_gzip to disable.
     #[clap(long = "gzip", hide = true)]
     pub gzip: bool,
@@ -306,7 +316,10 @@ impl Cli {
         }
 
         if self.error_rate < 0.0 || self.error_rate > 1.0 {
-            anyhow::bail!("Error rate must be between 0 and 1, got {}", self.error_rate);
+            anyhow::bail!(
+                "Error rate must be between 0 and 1, got {}",
+                self.error_rate
+            );
         }
 
         if self.stringency == 0 {
@@ -380,20 +393,30 @@ impl Cli {
 
         // Deprecation warnings for Perl-era flags
         if self.gzip {
-            eprintln!("WARNING: --gzip is deprecated in Trim Galore v2.0. Output is gzipped by default. Use --dont_gzip to disable. Ignoring.");
+            eprintln!(
+                "WARNING: --gzip is deprecated in Trim Galore v2.0. Output is gzipped by default. Use --dont_gzip to disable. Ignoring."
+            );
         }
         if self.path_to_cutadapt.is_some() {
-            eprintln!("WARNING: --path_to_cutadapt is deprecated in Trim Galore v2.0 (no external Cutadapt needed). Ignoring.");
+            eprintln!(
+                "WARNING: --path_to_cutadapt is deprecated in Trim Galore v2.0 (no external Cutadapt needed). Ignoring."
+            );
         }
         if self.cutadapt_args.is_some() {
-            eprintln!("WARNING: --cutadapt_args is deprecated in Trim Galore v2.0 (no external Cutadapt needed). Ignoring.");
+            eprintln!(
+                "WARNING: --cutadapt_args is deprecated in Trim Galore v2.0 (no external Cutadapt needed). Ignoring."
+            );
             eprintln!("         Note: --discard-untrimmed is now a native flag.");
         }
         if self.suppress_warn {
-            eprintln!("WARNING: --suppress_warn is deprecated in Trim Galore v2.0 (no Cutadapt subprocess). Ignoring.");
+            eprintln!(
+                "WARNING: --suppress_warn is deprecated in Trim Galore v2.0 (no Cutadapt subprocess). Ignoring."
+            );
         }
         if self.keep {
-            eprintln!("WARNING: --keep is not yet supported in Trim Galore v2.0. RRBS reads below length cutoff will be removed. Ignoring.");
+            eprintln!(
+                "WARNING: --keep is not yet supported in Trim Galore v2.0. RRBS reads below length cutoff will be removed. Ignoring."
+            );
         }
 
         Ok(())

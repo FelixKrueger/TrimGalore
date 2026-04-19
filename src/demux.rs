@@ -7,7 +7,7 @@
 //!
 //! Single-end only (matches TrimGalore behavior).
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -47,7 +47,9 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
         if parts.len() != 2 {
             bail!(
                 "Barcode file {} line {}: expected tab-separated 'sample_name\\tbarcode_sequence', got: '{}'",
-                path.display(), line_num + 1, line
+                path.display(),
+                line_num + 1,
+                line
             );
         }
 
@@ -55,10 +57,15 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
         let barcode = parts[1].to_string();
 
         // Validate barcode characters
-        if !barcode.bytes().all(|b| matches!(b, b'A' | b'C' | b'T' | b'G' | b'N')) {
+        if !barcode
+            .bytes()
+            .all(|b| matches!(b, b'A' | b'C' | b'T' | b'G' | b'N'))
+        {
             bail!(
                 "Barcode file {} line {}: barcode must contain only A, C, T, G, N. Got: '{}'",
-                path.display(), line_num + 1, barcode
+                path.display(),
+                line_num + 1,
+                barcode
             );
         }
 
@@ -68,21 +75,31 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
             Some(len) if barcode.len() != len => {
                 bail!(
                     "Barcode file {} line {}: barcode '{}' has length {} but expected {} (all barcodes must be the same length)",
-                    path.display(), line_num + 1, barcode, barcode.len(), len
+                    path.display(),
+                    line_num + 1,
+                    barcode,
+                    barcode.len(),
+                    len
                 );
             }
             _ => {}
         }
 
         eprintln!("Testing:\t{}\t{}", sample_name, barcode);
-        entries.push(BarcodeEntry { barcode, sample_name });
+        entries.push(BarcodeEntry {
+            barcode,
+            sample_name,
+        });
     }
 
     if entries.is_empty() {
         bail!("Barcode file {} is empty", path.display());
     }
 
-    eprintln!("Demultiplexing file {} seems to be in the correct format. Proceeding...", path.display());
+    eprintln!(
+        "Demultiplexing file {} seems to be in the correct format. Proceeding...",
+        path.display()
+    );
     Ok(entries)
 }
 
@@ -121,9 +138,12 @@ pub fn demultiplex(
         base_name = base_name[..base_name.len() - 3].to_string();
     }
 
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| trimmed_file.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = output_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| {
+        trimmed_file
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    });
 
     // Open per-sample output writers + NoCode
     let mut writers: HashMap<String, FastqWriter> = HashMap::new();
@@ -141,10 +161,8 @@ pub fn demultiplex(
     let mut nocode_writer = FastqWriter::create(&nocode_path, gzip, cores)?;
 
     // Per-barcode counts
-    let mut counts: HashMap<String, usize> = barcodes
-        .iter()
-        .map(|e| (e.barcode.clone(), 0))
-        .collect();
+    let mut counts: HashMap<String, usize> =
+        barcodes.iter().map(|e| (e.barcode.clone(), 0)).collect();
     counts.insert("NoCode".to_string(), 0);
 
     // Process the trimmed file
@@ -229,7 +247,7 @@ pub fn demultiplex(
         writeln!(w, "{}\t{}\t{}", barcode, sample, count)?;
     }
     writeln!(w, "======================")?;
-    write!(w, "      ¯\\_(ツ)_/¯\n")?;
+    writeln!(w, "      ¯\\_(ツ)_/¯")?;
     w.flush()?;
 
     Ok(())
