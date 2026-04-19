@@ -100,29 +100,29 @@ fn main() -> Result<()> {
             }
         }
 
-        // R1 of pair 0 was already sanity-checked at line 28. Check R2 of pair 0
-        // once here so adapter detection starts safely; subsequent pairs are
-        // checked inside the loop.
-        FastqReader::sanity_check(&cli.input[1])?;
-
-        // Adapter detection runs ONCE on input[0] (matches Perl at
-        // trim_galore:2455 — autodetect is called exactly once per invocation).
-        // The detected adapter, poly-G setting, and length cutoff are reused
-        // for every pair. Note: the single-end loop below intentionally calls
-        // `setup_trimming` per file because single-end files are independent
-        // runs, whereas paired-end is treated as one logical batch.
-        let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &cli.input[0])?;
-
+        // Adapter detection runs PER PAIR — intentional deviation from Perl
+        // v0.6.x (which detected once on $ARGV[0] at trim_galore:2455). Shell-
+        // glob invocations across mixed library types or 2-colour/4-colour
+        // chemistries are common enough that per-pair detection is the safer
+        // default. The header peek is microseconds per sample, so the cost is
+        // negligible on I/O-bound workloads. Symmetrical with the single-end
+        // loop below, which has always detected per file.
         let total_pairs = cli.input.len() / 2;
         for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
             if total_pairs > 1 {
                 eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
             }
-            // Pair 0 was already sanity-checked above (R1 at line 28, R2 just above).
+            // R1 of pair 0 was already sanity-checked at line 28; skip that.
+            // R2 of pair 0 and both files of every later pair need checking
+            // before setup_trimming reads the header.
             if pair_idx > 0 {
                 FastqReader::sanity_check(&chunk[0])?;
-                FastqReader::sanity_check(&chunk[1])?;
             }
+            FastqReader::sanity_check(&chunk[1])?;
+
+            let (_label, adapters_r1, adapters_r2, config) =
+                setup_trimming(&cli, &chunk[0])?;
+
             run_paired(
                 &cli, &chunk[0], &chunk[1],
                 &config, gzip, output_dir,

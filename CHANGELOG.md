@@ -8,11 +8,12 @@
   consecutive R1/R2 pairs, restoring v0.6.x Perl behaviour. Beta 1 rejected
   more than 2 files with "Paired-end mode requires exactly 2 input files".
   Common shell-glob invocations like `trim_galore --paired *fastq.gz` now
-  work again. Adapter auto-detection and poly-G scanning still run once on
-  the first input file and are applied to all pairs (matches Perl at
-  `trim_galore:2455`). Users mixing library types or 2-colour/4-colour
-  chemistries within a single invocation should run them as separate
-  `trim_galore` calls.
+  work again. Adapter auto-detection and poly-G scanning run **per pair**
+  (intentional deviation from Perl v0.6.x, which detected once on the first
+  input file). This is safer for shell-glob invocations that mix library
+  types or 2-colour/4-colour chemistries across samples, at negligible cost
+  (header-only peek, dominated by FASTQ I/O). The paired-end loop is now
+  symmetrical with the single-end loop, which has always detected per file.
 - Paired-end validation catches when R1 and R2 are the exact same filename
   (byte-equal path comparison; does not follow symlinks or canonicalise —
   matches v0.6.x behaviour).

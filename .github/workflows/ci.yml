@@ -123,8 +123,9 @@ jobs:
             test -f /tmp/op_multi/${sample}_R1.fastq.gz_trimming_report.json
             test -f /tmp/op_multi/${sample}_R2.fastq.gz_trimming_report.json
           done
-          # Adapter auto-detection should run exactly once across the invocation
-          # (on pair A / A_R1), then the detected adapter is reused for B and C.
+          # Adapter auto-detection runs PER PAIR (intentional deviation from
+          # Perl v0.6.x for safer handling of mixed library types across a
+          # shell-glob invocation). 2 pairs → 2 detection log lines.
           rm -rf /tmp/op_multi2; mkdir -p /tmp/op_multi2
           for sample in A B; do
             cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi2/${sample}_R1.fastq.gz
@@ -133,7 +134,7 @@ jobs:
           ./target/release/trim_galore --paired -o /tmp/op_multi2 \
             /tmp/op_multi2/A_R1.fastq.gz /tmp/op_multi2/A_R2.fastq.gz \
             /tmp/op_multi2/B_R1.fastq.gz /tmp/op_multi2/B_R2.fastq.gz 2>&1 | tee /tmp/detect.log
-          test "$(grep -c 'Auto-detecting adapter type' /tmp/detect.log)" = "1"
+          test "$(grep -c 'Auto-detecting adapter type' /tmp/detect.log)" = "2"
 
       - name: Validate paired-end rejects odd-count input
         run: |
