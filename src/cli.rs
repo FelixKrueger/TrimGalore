@@ -271,16 +271,37 @@ pub struct Cli {
 impl Cli {
     /// Validate CLI arguments after parsing.
     pub fn validate(&self) -> anyhow::Result<()> {
-        if self.paired && self.input.len() != 2 {
-            anyhow::bail!(
-                "Paired-end mode requires exactly 2 input files, got {}",
-                self.input.len()
-            );
+        if self.paired {
+            // `#[clap(required = true)]` on `input` guarantees at least one file
+            // reaches validate(), so no is_empty() check is needed.
+            if self.input.len() % 2 != 0 {
+                anyhow::bail!(
+                    "Paired-end mode requires an even number of input files (R1/R2 pairs), got {}",
+                    self.input.len()
+                );
+            }
+            // Catch common user error: same file passed twice. Matches Perl's
+            // byte-equality check at trim_galore:3208 (`$ARGV[$i] eq $ARGV[$i+1]`).
+            // Does not follow symlinks or canonicalise.
+            for chunk in self.input.chunks(2) {
+                if chunk[0] == chunk[1] {
+                    anyhow::bail!(
+                        "Read 1 and Read 2 appear to be the same file: {}. \
+                         Did you mean to pass distinct R1 and R2 files?",
+                        chunk[0].display()
+                    );
+                }
+            }
         }
 
         if !self.paired && self.input.len() > 1 && self.basename.is_some() {
             anyhow::bail!(
                 "--basename cannot be used with multiple input files (ambiguous output naming)"
+            );
+        }
+        if self.paired && self.input.len() > 2 && self.basename.is_some() {
+            anyhow::bail!(
+                "--basename cannot be used with multiple paired-end pairs (ambiguous output naming)"
             );
         }
 

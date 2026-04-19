@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -61,9 +61,72 @@ fn main() -> Result<()> {
     }
 
     if cli.paired {
+        // Pre-flight: detect output-path collisions across pairs before any I/O.
+        // Compares full PathBufs (not just file_name) so two pairs from different
+        // source dirs with `-o` unset do NOT falsely collide.
+        let mut out_paths: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
+        for chunk in cli.input.chunks(2) {
+            let (o1, o2) = naming::paired_end_output_names(
+                &chunk[0], &chunk[1], output_dir,
+                cli.basename.as_deref(), gzip,
+            );
+            let mut candidates = vec![o1, o2];
+            if cli.retain_unpaired {
+                let (u1, u2) = naming::unpaired_output_names(
+                    &chunk[0], &chunk[1], output_dir,
+                    cli.basename.as_deref(), gzip,
+                );
+                candidates.push(u1);
+                candidates.push(u2);
+            }
+            for p in candidates {
+                if !out_paths.insert(p.clone()) {
+                    anyhow::bail!(
+                        "Output path collision: {} would be written twice. \
+                         Check that input pairs produce distinct output paths \
+                         (e.g., different source directories or `--output-dir`).",
+                        p.display()
+                    );
+                }
+            }
+        }
+
+        // R1 of pair 0 was already sanity-checked at line 28. Check R2 of pair 0
+        // once here so adapter detection starts safely; subsequent pairs are
+        // checked inside the loop.
         FastqReader::sanity_check(&cli.input[1])?;
+
+        // Adapter detection runs ONCE on input[0] (matches Perl at
+        // trim_galore:2455 — autodetect is called exactly once per invocation).
+        // The detected adapter, poly-G setting, and length cutoff are reused
+        // for every pair. Note: the single-end loop below intentionally calls
+        // `setup_trimming` per file because single-end files are independent
+        // runs, whereas paired-end is treated as one logical batch.
         let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &cli.input[0])?;
-        run_paired(&cli, &config, gzip, output_dir, cli.basename.as_deref(), &adapters_r1, &adapters_r2)?;
+
+        let total_pairs = cli.input.len() / 2;
+        for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
+            if total_pairs > 1 {
+                eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
+            }
+            // Pair 0 was already sanity-checked above (R1 at line 28, R2 just above).
+            if pair_idx > 0 {
+                FastqReader::sanity_check(&chunk[0])?;
+                FastqReader::sanity_check(&chunk[1])?;
+            }
+            run_paired(
+                &cli, &chunk[0], &chunk[1],
+                &config, gzip, output_dir,
+                cli.basename.as_deref(),
+                &adapters_r1, &adapters_r2,
+            )
+            .with_context(|| format!(
+                "processing pair {} of {} (R1={}, R2={})",
+                pair_idx + 1, total_pairs,
+                chunk[0].display(), chunk[1].display()
+            ))?;
+        }
     } else {
         // Single-end: process each input file independently
         // (matches Perl TrimGalore behavior of looping over all positional args)
@@ -423,8 +486,11 @@ fn run_single_file(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_paired(
     cli: &Cli,
+    input_r1: &Path,
+    input_r2: &Path,
     config: &trimmer::TrimConfig,
     gzip: bool,
     output_dir: Option<&Path>,
@@ -432,16 +498,10 @@ fn run_paired(
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
-    let input_r1 = &cli.input[0];
-    let input_r2 = &cli.input[1];
-
-    // Sanity check R2 as well
-    FastqReader::sanity_check(input_r2)?;
-
     let (output_r1, output_r2) =
         naming::paired_end_output_names(input_r1, input_r2, output_dir, basename, gzip);
 
-    eprintln!("Trimming (paired-end, single-pass):");
+    eprintln!("Trimming (paired-end):");
     eprintln!("  R1: {}", input_r1.display());
     eprintln!("  R2: {}", input_r2.display());
     eprintln!("  Output R1: {}", output_r1.display());

@@ -103,6 +103,113 @@ jobs:
             [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
           done
 
+      - name: Validate multi-pair paired-end (regression guard — beta-1 reporter scenario)
+        run: |
+          rm -rf /tmp/op_multi; mkdir -p /tmp/op_multi
+          # 3 pairs = 6 files, the scenario that triggered the beta-1 bug.
+          for sample in A B C; do
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_multi/${sample}_R2.fastq.gz
+          done
+          ./target/release/trim_galore --paired -j 4 -o /tmp/op_multi \
+            /tmp/op_multi/A_R1.fastq.gz /tmp/op_multi/A_R2.fastq.gz \
+            /tmp/op_multi/B_R1.fastq.gz /tmp/op_multi/B_R2.fastq.gz \
+            /tmp/op_multi/C_R1.fastq.gz /tmp/op_multi/C_R2.fastq.gz
+          for sample in A B C; do
+            test -f /tmp/op_multi/${sample}_R1_val_1.fq.gz
+            test -f /tmp/op_multi/${sample}_R2_val_2.fq.gz
+            test -f /tmp/op_multi/${sample}_R1.fastq.gz_trimming_report.txt
+            test -f /tmp/op_multi/${sample}_R2.fastq.gz_trimming_report.txt
+            test -f /tmp/op_multi/${sample}_R1.fastq.gz_trimming_report.json
+            test -f /tmp/op_multi/${sample}_R2.fastq.gz_trimming_report.json
+          done
+          # Adapter auto-detection should run exactly once across the invocation
+          # (on pair A / A_R1), then the detected adapter is reused for B and C.
+          rm -rf /tmp/op_multi2; mkdir -p /tmp/op_multi2
+          for sample in A B; do
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi2/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_multi2/${sample}_R2.fastq.gz
+          done
+          ./target/release/trim_galore --paired -o /tmp/op_multi2 \
+            /tmp/op_multi2/A_R1.fastq.gz /tmp/op_multi2/A_R2.fastq.gz \
+            /tmp/op_multi2/B_R1.fastq.gz /tmp/op_multi2/B_R2.fastq.gz 2>&1 | tee /tmp/detect.log
+          test "$(grep -c 'Auto-detecting adapter type' /tmp/detect.log)" = "1"
+
+      - name: Validate paired-end rejects odd-count input
+        run: |
+          set +e
+          ./target/release/trim_galore --paired test_files/BS-seq_10K_R1.fastq.gz 2>&1 | tee /tmp/odd.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "even number of input files" /tmp/odd.log
+
+      - name: Validate paired-end rejects R1==R2
+        run: |
+          set +e
+          ./target/release/trim_galore --paired \
+            test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R1.fastq.gz 2>&1 | tee /tmp/same.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "appear to be the same file" /tmp/same.log
+
+      - name: Validate --basename rejected with multi-pair
+        run: |
+          set +e
+          ./target/release/trim_galore --paired --basename foo \
+            test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz \
+            test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz 2>&1 | tee /tmp/bn.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "basename cannot be used with multiple" /tmp/bn.log
+
+      - name: Validate --clock still requires exactly 2 inputs (no multi-pair widening)
+        run: |
+          set +e
+          ./target/release/trim_galore --clock \
+            test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz \
+            test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz 2>&1 | tee /tmp/clock.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "clock requires exactly 2" /tmp/clock.log
+
+      - name: Validate paired-end output-path collision pre-flight
+        run: |
+          # Two pairs with the same R1/R2 filename but different source dirs +
+          # `-o /shared` would produce colliding outputs. Expect fail-fast
+          # before any output files are written.
+          rm -rf /tmp/op_coll; mkdir -p /tmp/op_coll/sub1 /tmp/op_coll/sub2 /tmp/op_coll/out
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_coll/sub1/sample_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_coll/sub1/sample_R2.fastq.gz
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_coll/sub2/sample_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_coll/sub2/sample_R2.fastq.gz
+          set +e
+          ./target/release/trim_galore --paired -o /tmp/op_coll/out \
+            /tmp/op_coll/sub1/sample_R1.fastq.gz /tmp/op_coll/sub1/sample_R2.fastq.gz \
+            /tmp/op_coll/sub2/sample_R1.fastq.gz /tmp/op_coll/sub2/sample_R2.fastq.gz 2>&1 | tee /tmp/coll.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "Output path collision" /tmp/coll.log
+          # Fail-fast sanity: no fastq outputs should have been written.
+          test -z "$(ls /tmp/op_coll/out/*.fq.gz 2>/dev/null)"
+
+      - name: Validate multi-pair with --cores 1 (sequential path)
+        run: |
+          rm -rf /tmp/op_multi_seq; mkdir -p /tmp/op_multi_seq
+          for sample in A B; do
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi_seq/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_multi_seq/${sample}_R2.fastq.gz
+          done
+          ./target/release/trim_galore --paired --cores 1 -o /tmp/op_multi_seq \
+            /tmp/op_multi_seq/A_R1.fastq.gz /tmp/op_multi_seq/A_R2.fastq.gz \
+            /tmp/op_multi_seq/B_R1.fastq.gz /tmp/op_multi_seq/B_R2.fastq.gz
+          test -f /tmp/op_multi_seq/A_R1_val_1.fq.gz
+          test -f /tmp/op_multi_seq/B_R2_val_2.fq.gz
+
       - name: Validate hardtrim5
         run: |
           rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op

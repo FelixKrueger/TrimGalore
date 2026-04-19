@@ -1,11 +1,30 @@
 # Trim Galore Changelog
 
 
-### Version 2.1.0 (Beta, Release on DD Mon 2026)
+### Version 2.1.0-beta.2 (Pending)
+
+#### Bug fixes (since v2.1.0-beta.1)
+- `--paired` now accepts any even number of input files and processes them as
+  consecutive R1/R2 pairs, restoring v0.6.x Perl behaviour. Beta 1 rejected
+  more than 2 files with "Paired-end mode requires exactly 2 input files".
+  Common shell-glob invocations like `trim_galore --paired *fastq.gz` now
+  work again. Adapter auto-detection and poly-G scanning still run once on
+  the first input file and are applied to all pairs (matches Perl at
+  `trim_galore:2455`). Users mixing library types or 2-colour/4-colour
+  chemistries within a single invocation should run them as separate
+  `trim_galore` calls.
+- Paired-end validation catches when R1 and R2 are the exact same filename
+  (byte-equal path comparison; does not follow symlinks or canonicalise —
+  matches v0.6.x behaviour).
+- Paired-end invocations pre-flight-check for output-path collisions across
+  pairs and abort before writing rather than silently overwriting.
+
+
+### Version 2.1.0 (Beta, Release on 18 Apr 2026)
 
 **Major release — Rust rewrite (Oxidized Edition).** Single-binary drop-in replacement for the Perl Trim Galore. Same CLI, same outputs, plus a JSON MultiQC-native report and multi-adapter support. Built from `src/main.rs` (Cargo crate at repo root); the historical Perl script will be preserved at `legacy/trim_galore` once v2.1.0 GA ships (retained in the `0.6.11` tag during the beta window).
 
-**Note on v2.0.0:** v2.0.0 was a pre-release cut inadvertently published to crates.io on DD Mon 2026. It will be yanked when v2.1.0 GA ships. Users should install v2.1.0 or later.
+**Note on v2.0.0:** v2.0.0 was a pre-release cut inadvertently published to crates.io on 13 Apr 2026. It will be yanked when v2.1.0 GA ships. Users should install v2.1.0 or later.
 
 #### Features (since v2.0.0)
 - Multi-adapter support for both R1 and R2 via repeated `-a`/`-a2` flags and `file:adapters.fa` (c36b7fe)
