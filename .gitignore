@@ -3,3 +3,10 @@
 /plans/
 /legacy/
 Thumbs.db
+
+# Claude Code agent workdirs + local settings
+.claude/
+
+# nf-test working directory + log
+.nf-test/
+.nf-test.log
