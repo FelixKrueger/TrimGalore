@@ -300,8 +300,11 @@ jobs:
           set -e
           test $rc -ne 0
           grep -q "Output path collision" /tmp/coll.log
-          # Fail-fast sanity: no fastq outputs should have been written.
-          test -z "$(ls /tmp/op_coll/out/*.fq.gz 2>/dev/null)"
+          # Fail-fast sanity: NOTHING should be written — covers trimming
+          # reports (*.txt, *.json) and FastQC output too, not just *.fq.gz.
+          # Drops the glob so a future report-naming change can't silently
+          # mask a regression here.
+          test -z "$(ls -A /tmp/op_coll/out 2>/dev/null)"
 
       - name: Validate paired-end collision pre-flight catches case-only aliases (issue #216)
         run: |
@@ -325,7 +328,8 @@ jobs:
           # to "case-insensitive, for APFS/NTFS safety" when it switched the
           # error to name both colliding paths. Tighten grep to the new form.
           grep -q "case-insensitive, for APFS/NTFS safety" /tmp/case.log
-          test -z "$(ls /tmp/op_case/out/*.fq.gz 2>/dev/null)"
+          # Fail-fast sanity: NOTHING should be written — covers reports too.
+          test -z "$(ls -A /tmp/op_case/out 2>/dev/null)"
 
       - name: Validate multi-pair with --cores 1 (sequential path)
         run: |
@@ -339,6 +343,57 @@ jobs:
             /tmp/op_multi_seq/B_R1.fastq.gz /tmp/op_multi_seq/B_R2.fastq.gz
           test -f /tmp/op_multi_seq/A_R1_val_1.fq.gz
           test -f /tmp/op_multi_seq/B_R2_val_2.fq.gz
+
+      - name: Validate --retain_unpaired × multi-pair produces per-pair unpaired files
+        run: |
+          # Exercises the retain_unpaired branch of the collision pre-flight
+          # (src/main.rs:101–111) plus per-pair unpaired naming. Uses
+          # `--length 80` so the trimming threshold is strict enough to
+          # force some reads into the unpaired bucket on BS-seq 10K fixtures.
+          rm -rf /tmp/op_retain; mkdir -p /tmp/op_retain
+          for sample in A B; do
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_retain/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_retain/${sample}_R2.fastq.gz
+          done
+          ./target/release/trim_galore --paired --retain_unpaired --length 80 \
+            -o /tmp/op_retain \
+            /tmp/op_retain/A_R1.fastq.gz /tmp/op_retain/A_R2.fastq.gz \
+            /tmp/op_retain/B_R1.fastq.gz /tmp/op_retain/B_R2.fastq.gz
+          # Each pair must produce its own val_1 / val_2 AND its own
+          # unpaired_1 / unpaired_2 file — no sharing, no overwrites.
+          for sample in A B; do
+            test -f /tmp/op_retain/${sample}_R1_val_1.fq.gz
+            test -f /tmp/op_retain/${sample}_R2_val_2.fq.gz
+            test -f /tmp/op_retain/${sample}_R1_unpaired_1.fq.gz
+            test -f /tmp/op_retain/${sample}_R2_unpaired_2.fq.gz
+          done
+
+      - name: Validate missing input mid-list fails fast
+        run: |
+          # If input N in a multi-pair list does not exist, `Cli::validate()`
+          # must fail before any pair starts processing — no partial outputs.
+          # Here pair B's R1 is intentionally not created.
+          rm -rf /tmp/op_missing; mkdir -p /tmp/op_missing
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_missing/A_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_missing/A_R2.fastq.gz
+          # B_R1 deliberately absent
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_missing/B_R2.fastq.gz
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_missing/C_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_missing/C_R2.fastq.gz
+          set +e
+          ./target/release/trim_galore --paired -o /tmp/op_missing \
+            /tmp/op_missing/A_R1.fastq.gz /tmp/op_missing/A_R2.fastq.gz \
+            /tmp/op_missing/B_R1.fastq.gz /tmp/op_missing/B_R2.fastq.gz \
+            /tmp/op_missing/C_R1.fastq.gz /tmp/op_missing/C_R2.fastq.gz 2>&1 | tee /tmp/missing.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "Input file not found" /tmp/missing.log
+          # Critical fail-fast assertion: pair A must NOT have been processed
+          # before validation caught the missing B_R1.
+          test ! -f /tmp/op_missing/A_R1_val_1.fq.gz
+          test ! -f /tmp/op_missing/A_R2_val_2.fq.gz
+          test ! -f /tmp/op_missing/C_R1_val_1.fq.gz
 
       - name: Validate hardtrim5
         run: |
