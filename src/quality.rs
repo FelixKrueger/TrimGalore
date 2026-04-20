@@ -132,8 +132,8 @@ pub fn homopolymer_trim_index(sequence: &[u8], target_3prime: u8, revcomp: bool)
     if revcomp {
         // Scan from 5' end for complement head (e.g. poly-T for poly-A, poly-C for poly-G)
         let mut best_index: usize = 0;
-        for i in 0..n {
-            if sequence[i] == target {
+        for (i, &base) in sequence.iter().enumerate().take(n) {
+            if base == target {
                 score += 1;
             } else {
                 score -= 2;

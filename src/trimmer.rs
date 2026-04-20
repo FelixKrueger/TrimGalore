@@ -3,12 +3,12 @@
 //! This module wires together quality trimming, adapter trimming, clipping,
 //! filtering, and report generation into complete processing pipelines.
 
-use anyhow::Result;
 use crate::alignment;
 use crate::fastq::{FastqReader, FastqRecord, FastqWriter};
 use crate::filters::{self, FilterResult, MaxNFilter, PairFilterResult};
 use crate::quality;
-use crate::report::{TrimStats, PairValidationStats};
+use crate::report::{PairValidationStats, TrimStats};
+use anyhow::Result;
 
 /// Configuration for the trimming pipeline.
 pub struct TrimConfig {
@@ -43,7 +43,11 @@ pub struct TrimConfig {
 impl TrimConfig {
     /// Number of adapters used for R2 (falls back to R1 adapter count when no R2-specific adapters are set).
     pub fn r2_adapter_count(&self) -> usize {
-        if self.adapters_r2.is_empty() { self.adapters.len() } else { self.adapters_r2.len() }
+        if self.adapters_r2.is_empty() {
+            self.adapters.len()
+        } else {
+            self.adapters_r2.len()
+        }
     }
 }
 
@@ -66,7 +70,7 @@ pub struct TrimResult {
 /// Processing order (matches TrimGalore behavior):
 /// 1. Quality trim (3' BWA algorithm)
 /// 2. Adapter trim (semi-global alignment)
-/// 2.5. RRBS trim (MspI 2bp artifact removal, if --rrbs)
+///    2.5. RRBS trim (MspI 2bp artifact removal, if --rrbs)
 /// 3. Trim Ns (if --trim-n)
 /// 4. 5'/3' fixed clipping
 ///
@@ -103,13 +107,17 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
     let mut adapter_matches: Vec<(usize, usize)> = Vec::new();
 
     for _round in 0..config.times {
-        if record.is_empty() { break; }
+        if record.is_empty() {
+            break;
+        }
 
         let mut best: Option<(usize, alignment::AdapterMatch)> = None;
         let seq_bytes = record.seq.as_bytes();
 
         for (idx, (_name, adapter_seq)) in adapters.iter().enumerate() {
-            if adapter_seq.is_empty() { continue; }
+            if adapter_seq.is_empty() {
+                continue;
+            }
             if let Some(m) = alignment::find_3prime_adapter(
                 seq_bytes,
                 adapter_seq,
@@ -146,8 +154,7 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
             // Non-directional: check all reads (R1 and R2)
             if record.seq.len() > 2 {
                 let seq_bytes = record.seq.as_bytes();
-                if seq_bytes.len() >= 3
-                    && (seq_bytes[..3] == *b"CAA" || seq_bytes[..3] == *b"CGA")
+                if seq_bytes.len() >= 3 && (seq_bytes[..3] == *b"CAA" || seq_bytes[..3] == *b"CGA")
                 {
                     // Non-directional artifact: trim 2bp from 5' end
                     record.clip_5prime(2);
@@ -160,11 +167,9 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
             }
         } else {
             // Directional RRBS: only R1/SE get 3' trimmed; R2 handled by auto-set clip_r2=2
-            if !(config.is_paired && is_r2) {
-                if record.seq.len() >= 2 && had_adapter {
-                    record.truncate(record.seq.len() - 2);
-                    rrbs_trimmed_3prime = true;
-                }
+            if !(config.is_paired && is_r2) && record.seq.len() >= 2 && had_adapter {
+                record.truncate(record.seq.len() - 2);
+                rrbs_trimmed_3prime = true;
             }
         }
     }
@@ -217,8 +222,16 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
     }
 
     // 4. Fixed clipping
-    let clip_5 = if is_r2 { config.clip_r2 } else { config.clip_r1 };
-    let clip_3 = if is_r2 { config.three_prime_clip_r2 } else { config.three_prime_clip_r1 };
+    let clip_5 = if is_r2 {
+        config.clip_r2
+    } else {
+        config.clip_r1
+    };
+    let clip_3 = if is_r2 {
+        config.three_prime_clip_r2
+    } else {
+        config.three_prime_clip_r1
+    };
 
     let mut clip_5prime_applied = false;
     if let Some(n) = clip_5 {
@@ -284,8 +297,12 @@ pub fn run_single_end(
         let result = trim_read(&mut record, config, false);
         stats.bases_quality_trimmed += result.quality_trimmed_bp;
         update_adapter_stats(&mut stats, &result);
-        if result.rrbs_trimmed_3prime { stats.rrbs_trimmed_3prime += 1; }
-        if result.rrbs_trimmed_5prime { stats.rrbs_trimmed_5prime += 1; }
+        if result.rrbs_trimmed_3prime {
+            stats.rrbs_trimmed_3prime += 1;
+        }
+        if result.rrbs_trimmed_5prime {
+            stats.rrbs_trimmed_5prime += 1;
+        }
         if result.poly_a_trimmed > 0 {
             stats.poly_a_trimmed += 1;
             stats.poly_a_bases_trimmed += result.poly_a_trimmed;
@@ -329,6 +346,7 @@ pub fn run_single_end(
 ///
 /// Reads R1 and R2 in lockstep, trims both, applies pair-aware filtering.
 /// This is the key architectural improvement over TrimGalore's 3-pass approach.
+#[allow(clippy::too_many_arguments)]
 pub fn run_paired_end(
     reader_r1: &mut FastqReader,
     reader_r2: &mut FastqReader,
@@ -364,10 +382,18 @@ pub fn run_paired_end(
                 stats_r2.bases_quality_trimmed += result_r2.quality_trimmed_bp;
                 update_adapter_stats(&mut stats_r1, &result_r1);
                 update_adapter_stats(&mut stats_r2, &result_r2);
-                if result_r1.rrbs_trimmed_3prime { stats_r1.rrbs_trimmed_3prime += 1; }
-                if result_r1.rrbs_trimmed_5prime { stats_r1.rrbs_trimmed_5prime += 1; }
-                if result_r2.rrbs_trimmed_3prime { stats_r2.rrbs_trimmed_3prime += 1; }
-                if result_r2.rrbs_trimmed_5prime { stats_r2.rrbs_trimmed_5prime += 1; }
+                if result_r1.rrbs_trimmed_3prime {
+                    stats_r1.rrbs_trimmed_3prime += 1;
+                }
+                if result_r1.rrbs_trimmed_5prime {
+                    stats_r1.rrbs_trimmed_5prime += 1;
+                }
+                if result_r2.rrbs_trimmed_3prime {
+                    stats_r2.rrbs_trimmed_3prime += 1;
+                }
+                if result_r2.rrbs_trimmed_5prime {
+                    stats_r2.rrbs_trimmed_5prime += 1;
+                }
                 if config.rrbs && result_r2.clip_5prime_applied {
                     stats_r2.rrbs_r2_clipped_5prime += 1;
                 }
@@ -478,10 +504,7 @@ mod tests {
 
     /// Build a minimal TrimConfig for adapter-trimming tests.
     /// Quality cutoff 0 disables quality trimming so we test only adapter logic.
-    fn test_config_with_adapters(
-        adapters: Vec<(&str, &str)>,
-        times: usize,
-    ) -> TrimConfig {
+    fn test_config_with_adapters(adapters: Vec<(&str, &str)>, times: usize) -> TrimConfig {
         TrimConfig {
             adapters: adapters
                 .iter()
@@ -529,10 +552,7 @@ mod tests {
         let read_seq = "ACGTACGTACGTACGTACGTCTGTCTCTTATAGGGGGGGGAGATCGGAAGAGC";
         //              |----20bp random----|--Nextera 12bp--|--8bp pad--|--Illumina 13bp--|
         let config = test_config_with_adapters(
-            vec![
-                ("illumina", "AGATCGGAAGAGC"),
-                ("nextera", "CTGTCTCTTATA"),
-            ],
+            vec![("illumina", "AGATCGGAAGAGC"), ("nextera", "CTGTCTCTTATA")],
             1,
         );
 
@@ -573,10 +593,7 @@ mod tests {
         // Read with no adapter sequences at all.
         let read_seq = "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
         let config = test_config_with_adapters(
-            vec![
-                ("illumina", "AGATCGGAAGAGC"),
-                ("nextera", "CTGTCTCTTATA"),
-            ],
+            vec![("illumina", "AGATCGGAAGAGC"), ("nextera", "CTGTCTCTTATA")],
             1,
         );
 
@@ -593,10 +610,7 @@ mod tests {
     fn test_trim_read_single_adapter_unchanged() {
         // Regression test: single adapter behavior identical to before multi-adapter.
         let read_seq = "ACGTACGTACGTACGTACGTAAGAGATCGGAAGAGC";
-        let config = test_config_with_adapters(
-            vec![("illumina", "AGATCGGAAGAGC")],
-            1,
-        );
+        let config = test_config_with_adapters(vec![("illumina", "AGATCGGAAGAGC")], 1);
 
         let mut record = make_record(read_seq);
         let result = trim_read(&mut record, &config, false);
@@ -623,10 +637,7 @@ mod tests {
         let adapter = "AGATCGGAAGAGC";
         let read_seq = format!("ACGTACGTACGTACGT{}{}", adapter, adapter);
         // = "ACGTACGTACGTACGTAGATCGGAAGAGCAGATCGGAAGAGC" (16 + 13 + 13 = 42bp)
-        let config = test_config_with_adapters(
-            vec![("illumina", adapter)],
-            2,
-        );
+        let config = test_config_with_adapters(vec![("illumina", adapter)], 2);
 
         let mut record = make_record(&read_seq);
         let result = trim_read(&mut record, &config, false);
@@ -636,7 +647,7 @@ mod tests {
         // Round 2: 16bp with no adapter → stops
         // So only 1 match (the first round trims BOTH copies at once since
         // the alignment finds the leftmost match).
-        assert!(result.adapter_matches.len() >= 1);
+        assert!(!result.adapter_matches.is_empty());
         assert_eq!(record.seq, "ACGTACGTACGTACGT");
     }
 
@@ -646,10 +657,7 @@ mod tests {
         // Use min_overlap=3 (realistic default) and a read whose remaining portion
         // after trimming is pure TTTT — no chance of accidental adapter matches.
         let read_seq = "TTTTTTTTTTTTTTTTTTTTAAGAGATCGGAAGAGC";
-        let mut config = test_config_with_adapters(
-            vec![("illumina", "AGATCGGAAGAGC")],
-            3,
-        );
+        let mut config = test_config_with_adapters(vec![("illumina", "AGATCGGAAGAGC")], 3);
         config.min_overlap = 3;
 
         let mut record = make_record(read_seq);

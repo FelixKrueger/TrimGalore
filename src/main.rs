@@ -15,6 +15,10 @@ use trim_galore::report;
 use trim_galore::specialty;
 use trim_galore::trimmer;
 
+type AdapterList = Vec<(String, String)>;
+type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
+type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -22,7 +26,11 @@ fn main() -> Result<()> {
     cli.validate()?;
 
     // Input sanity check on first file
-    eprintln!("\nTrim Galore - Oxidized Edition v{}", env!("CARGO_PKG_VERSION"));
+    eprintln!(
+        "\nTrim Galore - Oxidized Edition v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    eprintln!("{}", env!("VERSION_BODY"));
     eprintln!("==================================================\n");
 
     FastqReader::sanity_check(&cli.input[0])?;
@@ -48,7 +56,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(umi_len) = cli.implicon {
-        specialty::implicon(&cli.input[0], &cli.input[1], umi_len, gzip, output_dir, cli.cores)?;
+        specialty::implicon(
+            &cli.input[0],
+            &cli.input[1],
+            umi_len,
+            gzip,
+            output_dir,
+            cli.cores,
+        )?;
         return Ok(());
     }
 
@@ -57,7 +72,10 @@ fn main() -> Result<()> {
     }
 
     if cli.cores > 1 {
-        eprintln!("Using {} worker threads (parallel trim + compress)", cli.cores);
+        eprintln!(
+            "Using {} worker threads (parallel trim + compress)",
+            cli.cores
+        );
     }
 
     if cli.paired {
@@ -68,21 +86,24 @@ fn main() -> Result<()> {
         // Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
         // false-positive, but the penalty is a loud early error rather than
         // silent data loss.
-        let mut out_paths: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
-        let norm = |p: &std::path::Path| -> String {
-            p.to_string_lossy().to_ascii_lowercase()
-        };
+        let mut out_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let norm = |p: &std::path::Path| -> String { p.to_string_lossy().to_ascii_lowercase() };
         for chunk in cli.input.chunks(2) {
             let (o1, o2) = naming::paired_end_output_names(
-                &chunk[0], &chunk[1], output_dir,
-                cli.basename.as_deref(), gzip,
+                &chunk[0],
+                &chunk[1],
+                output_dir,
+                cli.basename.as_deref(),
+                gzip,
             );
             let mut candidates = vec![o1, o2];
             if cli.retain_unpaired {
                 let (u1, u2) = naming::unpaired_output_names(
-                    &chunk[0], &chunk[1], output_dir,
-                    cli.basename.as_deref(), gzip,
+                    &chunk[0],
+                    &chunk[1],
+                    output_dir,
+                    cli.basename.as_deref(),
+                    gzip,
                 );
                 candidates.push(u1);
                 candidates.push(u2);
@@ -120,20 +141,28 @@ fn main() -> Result<()> {
             }
             FastqReader::sanity_check(&chunk[1])?;
 
-            let (_label, adapters_r1, adapters_r2, config) =
-                setup_trimming(&cli, &chunk[0])?;
+            let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &chunk[0])?;
 
             run_paired(
-                &cli, &chunk[0], &chunk[1],
-                &config, gzip, output_dir,
+                &cli,
+                &chunk[0],
+                &chunk[1],
+                &config,
+                gzip,
+                output_dir,
                 cli.basename.as_deref(),
-                &adapters_r1, &adapters_r2,
+                &adapters_r1,
+                &adapters_r2,
             )
-            .with_context(|| format!(
-                "processing pair {} of {} (R1={}, R2={})",
-                pair_idx + 1, total_pairs,
-                chunk[0].display(), chunk[1].display()
-            ))?;
+            .with_context(|| {
+                format!(
+                    "processing pair {} of {} (R1={}, R2={})",
+                    pair_idx + 1,
+                    total_pairs,
+                    chunk[0].display(),
+                    chunk[1].display()
+                )
+            })?;
         }
     } else {
         // Single-end: process each input file independently
@@ -156,15 +185,20 @@ fn main() -> Result<()> {
 /// When adapter is user-specified, auto-detection is skipped. When auto-detecting,
 /// the poly-G scan piggybacks on the adapter scan. Returns (adapter_label,
 /// adapters_r1, adapters_r2, TrimConfig).
-fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, String)>, Vec<(String, String)>, trimmer::TrimConfig)> {
+fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
     // Determine adapter
-    let (adapter_label, adapters_r1, adapters_r2, autodetect_poly_g) = resolve_adapter(cli, input_file)?;
+    let (adapter_label, adapters_r1, adapters_r2, autodetect_poly_g) =
+        resolve_adapter(cli, input_file)?;
 
     // Display adapter info
     if adapters_r1.len() == 1 {
         eprintln!("Adapter: {} ({})", adapter_label, adapters_r1[0].1);
     } else {
-        eprintln!("Adapters ({}, {} sequences):", adapter_label, adapters_r1.len());
+        eprintln!(
+            "Adapters ({}, {} sequences):",
+            adapter_label,
+            adapters_r1.len()
+        );
         for (name, seq) in &adapters_r1 {
             eprintln!("  {}: {}", name, seq);
         }
@@ -206,17 +240,23 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, 
 
     // RRBS: auto-set --clip_r2 2 for directional paired-end mode
     let clip_r2 = if cli.rrbs && !cli.non_directional && cli.paired && cli.clip_r2.is_none() {
-        eprintln!("Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)");
+        eprintln!(
+            "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)"
+        );
         Some(2)
     } else {
         cli.clip_r2
     };
 
     if cli.rrbs {
-        eprintln!("File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction");
+        eprintln!(
+            "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction"
+        );
     }
     if cli.non_directional {
-        eprintln!("File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction");
+        eprintln!(
+            "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction"
+        );
     }
 
     // Determine poly-G trimming: CLI overrides auto-detection
@@ -265,10 +305,12 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, 
     }
 
     // Convert string adapters to bytes for the trimmer config
-    let adapters_bytes: Vec<(String, Vec<u8>)> = adapters_r1.iter()
+    let adapters_bytes: Vec<(String, Vec<u8>)> = adapters_r1
+        .iter()
         .map(|(name, seq)| (name.clone(), seq.as_bytes().to_vec()))
         .collect();
-    let adapters_r2_bytes: Vec<(String, Vec<u8>)> = adapters_r2.iter()
+    let adapters_r2_bytes: Vec<(String, Vec<u8>)> = adapters_r2
+        .iter()
         .map(|(name, seq)| (name.clone(), seq.as_bytes().to_vec()))
         .collect();
 
@@ -307,7 +349,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, 
 /// The last element is Some((poly_g_count, reads_scanned)) when auto-detection ran,
 /// None when the adapter was user-specified or preset-selected (poly-G must be
 /// detected separately via `adapter::detect_poly_g()`).
-fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String, String)>, Vec<(String, String)>, Option<(usize, usize)>)> {
+fn resolve_adapter(cli: &Cli, input_file: &Path) -> ResolvedAdapter {
     if let Some(ref spec) = cli.adapter {
         let adapters_r1 = adapter::parse_adapter_spec(spec)?;
         let adapters_r2 = match &cli.adapter2 {
@@ -320,7 +362,12 @@ fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String,
 
     // Presets: single-adapter, use AdapterPreset methods
     if cli.nextera {
-        return Ok((adapter::NEXTERA.name.to_string(), adapter::NEXTERA.to_adapter_vec(), Vec::new(), None));
+        return Ok((
+            adapter::NEXTERA.name.to_string(),
+            adapter::NEXTERA.to_adapter_vec(),
+            Vec::new(),
+            None,
+        ));
     }
     if cli.small_rna {
         return Ok((
@@ -347,7 +394,12 @@ fn resolve_adapter(cli: &Cli, input_file: &Path) -> Result<(String, Vec<(String,
         ));
     }
     if cli.illumina {
-        return Ok((adapter::ILLUMINA.name.to_string(), adapter::ILLUMINA.to_adapter_vec(), Vec::new(), None));
+        return Ok((
+            adapter::ILLUMINA.name.to_string(),
+            adapter::ILLUMINA.to_adapter_vec(),
+            Vec::new(),
+            None,
+        ));
     }
 
     // Auto-detect (also piggybacks poly-G counting)
@@ -374,7 +426,8 @@ fn run_single_file(
     output_dir: Option<&Path>,
     adapters_r1: &[(String, String)],
 ) -> Result<()> {
-    let output_path = naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
+    let output_path =
+        naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
     let report_path = naming::report_name(input, output_dir);
 
     eprintln!("Trimming: {}", input.display());
@@ -394,40 +447,72 @@ fn run_single_file(
     // Print summary
     eprintln!("\n=== Summary ===\n");
     eprintln!("Total reads processed:           {:>10}", stats.total_reads);
-    eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
+    eprintln!(
+        "Reads with adapters:             {:>10} ({:.1}%)",
         stats.total_reads_with_adapter,
-        pct(stats.total_reads_with_adapter, stats.total_reads));
+        pct(stats.total_reads_with_adapter, stats.total_reads)
+    );
     if stats.discarded_untrimmed > 0 {
-        eprintln!("Reads discarded as untrimmed:    {:>10} ({:.1}%)",
-            stats.discarded_untrimmed, pct(stats.discarded_untrimmed, stats.total_reads));
+        eprintln!(
+            "Reads discarded as untrimmed:    {:>10} ({:.1}%)",
+            stats.discarded_untrimmed,
+            pct(stats.discarded_untrimmed, stats.total_reads)
+        );
     }
-    eprintln!("Reads too short:                 {:>10} ({:.1}%)",
-        stats.too_short, pct(stats.too_short, stats.total_reads));
-    eprintln!("Reads written (passing filters): {:>10} ({:.1}%)",
-        stats.reads_written, pct(stats.reads_written, stats.total_reads));
+    eprintln!(
+        "Reads too short:                 {:>10} ({:.1}%)",
+        stats.too_short,
+        pct(stats.too_short, stats.total_reads)
+    );
+    eprintln!(
+        "Reads written (passing filters): {:>10} ({:.1}%)",
+        stats.reads_written,
+        pct(stats.reads_written, stats.total_reads)
+    );
     if stats.rrbs_trimmed_3prime > 0 {
-        eprintln!("RRBS trimmed (3' end, adapter): {:>10} ({:.1}%)",
-            stats.rrbs_trimmed_3prime, pct(stats.rrbs_trimmed_3prime, stats.total_reads));
+        eprintln!(
+            "RRBS trimmed (3' end, adapter): {:>10} ({:.1}%)",
+            stats.rrbs_trimmed_3prime,
+            pct(stats.rrbs_trimmed_3prime, stats.total_reads)
+        );
     }
     if stats.rrbs_trimmed_5prime > 0 {
-        eprintln!("RRBS trimmed (5' end, CAA/CGA): {:>10} ({:.1}%)",
-            stats.rrbs_trimmed_5prime, pct(stats.rrbs_trimmed_5prime, stats.total_reads));
+        eprintln!(
+            "RRBS trimmed (5' end, CAA/CGA): {:>10} ({:.1}%)",
+            stats.rrbs_trimmed_5prime,
+            pct(stats.rrbs_trimmed_5prime, stats.total_reads)
+        );
     }
     if stats.poly_a_trimmed > 0 {
-        eprintln!("Reads with poly-A/T trimmed:     {:>10} ({:.1}%)",
-            stats.poly_a_trimmed, pct(stats.poly_a_trimmed, stats.total_reads));
-        eprintln!("  Poly-A/T bases removed:        {:>10}", stats.poly_a_bases_trimmed);
+        eprintln!(
+            "Reads with poly-A/T trimmed:     {:>10} ({:.1}%)",
+            stats.poly_a_trimmed,
+            pct(stats.poly_a_trimmed, stats.total_reads)
+        );
+        eprintln!(
+            "  Poly-A/T bases removed:        {:>10}",
+            stats.poly_a_bases_trimmed
+        );
     }
     if stats.poly_g_trimmed > 0 {
-        eprintln!("Reads with poly-G/C trimmed:     {:>10} ({:.1}%)",
-            stats.poly_g_trimmed, pct(stats.poly_g_trimmed, stats.total_reads));
-        eprintln!("  Poly-G/C bases removed:        {:>10}", stats.poly_g_bases_trimmed);
+        eprintln!(
+            "Reads with poly-G/C trimmed:     {:>10} ({:.1}%)",
+            stats.poly_g_trimmed,
+            pct(stats.poly_g_trimmed, stats.total_reads)
+        );
+        eprintln!(
+            "  Poly-G/C bases removed:        {:>10}",
+            stats.poly_g_bases_trimmed
+        );
     }
 
     // Write report
     if !cli.no_report_file {
-        let input_filename = input.file_name()
-            .unwrap_or_default().to_string_lossy().to_string();
+        let input_filename = input
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let report_cfg = report::TrimConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
             quality_cutoff: cli.effective_quality_cutoff(),
@@ -485,8 +570,10 @@ fn run_single_file(
 
     // Demultiplex if requested
     if let Some(ref barcode_file) = cli.demux {
-        eprintln!("\nTrimming complete, starting demultiplexing procedure (based on 3' barcodes supplied as per file >{}<)",
-            barcode_file.display());
+        eprintln!(
+            "\nTrimming complete, starting demultiplexing procedure (based on 3' barcodes supplied as per file >{}<)",
+            barcode_file.display()
+        );
         let barcodes = demux::read_barcode_file(barcode_file)?;
         demux::demultiplex(&output_path, &barcodes, gzip, output_dir, cli.cores)?;
     }
@@ -517,7 +604,8 @@ fn run_paired(
 
     // Compute unpaired output paths (needed for both parallel and sequential paths)
     let (unpaired_r1_path, unpaired_r2_path) = if cli.retain_unpaired {
-        let (up1, up2) = naming::unpaired_output_names(input_r1, input_r2, output_dir, basename, gzip);
+        let (up1, up2) =
+            naming::unpaired_output_names(input_r1, input_r2, output_dir, basename, gzip);
         eprintln!("  Unpaired R1: {}", up1.display());
         eprintln!("  Unpaired R2: {}", up2.display());
         (Some(up1), Some(up2))
@@ -528,12 +616,17 @@ fn run_paired(
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
         // Worker-pool parallel path: N workers each handle trim + compress
         parallel::run_paired_end_parallel(
-            input_r1, input_r2,
-            &output_r1, &output_r2,
+            input_r1,
+            input_r2,
+            &output_r1,
+            &output_r2,
             unpaired_r1_path.as_deref(),
             unpaired_r2_path.as_deref(),
-            config, cli.cores, gzip,
-            cli.length_1, cli.length_2,
+            config,
+            cli.cores,
+            gzip,
+            cli.length_1,
+            cli.length_2,
         )?
     } else {
         // Sequential path (--cores 1)
@@ -551,16 +644,25 @@ fn run_paired(
         };
 
         let result = trimmer::run_paired_end(
-            &mut reader_r1, &mut reader_r2,
-            &mut writer_r1, &mut writer_r2,
-            unpaired_w1.as_mut(), unpaired_w2.as_mut(),
-            config, cli.length_1, cli.length_2,
+            &mut reader_r1,
+            &mut reader_r2,
+            &mut writer_r1,
+            &mut writer_r2,
+            unpaired_w1.as_mut(),
+            unpaired_w2.as_mut(),
+            config,
+            cli.length_1,
+            cli.length_2,
         )?;
 
         writer_r1.flush()?;
         writer_r2.flush()?;
-        if let Some(ref mut w) = unpaired_w1 { w.flush()?; }
-        if let Some(ref mut w) = unpaired_w2 { w.flush()?; }
+        if let Some(ref mut w) = unpaired_w1 {
+            w.flush()?;
+        }
+        if let Some(ref mut w) = unpaired_w2 {
+            w.flush()?;
+        }
         drop(writer_r1);
         drop(writer_r2);
         drop(unpaired_w1);
@@ -571,56 +673,107 @@ fn run_paired(
 
     // Print summary
     eprintln!("\n=== Summary (Read 1) ===\n");
-    eprintln!("Total reads processed:           {:>10}", stats_r1.total_reads);
-    eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
+    eprintln!(
+        "Total reads processed:           {:>10}",
+        stats_r1.total_reads
+    );
+    eprintln!(
+        "Reads with adapters:             {:>10} ({:.1}%)",
         stats_r1.total_reads_with_adapter,
-        pct(stats_r1.total_reads_with_adapter, stats_r1.total_reads));
+        pct(stats_r1.total_reads_with_adapter, stats_r1.total_reads)
+    );
 
     eprintln!("\n=== Summary (Read 2) ===\n");
-    eprintln!("Total reads processed:           {:>10}", stats_r2.total_reads);
-    eprintln!("Reads with adapters:             {:>10} ({:.1}%)",
+    eprintln!(
+        "Total reads processed:           {:>10}",
+        stats_r2.total_reads
+    );
+    eprintln!(
+        "Reads with adapters:             {:>10} ({:.1}%)",
         stats_r2.total_reads_with_adapter,
-        pct(stats_r2.total_reads_with_adapter, stats_r2.total_reads));
+        pct(stats_r2.total_reads_with_adapter, stats_r2.total_reads)
+    );
 
     if stats_r1.poly_a_trimmed > 0 {
-        eprintln!("R1 reads with poly-A trimmed:    {:>10} ({:.1}%)",
-            stats_r1.poly_a_trimmed, pct(stats_r1.poly_a_trimmed, stats_r1.total_reads));
+        eprintln!(
+            "R1 reads with poly-A trimmed:    {:>10} ({:.1}%)",
+            stats_r1.poly_a_trimmed,
+            pct(stats_r1.poly_a_trimmed, stats_r1.total_reads)
+        );
     }
     if stats_r2.poly_a_trimmed > 0 {
-        eprintln!("R2 reads with poly-T trimmed:    {:>10} ({:.1}%)",
-            stats_r2.poly_a_trimmed, pct(stats_r2.poly_a_trimmed, stats_r2.total_reads));
+        eprintln!(
+            "R2 reads with poly-T trimmed:    {:>10} ({:.1}%)",
+            stats_r2.poly_a_trimmed,
+            pct(stats_r2.poly_a_trimmed, stats_r2.total_reads)
+        );
     }
     if stats_r1.poly_g_trimmed > 0 {
-        eprintln!("R1 reads with poly-G trimmed:    {:>10} ({:.1}%)",
-            stats_r1.poly_g_trimmed, pct(stats_r1.poly_g_trimmed, stats_r1.total_reads));
-        eprintln!("  R1 poly-G bases removed:       {:>10}", stats_r1.poly_g_bases_trimmed);
+        eprintln!(
+            "R1 reads with poly-G trimmed:    {:>10} ({:.1}%)",
+            stats_r1.poly_g_trimmed,
+            pct(stats_r1.poly_g_trimmed, stats_r1.total_reads)
+        );
+        eprintln!(
+            "  R1 poly-G bases removed:       {:>10}",
+            stats_r1.poly_g_bases_trimmed
+        );
     }
     if stats_r2.poly_g_trimmed > 0 {
-        eprintln!("R2 reads with poly-C trimmed:    {:>10} ({:.1}%)",
-            stats_r2.poly_g_trimmed, pct(stats_r2.poly_g_trimmed, stats_r2.total_reads));
-        eprintln!("  R2 poly-C bases removed:       {:>10}", stats_r2.poly_g_bases_trimmed);
+        eprintln!(
+            "R2 reads with poly-C trimmed:    {:>10} ({:.1}%)",
+            stats_r2.poly_g_trimmed,
+            pct(stats_r2.poly_g_trimmed, stats_r2.total_reads)
+        );
+        eprintln!(
+            "  R2 poly-C bases removed:       {:>10}",
+            stats_r2.poly_g_bases_trimmed
+        );
     }
 
     eprintln!("\n=== Paired-end validation ===\n");
-    eprintln!("Pairs analyzed:                  {:>10}", pair_stats.pairs_analyzed);
-    eprintln!("Pairs removed:                   {:>10} ({:.1}%)",
+    eprintln!(
+        "Pairs analyzed:                  {:>10}",
+        pair_stats.pairs_analyzed
+    );
+    eprintln!(
+        "Pairs removed:                   {:>10} ({:.1}%)",
         pair_stats.pairs_removed,
-        pct(pair_stats.pairs_removed, pair_stats.pairs_analyzed));
+        pct(pair_stats.pairs_removed, pair_stats.pairs_analyzed)
+    );
     if pair_stats.r1_unpaired > 0 || pair_stats.r2_unpaired > 0 {
-        eprintln!("Unpaired R1 kept:                {:>10}", pair_stats.r1_unpaired);
-        eprintln!("Unpaired R2 kept:                {:>10}", pair_stats.r2_unpaired);
+        eprintln!(
+            "Unpaired R1 kept:                {:>10}",
+            pair_stats.r1_unpaired
+        );
+        eprintln!(
+            "Unpaired R2 kept:                {:>10}",
+            pair_stats.r2_unpaired
+        );
     }
 
     // Write reports
     if !cli.no_report_file {
-        let all_input_filenames: Vec<String> = [input_r1, input_r2].iter()
-            .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+        let all_input_filenames: Vec<String> = [input_r1, input_r2]
+            .iter()
+            .map(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            })
             .collect();
 
-        for (idx, (input, stats)) in [(input_r1, &stats_r1), (input_r2, &stats_r2)].iter().enumerate() {
+        for (idx, (input, stats)) in [(input_r1, &stats_r1), (input_r2, &stats_r2)]
+            .iter()
+            .enumerate()
+        {
             let report_path = naming::report_name(input, output_dir);
-            let input_filename = input.file_name()
-                .unwrap_or_default().to_string_lossy().to_string();
+            let input_filename = input
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let report_cfg = report::TrimConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 quality_cutoff: cli.effective_quality_cutoff(),
@@ -671,7 +824,9 @@ fn run_paired(
             let json_file = File::create(&json_path)?;
             let mut jw = BufWriter::new(json_file);
             report::write_json_report(
-                &mut jw, &report_cfg, stats,
+                &mut jw,
+                &report_cfg,
+                stats,
                 Some(&pair_stats),
                 (idx + 1) as u8,
                 &json_extra,
@@ -690,7 +845,11 @@ fn run_paired(
     Ok(())
 }
 
-fn run_fastqc(output_path: &Path, fastqc_args: Option<&str>, output_dir: Option<&Path>) -> Result<()> {
+fn run_fastqc(
+    output_path: &Path,
+    fastqc_args: Option<&str>,
+    output_dir: Option<&Path>,
+) -> Result<()> {
     let mut cmd = std::process::Command::new("fastqc");
     if let Some(args) = fastqc_args {
         for arg in args.split_whitespace() {
@@ -716,5 +875,9 @@ fn run_fastqc(output_path: &Path, fastqc_args: Option<&str>, output_dir: Option<
 }
 
 fn pct(part: usize, total: usize) -> f64 {
-    if total == 0 { 0.0 } else { part as f64 / total as f64 * 100.0 }
+    if total == 0 {
+        0.0
+    } else {
+        part as f64 / total as f64 * 100.0
+    }
 }

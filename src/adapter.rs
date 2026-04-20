@@ -3,8 +3,8 @@
 //! Provides built-in adapter sequences for common sequencing platforms
 //! and auto-detection by scanning the first 1M reads.
 
-use anyhow::{Context, Result};
 use crate::fastq::FastqReader;
+use anyhow::{Context, Result};
 use std::io::BufRead;
 use std::path::Path;
 
@@ -162,7 +162,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
         .enumerate()
         .map(|(i, &c)| (i, adapters[i].0, c))
         .collect();
-    sorted_counts.sort_by(|a, b| b.2.cmp(&a.2));
+    sorted_counts.sort_by_key(|entry| std::cmp::Reverse(entry.2));
 
     // Check if adapter trimming should be suppressed
     let suppressed = if let Some(threshold) = consider_already_trimmed {
@@ -187,10 +187,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
         format!(
             "Using {} adapter for trimming (count: {}). \
              Second best hit was {} (count: {}).",
-            sorted_counts[0].1,
-            sorted_counts[0].2,
-            sorted_counts[1].1,
-            sorted_counts[1].2,
+            sorted_counts[0].1, sorted_counts[0].2, sorted_counts[1].1, sorted_counts[1].2,
         )
     };
 
@@ -335,7 +332,11 @@ pub fn read_fasta_adapters<P: AsRef<Path>>(path: P) -> Result<Vec<(String, Strin
             // Flush previous entry
             if let Some(name) = current_name.take() {
                 if current_seq.is_empty() {
-                    anyhow::bail!("Empty sequence for adapter '{}' in {}", name, path.display());
+                    anyhow::bail!(
+                        "Empty sequence for adapter '{}' in {}",
+                        name,
+                        path.display()
+                    );
                 }
                 validate_adapter_sequence(&current_seq)?;
                 adapters.push((name, current_seq.clone()));
@@ -350,14 +351,21 @@ pub fn read_fasta_adapters<P: AsRef<Path>>(path: P) -> Result<Vec<(String, Strin
     // Flush last entry
     if let Some(name) = current_name {
         if current_seq.is_empty() {
-            anyhow::bail!("Empty sequence for adapter '{}' in {}", name, path.display());
+            anyhow::bail!(
+                "Empty sequence for adapter '{}' in {}",
+                name,
+                path.display()
+            );
         }
         validate_adapter_sequence(&current_seq)?;
         adapters.push((name, current_seq));
     }
 
     if adapters.is_empty() {
-        anyhow::bail!("No adapter sequences found in FASTA file: {}", path.display());
+        anyhow::bail!(
+            "No adapter sequences found in FASTA file: {}",
+            path.display()
+        );
     }
 
     Ok(adapters)
@@ -365,7 +373,10 @@ pub fn read_fasta_adapters<P: AsRef<Path>>(path: P) -> Result<Vec<(String, Strin
 
 /// Validate that an adapter sequence contains only valid DNA characters.
 fn validate_adapter_sequence(seq: &str) -> Result<()> {
-    if !seq.bytes().all(|b| matches!(b, b'A' | b'C' | b'G' | b'T' | b'N' | b'X')) {
+    if !seq
+        .bytes()
+        .all(|b| matches!(b, b'A' | b'C' | b'G' | b'T' | b'N' | b'X'))
+    {
         anyhow::bail!(
             "Adapter sequence must contain only DNA characters (A, C, G, T, N, X), got: '{}'",
             seq
@@ -380,7 +391,10 @@ mod tests {
 
     #[test]
     fn test_contains_subsequence() {
-        assert!(contains_subsequence(b"ACGTAAGAGATCGGAAGAGCTTTT", b"AGATCGGAAGAGC"));
+        assert!(contains_subsequence(
+            b"ACGTAAGAGATCGGAAGAGCTTTT",
+            b"AGATCGGAAGAGC"
+        ));
         assert!(!contains_subsequence(b"ACGTACGT", b"AGATCGGAAGAGC"));
         assert!(contains_subsequence(b"AGATCGGAAGAGC", b"AGATCGGAAGAGC"));
         assert!(!contains_subsequence(b"", b"AGATC"));
@@ -435,8 +449,14 @@ mod tests {
         let result = parse_adapter_spec(" AGCTAGCG -a TCTCTTATAT -a TTTATTCGGATTTAT").unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], ("adapter_1".to_string(), "AGCTAGCG".to_string()));
-        assert_eq!(result[1], ("adapter_2".to_string(), "TCTCTTATAT".to_string()));
-        assert_eq!(result[2], ("adapter_3".to_string(), "TTTATTCGGATTTAT".to_string()));
+        assert_eq!(
+            result[1],
+            ("adapter_2".to_string(), "TCTCTTATAT".to_string())
+        );
+        assert_eq!(
+            result[2],
+            ("adapter_3".to_string(), "TTTATTCGGATTTAT".to_string())
+        );
     }
 
     #[test]
@@ -451,8 +471,14 @@ mod tests {
 
         let result = read_fasta_adapters(&path).unwrap();
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], ("Illumina".to_string(), "AGATCGGAAGAGC".to_string()));
-        assert_eq!(result[1], ("Nextera".to_string(), "CTGTCTCTTATA".to_string()));
+        assert_eq!(
+            result[0],
+            ("Illumina".to_string(), "AGATCGGAAGAGC".to_string())
+        );
+        assert_eq!(
+            result[1],
+            ("Nextera".to_string(), "CTGTCTCTTATA".to_string())
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

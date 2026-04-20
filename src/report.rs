@@ -75,8 +75,10 @@ impl TrimStats {
         // Merge per-adapter stats (element-wise addition across 2D vecs)
         // Ensure self has enough adapter slots
         if other.reads_with_adapter.len() > self.reads_with_adapter.len() {
-            self.reads_with_adapter.resize(other.reads_with_adapter.len(), 0);
-            self.adapter_length_counts.resize(other.adapter_length_counts.len(), Vec::new());
+            self.reads_with_adapter
+                .resize(other.reads_with_adapter.len(), 0);
+            self.adapter_length_counts
+                .resize(other.adapter_length_counts.len(), Vec::new());
         }
         for (i, &count) in other.reads_with_adapter.iter().enumerate() {
             self.reads_with_adapter[i] += count;
@@ -165,16 +167,40 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     writeln!(w, "SUMMARISING RUN PARAMETERS")?;
     writeln!(w, "=========================")?;
     writeln!(w, "Input filename: {}", config.input_filename)?;
-    writeln!(w, "Trimming mode: {}", if config.paired { "paired-end" } else { "single-end" })?;
-    writeln!(w, "Trim Galore version: {} (Oxidized Edition)", config.version)?;
+    writeln!(
+        w,
+        "Trimming mode: {}",
+        if config.paired {
+            "paired-end"
+        } else {
+            "single-end"
+        }
+    )?;
+    writeln!(
+        w,
+        "Trim Galore version: {} (Oxidized Edition)",
+        config.version
+    )?;
     if config.nextseq {
-        writeln!(w, "2-colour high quality G-trimming enabled, with quality cutoff: --nextseq-trim={}", config.quality_cutoff)?;
+        writeln!(
+            w,
+            "2-colour high quality G-trimming enabled, with quality cutoff: --nextseq-trim={}",
+            config.quality_cutoff
+        )?;
     } else {
         writeln!(w, "Quality Phred score cutoff: {}", config.quality_cutoff)?;
     }
-    writeln!(w, "Quality encoding type selected: ASCII+{}", config.phred_encoding)?;
+    writeln!(
+        w,
+        "Quality encoding type selected: ASCII+{}",
+        config.phred_encoding
+    )?;
     if config.adapters.len() == 1 {
-        writeln!(w, "Adapter sequence: '{}' (user-specified or auto-detected)", config.adapters[0].1)?;
+        writeln!(
+            w,
+            "Adapter sequence: '{}' (user-specified or auto-detected)",
+            config.adapters[0].1
+        )?;
     } else {
         write!(w, "Adapter sequence(s):")?;
         for (name, seq) in &config.adapters {
@@ -184,7 +210,11 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     }
     if !config.adapters_r2.is_empty() {
         if config.adapters_r2.len() == 1 {
-            writeln!(w, "Optional adapter 2 sequence (Read 2): '{}'", config.adapters_r2[0].1)?;
+            writeln!(
+                w,
+                "Optional adapter 2 sequence (Read 2): '{}'",
+                config.adapters_r2[0].1
+            )?;
         } else {
             write!(w, "Adapter 2 sequence(s) (Read 2):")?;
             for (name, seq) in &config.adapters_r2 {
@@ -197,24 +227,47 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
         writeln!(w, "Trimming rounds per read (-n): {}", config.times)?;
     }
     writeln!(w, "Maximum trimming error rate: {}", config.error_rate)?;
-    writeln!(w, "Minimum required adapter overlap (stringency): {} bp", config.stringency)?;
-    writeln!(w, "Minimum required sequence length {}-end: {} bp",
-        if config.paired { "for both reads before a sequence pair gets removed" } else { "single" },
-        config.length_cutoff)?;
+    writeln!(
+        w,
+        "Minimum required adapter overlap (stringency): {} bp",
+        config.stringency
+    )?;
+    writeln!(
+        w,
+        "Minimum required sequence length {}-end: {} bp",
+        if config.paired {
+            "for both reads before a sequence pair gets removed"
+        } else {
+            "single"
+        },
+        config.length_cutoff
+    )?;
     if config.trim_n {
         writeln!(w, "Removing Ns from the end of reads")?;
     }
     if config.rrbs {
-        writeln!(w, "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction")?;
+        writeln!(
+            w,
+            "File was specified to be an MspI-digested RRBS sample. Read 1 sequences with adapter contamination will be trimmed a further 2 bp from their 3' end, and Read 2 sequences will be trimmed by 2 bp from their 5' end to remove potential methylation-biased bases from the end-repair reaction"
+        )?;
     }
     if config.non_directional {
-        writeln!(w, "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction")?;
+        writeln!(
+            w,
+            "File was specified to be a non-directional MspI-digested RRBS sample. Sequences starting with either 'CAA' or 'CGA' will have the first 2 bp trimmed off to remove potential methylation-biased bases from the end-repair reaction"
+        )?;
     }
     if config.poly_a {
-        writeln!(w, "Poly-A trimming enabled: removing poly-A tails from 3' end of R1/SE reads, and poly-T heads from 5' end of R2 reads")?;
+        writeln!(
+            w,
+            "Poly-A trimming enabled: removing poly-A tails from 3' end of R1/SE reads, and poly-T heads from 5' end of R2 reads"
+        )?;
     }
     if config.poly_g {
-        writeln!(w, "Poly-G trimming enabled: removing poly-G tails from 3' end of R1/SE reads, and poly-C heads from 5' end of R2 reads")?;
+        writeln!(
+            w,
+            "Poly-G trimming enabled: removing poly-G tails from 3' end of R1/SE reads, and poly-C heads from 5' end of R2 reads"
+        )?;
     }
     if config.gzip {
         writeln!(w, "Output file will be GZIP compressed")?;
@@ -228,57 +281,97 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
 pub fn write_run_stats<W: Write>(w: &mut W, stats: &TrimStats) -> std::io::Result<()> {
     writeln!(w, "=== Summary ===")?;
     writeln!(w)?;
-    writeln!(w, "Total reads processed:              {:>10}", format_number(stats.total_reads))?;
-    writeln!(w, "Reads with adapters:                {:>10} ({:.1}%)",
+    writeln!(
+        w,
+        "Total reads processed:              {:>10}",
+        format_number(stats.total_reads)
+    )?;
+    writeln!(
+        w,
+        "Reads with adapters:                {:>10} ({:.1}%)",
         format_number(stats.total_reads_with_adapter),
-        percentage(stats.total_reads_with_adapter, stats.total_reads))?;
+        percentage(stats.total_reads_with_adapter, stats.total_reads)
+    )?;
     writeln!(w)?;
 
     if stats.total_reads > 0 {
         if stats.discarded_untrimmed > 0 {
-            writeln!(w, "Reads discarded as untrimmed:       {:>10} ({:.1}%)",
+            writeln!(
+                w,
+                "Reads discarded as untrimmed:       {:>10} ({:.1}%)",
                 format_number(stats.discarded_untrimmed),
-                percentage(stats.discarded_untrimmed, stats.total_reads))?;
+                percentage(stats.discarded_untrimmed, stats.total_reads)
+            )?;
         }
-        writeln!(w, "Reads that were too short:          {:>10} ({:.1}%)",
+        writeln!(
+            w,
+            "Reads that were too short:          {:>10} ({:.1}%)",
             format_number(stats.too_short),
-            percentage(stats.too_short, stats.total_reads))?;
-        writeln!(w, "Reads that were too long:           {:>10} ({:.1}%)",
+            percentage(stats.too_short, stats.total_reads)
+        )?;
+        writeln!(
+            w,
+            "Reads that were too long:           {:>10} ({:.1}%)",
             format_number(stats.too_long),
-            percentage(stats.too_long, stats.total_reads))?;
-        writeln!(w, "Reads with too many N:              {:>10} ({:.1}%)",
+            percentage(stats.too_long, stats.total_reads)
+        )?;
+        writeln!(
+            w,
+            "Reads with too many N:              {:>10} ({:.1}%)",
             format_number(stats.too_many_n),
-            percentage(stats.too_many_n, stats.total_reads))?;
+            percentage(stats.too_many_n, stats.total_reads)
+        )?;
     }
 
-    writeln!(w, "Reads written (passing filters):    {:>10} ({:.1}%)",
+    writeln!(
+        w,
+        "Reads written (passing filters):    {:>10} ({:.1}%)",
         format_number(stats.reads_written),
-        percentage(stats.reads_written, stats.total_reads))?;
+        percentage(stats.reads_written, stats.total_reads)
+    )?;
     writeln!(w)?;
 
     if stats.rrbs_trimmed_3prime > 0 {
-        writeln!(w, "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t{} ({:.1}%)",
+        writeln!(
+            w,
+            "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t{} ({:.1}%)",
             stats.rrbs_trimmed_3prime,
-            percentage(stats.rrbs_trimmed_3prime, stats.total_reads))?;
+            percentage(stats.rrbs_trimmed_3prime, stats.total_reads)
+        )?;
     }
     if stats.rrbs_trimmed_5prime > 0 {
-        writeln!(w, "RRBS reads trimmed by 2 bp at the start when read started with CAA or CGA in total:\t{} ({:.1}%)",
+        writeln!(
+            w,
+            "RRBS reads trimmed by 2 bp at the start when read started with CAA or CGA in total:\t{} ({:.1}%)",
             stats.rrbs_trimmed_5prime,
-            percentage(stats.rrbs_trimmed_5prime, stats.total_reads))?;
+            percentage(stats.rrbs_trimmed_5prime, stats.total_reads)
+        )?;
     }
     if stats.poly_a_trimmed > 0 {
-        writeln!(w, "Reads with poly-A/T trimmed:    {:>10} ({:.1}%)",
+        writeln!(
+            w,
+            "Reads with poly-A/T trimmed:    {:>10} ({:.1}%)",
             format_number(stats.poly_a_trimmed),
-            percentage(stats.poly_a_trimmed, stats.total_reads))?;
-        writeln!(w, "  Poly-A/T bases removed:       {:>10}",
-            format_number(stats.poly_a_bases_trimmed))?;
+            percentage(stats.poly_a_trimmed, stats.total_reads)
+        )?;
+        writeln!(
+            w,
+            "  Poly-A/T bases removed:       {:>10}",
+            format_number(stats.poly_a_bases_trimmed)
+        )?;
     }
     if stats.poly_g_trimmed > 0 {
-        writeln!(w, "Reads with poly-G/C trimmed:    {:>10} ({:.1}%)",
+        writeln!(
+            w,
+            "Reads with poly-G/C trimmed:    {:>10} ({:.1}%)",
             format_number(stats.poly_g_trimmed),
-            percentage(stats.poly_g_trimmed, stats.total_reads))?;
-        writeln!(w, "  Poly-G/C bases removed:       {:>10}",
-            format_number(stats.poly_g_bases_trimmed))?;
+            percentage(stats.poly_g_trimmed, stats.total_reads)
+        )?;
+        writeln!(
+            w,
+            "  Poly-G/C bases removed:       {:>10}",
+            format_number(stats.poly_g_bases_trimmed)
+        )?;
     }
 
     Ok(())
@@ -291,22 +384,48 @@ pub fn write_pair_validation_stats<W: Write>(
 ) -> std::io::Result<()> {
     writeln!(w, "=== Paired-end validation ===")?;
     writeln!(w)?;
-    writeln!(w, "Number of sequence pairs analysed:  {:>10}", format_number(stats.pairs_analyzed))?;
+    writeln!(
+        w,
+        "Number of sequence pairs analysed:  {:>10}",
+        format_number(stats.pairs_analyzed)
+    )?;
     writeln!(w)?;
-    writeln!(w, "Number of sequence pairs removed because at least one read was shorter than the length cutoff ({:.2}%):",
-        percentage(stats.pairs_removed, stats.pairs_analyzed))?;
-    writeln!(w, "                             {:>10}", format_number(stats.pairs_removed))?;
+    writeln!(
+        w,
+        "Number of sequence pairs removed because at least one read was shorter than the length cutoff ({:.2}%):",
+        percentage(stats.pairs_removed, stats.pairs_analyzed)
+    )?;
+    writeln!(
+        w,
+        "                             {:>10}",
+        format_number(stats.pairs_removed)
+    )?;
 
     if stats.pairs_removed_n > 0 {
-        writeln!(w, "Number of pairs removed for N content ({:.2}%):",
-            percentage(stats.pairs_removed_n, stats.pairs_analyzed))?;
-        writeln!(w, "                             {:>10}", format_number(stats.pairs_removed_n))?;
+        writeln!(
+            w,
+            "Number of pairs removed for N content ({:.2}%):",
+            percentage(stats.pairs_removed_n, stats.pairs_analyzed)
+        )?;
+        writeln!(
+            w,
+            "                             {:>10}",
+            format_number(stats.pairs_removed_n)
+        )?;
     }
 
     if stats.r1_unpaired > 0 || stats.r2_unpaired > 0 {
         writeln!(w)?;
-        writeln!(w, "Unpaired read 1 kept:        {:>10}", format_number(stats.r1_unpaired))?;
-        writeln!(w, "Unpaired read 2 kept:        {:>10}", format_number(stats.r2_unpaired))?;
+        writeln!(
+            w,
+            "Unpaired read 1 kept:        {:>10}",
+            format_number(stats.r1_unpaired)
+        )?;
+        writeln!(
+            w,
+            "Unpaired read 2 kept:        {:>10}",
+            format_number(stats.r2_unpaired)
+        )?;
     }
 
     writeln!(w)?;
@@ -335,48 +454,84 @@ pub fn write_cutadapt_compatible_section<W: Write>(
 
     writeln!(w)?;
     // Native identifier for MultiQC with Trim Galore v2.0 support
-    writeln!(w, "Trim Galore {} (Oxidized Edition) — adapter trimming built in", config.version)?;
+    writeln!(
+        w,
+        "Trim Galore {} (Oxidized Edition) — adapter trimming built in",
+        config.version
+    )?;
     // Backwards compatibility: older MultiQC discovers reports via "This is cutadapt"
-    writeln!(w, "This is cutadapt 4.0 (compatible; for MultiQC backwards compatibility)")?;
+    writeln!(
+        w,
+        "This is cutadapt 4.0 (compatible; for MultiQC backwards compatibility)"
+    )?;
     // Command line — MultiQC extracts the sample name from the input filename here
     let first_adapter_seq = adapters.first().map(|(_, s)| s.as_str()).unwrap_or("");
-    writeln!(w, "Command line parameters: -j 1 -e {} -q {} -O {} -a {} {}",
-        config.error_rate, config.quality_cutoff, config.stringency,
-        first_adapter_seq, config.input_filename)?;
+    writeln!(
+        w,
+        "Command line parameters: -j 1 -e {} -q {} -O {} -a {} {}",
+        config.error_rate,
+        config.quality_cutoff,
+        config.stringency,
+        first_adapter_seq,
+        config.input_filename
+    )?;
     writeln!(w, "Processing reads on 1 core in single-end mode ...")?;
     writeln!(w)?;
 
     // Summary — regexes: "Total reads processed:\s*([\d,]+)" etc.
     writeln!(w, "=== Summary ===")?;
     writeln!(w)?;
-    writeln!(w, "Total reads processed:           {:>10}", format_number(stats.total_reads))?;
-    writeln!(w, "Reads with adapters:             {:>10} ({:.1}%)",
+    writeln!(
+        w,
+        "Total reads processed:           {:>10}",
+        format_number(stats.total_reads)
+    )?;
+    writeln!(
+        w,
+        "Reads with adapters:             {:>10} ({:.1}%)",
         format_number(stats.total_reads_with_adapter),
-        percentage(stats.total_reads_with_adapter, stats.total_reads))?;
+        percentage(stats.total_reads_with_adapter, stats.total_reads)
+    )?;
     if stats.discarded_untrimmed > 0 {
-        writeln!(w, "Reads discarded as untrimmed:    {:>10} ({:.1}%)",
+        writeln!(
+            w,
+            "Reads discarded as untrimmed:    {:>10} ({:.1}%)",
             format_number(stats.discarded_untrimmed),
-            percentage(stats.discarded_untrimmed, stats.total_reads))?;
+            percentage(stats.discarded_untrimmed, stats.total_reads)
+        )?;
     }
     // In v0.6.x, Cutadapt wrote ALL reads — length/pair filtering was a separate
     // TrimGalore step. So Cutadapt's "Reads written" was total_reads minus only
     // --discard-untrimmed. We replicate that here for MultiQC backwards compatibility.
     let cutadapt_reads_written = stats.total_reads - stats.discarded_untrimmed;
-    writeln!(w, "Reads written (passing filters): {:>10} ({:.1}%)",
+    writeln!(
+        w,
+        "Reads written (passing filters): {:>10} ({:.1}%)",
         format_number(cutadapt_reads_written),
-        percentage(cutadapt_reads_written, stats.total_reads))?;
+        percentage(cutadapt_reads_written, stats.total_reads)
+    )?;
     writeln!(w)?;
 
     // Basepair statistics — "Total basepairs processed:\s*([\d,]+) bp"
-    writeln!(w, "Total basepairs processed:   {:>12} bp", format_number(stats.total_bp_processed))?;
-    writeln!(w, "Quality-trimmed:             {:>12} bp ({:.1}%)",
+    writeln!(
+        w,
+        "Total basepairs processed:   {:>12} bp",
+        format_number(stats.total_bp_processed)
+    )?;
+    writeln!(
+        w,
+        "Quality-trimmed:             {:>12} bp ({:.1}%)",
         format_number(stats.bases_quality_trimmed),
-        percentage(stats.bases_quality_trimmed, stats.total_bp_processed))?;
+        percentage(stats.bases_quality_trimmed, stats.total_bp_processed)
+    )?;
     // Same as reads: report bp after trimming but before length/pair filtering,
     // matching what Cutadapt would have written.
-    writeln!(w, "Total written (filtered):    {:>12} bp ({:.1}%)",
+    writeln!(
+        w,
+        "Total written (filtered):    {:>12} bp ({:.1}%)",
         format_number(stats.total_bp_after_trim),
-        percentage(stats.total_bp_after_trim, stats.total_bp_processed))?;
+        percentage(stats.total_bp_after_trim, stats.total_bp_processed)
+    )?;
     writeln!(w)?;
 
     // Per-adapter sections — "=== Adapter N ===" triggers MultiQC section parsing
@@ -386,8 +541,13 @@ pub fn write_cutadapt_compatible_section<W: Write>(
 
         writeln!(w, "=== Adapter {} ===", idx + 1)?;
         writeln!(w)?;
-        writeln!(w, "Sequence: {}; Type: regular 3'; Length: {}; Trimmed: {} times.",
-            seq, seq.len(), times_trimmed)?;
+        writeln!(
+            w,
+            "Sequence: {}; Type: regular 3'; Length: {}; Trimmed: {} times.",
+            seq,
+            seq.len(),
+            times_trimmed
+        )?;
         writeln!(w)?;
 
         write_allowed_errors(w, seq.len(), config.error_rate)?;
@@ -403,7 +563,11 @@ pub fn write_cutadapt_compatible_section<W: Write>(
                 }
                 let expect = stats.total_reads as f64 / 4f64.powi(length as i32);
                 let max_err = (length as f64 * config.error_rate).floor() as usize;
-                writeln!(w, "{}\t{}\t{:.1}\t{}\t{}", length, count, expect, max_err, count)?;
+                writeln!(
+                    w,
+                    "{}\t{}\t{:.1}\t{}\t{}",
+                    length, count, expect, max_err, count
+                )?;
             }
         }
         writeln!(w)?;
@@ -419,40 +583,73 @@ pub fn write_run_footer<W: Write>(
     config: &TrimConfig,
     stats: &TrimStats,
 ) -> std::io::Result<()> {
-    writeln!(w, "RUN STATISTICS FOR INPUT FILE: {}", config.input_filename)?;
+    writeln!(
+        w,
+        "RUN STATISTICS FOR INPUT FILE: {}",
+        config.input_filename
+    )?;
     writeln!(w, "=============================================")?;
     writeln!(w, "{} sequences processed in total", stats.total_reads)?;
 
     if stats.too_short > 0 {
-        writeln!(w, "Sequences removed because they became shorter than the length cutoff of {} bp:\t{} ({:.1}%)",
-            config.length_cutoff, stats.too_short, percentage(stats.too_short, stats.total_reads))?;
+        writeln!(
+            w,
+            "Sequences removed because they became shorter than the length cutoff of {} bp:\t{} ({:.1}%)",
+            config.length_cutoff,
+            stats.too_short,
+            percentage(stats.too_short, stats.total_reads)
+        )?;
     }
     if stats.too_long > 0 {
-        writeln!(w, "Sequences removed because they were longer than the upper length cutoff:\t{} ({:.1}%)",
-            stats.too_long, percentage(stats.too_long, stats.total_reads))?;
+        writeln!(
+            w,
+            "Sequences removed because they were longer than the upper length cutoff:\t{} ({:.1}%)",
+            stats.too_long,
+            percentage(stats.too_long, stats.total_reads)
+        )?;
     }
     if stats.too_many_n > 0 {
-        writeln!(w, "Sequences removed because of too many N bases:\t{} ({:.1}%)",
-            stats.too_many_n, percentage(stats.too_many_n, stats.total_reads))?;
+        writeln!(
+            w,
+            "Sequences removed because of too many N bases:\t{} ({:.1}%)",
+            stats.too_many_n,
+            percentage(stats.too_many_n, stats.total_reads)
+        )?;
     }
 
     if stats.rrbs_trimmed_3prime > 0 {
-        writeln!(w, "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t{} ({:.1}%)",
-            stats.rrbs_trimmed_3prime, percentage(stats.rrbs_trimmed_3prime, stats.total_reads))?;
+        writeln!(
+            w,
+            "RRBS reads trimmed by additional 2 bp when adapter contamination was detected:\t{} ({:.1}%)",
+            stats.rrbs_trimmed_3prime,
+            percentage(stats.rrbs_trimmed_3prime, stats.total_reads)
+        )?;
     }
     if stats.rrbs_trimmed_5prime > 0 {
-        writeln!(w, "RRBS reads trimmed by 2 bp at the start when read started with CAA or CGA in total:\t{} ({:.1}%)",
-            stats.rrbs_trimmed_5prime, percentage(stats.rrbs_trimmed_5prime, stats.total_reads))?;
+        writeln!(
+            w,
+            "RRBS reads trimmed by 2 bp at the start when read started with CAA or CGA in total:\t{} ({:.1}%)",
+            stats.rrbs_trimmed_5prime,
+            percentage(stats.rrbs_trimmed_5prime, stats.total_reads)
+        )?;
     }
     if stats.poly_a_trimmed > 0 {
-        writeln!(w, "Reads with poly-A/T trimmed:\t{} ({:.1}%); {} bp removed",
-            stats.poly_a_trimmed, percentage(stats.poly_a_trimmed, stats.total_reads),
-            format_number(stats.poly_a_bases_trimmed))?;
+        writeln!(
+            w,
+            "Reads with poly-A/T trimmed:\t{} ({:.1}%); {} bp removed",
+            stats.poly_a_trimmed,
+            percentage(stats.poly_a_trimmed, stats.total_reads),
+            format_number(stats.poly_a_bases_trimmed)
+        )?;
     }
     if stats.poly_g_trimmed > 0 {
-        writeln!(w, "Reads with poly-G/C trimmed:\t{} ({:.1}%); {} bp removed",
-            stats.poly_g_trimmed, percentage(stats.poly_g_trimmed, stats.total_reads),
-            format_number(stats.poly_g_bases_trimmed))?;
+        writeln!(
+            w,
+            "Reads with poly-G/C trimmed:\t{} ({:.1}%); {} bp removed",
+            stats.poly_g_trimmed,
+            percentage(stats.poly_g_trimmed, stats.total_reads),
+            format_number(stats.poly_g_bases_trimmed)
+        )?;
     }
 
     writeln!(w)?;
@@ -509,7 +706,17 @@ pub fn write_json_report<W: Write>(
         }
     }
     writeln!(w, "],")?;
-    json_str(w, i1, "mode", if config.paired { "paired-end" } else { "single-end" }, true)?;
+    json_str(
+        w,
+        i1,
+        "mode",
+        if config.paired {
+            "paired-end"
+        } else {
+            "single-end"
+        },
+        true,
+    )?;
     writeln!(w, "{}\"read_number\": {},", i1, read_number)?;
     json_str(w, i1, "command_line", &config.command_line, true)?;
 
@@ -519,14 +726,28 @@ pub fn write_json_report<W: Write>(
     // Adapters as array of objects
     write!(w, "{}\"adapters\": [", i2)?;
     for (i, (name, seq)) in config.adapters.iter().enumerate() {
-        write!(w, "{{\"name\": \"{}\", \"sequence\": \"{}\"}}", json_escape_string(name), json_escape_string(seq))?;
-        if i + 1 < config.adapters.len() { write!(w, ", ")?; }
+        write!(
+            w,
+            "{{\"name\": \"{}\", \"sequence\": \"{}\"}}",
+            json_escape_string(name),
+            json_escape_string(seq)
+        )?;
+        if i + 1 < config.adapters.len() {
+            write!(w, ", ")?;
+        }
     }
     writeln!(w, "],")?;
     write!(w, "{}\"adapters_r2\": [", i2)?;
     for (i, (name, seq)) in config.adapters_r2.iter().enumerate() {
-        write!(w, "{{\"name\": \"{}\", \"sequence\": \"{}\"}}", json_escape_string(name), json_escape_string(seq))?;
-        if i + 1 < config.adapters_r2.len() { write!(w, ", ")?; }
+        write!(
+            w,
+            "{{\"name\": \"{}\", \"sequence\": \"{}\"}}",
+            json_escape_string(name),
+            json_escape_string(seq)
+        )?;
+        if i + 1 < config.adapters_r2.len() {
+            write!(w, ", ")?;
+        }
     }
     writeln!(w, "],")?;
     json_int(w, i2, "times", config.times, true)?;
@@ -543,28 +764,64 @@ pub fn write_json_report<W: Write>(
     json_bool(w, i2, "poly_g", config.poly_g, true)?;
     json_opt_int(w, i2, "clip_r1", extra.clip_r1, true)?;
     json_opt_int(w, i2, "clip_r2", extra.clip_r2, true)?;
-    json_opt_int(w, i2, "three_prime_clip_r1", extra.three_prime_clip_r1, true)?;
-    json_opt_int(w, i2, "three_prime_clip_r2", extra.three_prime_clip_r2, true)?;
+    json_opt_int(
+        w,
+        i2,
+        "three_prime_clip_r1",
+        extra.three_prime_clip_r1,
+        true,
+    )?;
+    json_opt_int(
+        w,
+        i2,
+        "three_prime_clip_r2",
+        extra.three_prime_clip_r2,
+        true,
+    )?;
     json_opt_float(w, i2, "max_n", extra.max_n, true)?;
     json_bool(w, i2, "discard_untrimmed", extra.discard_untrimmed, true)?;
-    json_opt_int(w, i2, "consider_already_trimmed", extra.consider_already_trimmed, false)?;
+    json_opt_int(
+        w,
+        i2,
+        "consider_already_trimmed",
+        extra.consider_already_trimmed,
+        false,
+    )?;
     writeln!(w, "{}}},", i1)?;
 
     // ── Read processing ──────────────────────────────────────────
     writeln!(w, "{}\"read_processing\": {{", i1)?;
     json_int(w, i2, "total_reads", stats.total_reads, true)?;
-    json_int(w, i2, "reads_with_adapter", stats.total_reads_with_adapter, true)?;
+    json_int(
+        w,
+        i2,
+        "reads_with_adapter",
+        stats.total_reads_with_adapter,
+        true,
+    )?;
     json_int(w, i2, "reads_written", stats.reads_written, true)?;
     json_int(w, i2, "reads_too_short", stats.too_short, true)?;
     json_int(w, i2, "reads_too_long", stats.too_long, true)?;
     json_int(w, i2, "reads_too_many_n", stats.too_many_n, true)?;
-    json_int(w, i2, "reads_discarded_untrimmed", stats.discarded_untrimmed, false)?;
+    json_int(
+        w,
+        i2,
+        "reads_discarded_untrimmed",
+        stats.discarded_untrimmed,
+        false,
+    )?;
     writeln!(w, "{}}},", i1)?;
 
     // ── Basepair processing ──────────────────────────────────────
     writeln!(w, "{}\"basepair_processing\": {{", i1)?;
     json_int(w, i2, "total_bp_processed", stats.total_bp_processed, true)?;
-    json_int(w, i2, "quality_trimmed_bp", stats.bases_quality_trimmed, true)?;
+    json_int(
+        w,
+        i2,
+        "quality_trimmed_bp",
+        stats.bases_quality_trimmed,
+        true,
+    )?;
     json_int(w, i2, "total_bp_written", stats.total_bp_written, false)?;
     writeln!(w, "{}}},", i1)?;
 
@@ -577,7 +834,11 @@ pub fn write_json_report<W: Write>(
     };
     writeln!(w, "{}\"adapter_trimming\": [", i1)?;
     for (adapter_idx, (name, seq)) in adapters.iter().enumerate() {
-        let times_trimmed = stats.reads_with_adapter.get(adapter_idx).copied().unwrap_or(0);
+        let times_trimmed = stats
+            .reads_with_adapter
+            .get(adapter_idx)
+            .copied()
+            .unwrap_or(0);
         writeln!(w, "{}{{", i2)?;
         json_str(w, i3, "name", name, true)?;
         json_str(w, i3, "sequence", seq, true)?;
@@ -589,7 +850,9 @@ pub fn write_json_report<W: Write>(
         let length_counts = stats.adapter_length_counts.get(adapter_idx);
         let entries: Vec<(usize, usize)> = length_counts
             .map(|counts| {
-                counts.iter().enumerate()
+                counts
+                    .iter()
+                    .enumerate()
                     .filter(|&(i, &count)| i > 0 && count > 0)
                     .map(|(i, &count)| (i, count))
                     .collect()
@@ -602,12 +865,20 @@ pub fn write_json_report<W: Write>(
             writeln!(w, "{}\"length_distribution\": {{", i3)?;
             let i4 = "        ";
             for (entry_idx, &(length, count)) in entries.iter().enumerate() {
-                let comma = if entry_idx < entries.len() - 1 { "," } else { "" };
+                let comma = if entry_idx < entries.len() - 1 {
+                    ","
+                } else {
+                    ""
+                };
                 writeln!(w, "{}\"{}\": {}{}", i4, length, count, comma)?;
             }
             writeln!(w, "{}}}", i3)?;
         }
-        let comma = if adapter_idx < adapters.len() - 1 { "," } else { "" };
+        let comma = if adapter_idx < adapters.len() - 1 {
+            ","
+        } else {
+            ""
+        };
         writeln!(w, "{}}}{}", i2, comma)?;
     }
     writeln!(w, "{}],", i1)?;
@@ -628,7 +899,13 @@ pub fn write_json_report<W: Write>(
     writeln!(w, "{}\"rrbs\": {{", i1)?;
     json_int(w, i2, "trimmed_3prime", stats.rrbs_trimmed_3prime, true)?;
     json_int(w, i2, "trimmed_5prime", stats.rrbs_trimmed_5prime, true)?;
-    json_int(w, i2, "r2_clipped_5prime", stats.rrbs_r2_clipped_5prime, false)?;
+    json_int(
+        w,
+        i2,
+        "r2_clipped_5prime",
+        stats.rrbs_r2_clipped_5prime,
+        false,
+    )?;
     writeln!(w, "{}}},", i1)?;
 
     // ── Pair validation ──────────────────────────────────────────
@@ -640,7 +917,13 @@ pub fn write_json_report<W: Write>(
             json_int(w, i2, "pairs_analyzed", ps.pairs_analyzed, true)?;
             json_int(w, i2, "pairs_removed", ps.pairs_removed, true)?;
             json_int(w, i2, "pairs_removed_n", ps.pairs_removed_n, true)?;
-            json_int(w, i2, "pairs_removed_too_long", ps.pairs_removed_too_long, true)?;
+            json_int(
+                w,
+                i2,
+                "pairs_removed_too_long",
+                ps.pairs_removed_too_long,
+                true,
+            )?;
             json_int(w, i2, "r1_unpaired", ps.r1_unpaired, true)?;
             json_int(w, i2, "r2_unpaired", ps.r2_unpaired, false)?;
             writeln!(w, "{}}}", i1)?;
@@ -676,45 +959,110 @@ fn json_escape_string(s: &str) -> String {
     escaped
 }
 
-fn json_str<W: Write>(w: &mut W, indent: &str, key: &str, value: &str, comma: bool) -> std::io::Result<()> {
-    writeln!(w, "{}\"{}\": \"{}\"{}",
-        indent, key, json_escape_string(value), if comma { "," } else { "" })
+fn json_str<W: Write>(
+    w: &mut W,
+    indent: &str,
+    key: &str,
+    value: &str,
+    comma: bool,
+) -> std::io::Result<()> {
+    writeln!(
+        w,
+        "{}\"{}\": \"{}\"{}",
+        indent,
+        key,
+        json_escape_string(value),
+        if comma { "," } else { "" }
+    )
 }
 
-fn json_int<W: Write>(w: &mut W, indent: &str, key: &str, value: usize, comma: bool) -> std::io::Result<()> {
-    writeln!(w, "{}\"{}\": {}{}",
-        indent, key, value, if comma { "," } else { "" })
+fn json_int<W: Write>(
+    w: &mut W,
+    indent: &str,
+    key: &str,
+    value: usize,
+    comma: bool,
+) -> std::io::Result<()> {
+    writeln!(
+        w,
+        "{}\"{}\": {}{}",
+        indent,
+        key,
+        value,
+        if comma { "," } else { "" }
+    )
 }
 
-fn json_float<W: Write>(w: &mut W, indent: &str, key: &str, value: f64, comma: bool) -> std::io::Result<()> {
+fn json_float<W: Write>(
+    w: &mut W,
+    indent: &str,
+    key: &str,
+    value: f64,
+    comma: bool,
+) -> std::io::Result<()> {
     if !value.is_finite() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("non-finite float value for JSON key \"{}\": {}", key, value),
         ));
     }
-    writeln!(w, "{}\"{}\": {}{}",
-        indent, key, value, if comma { "," } else { "" })
+    writeln!(
+        w,
+        "{}\"{}\": {}{}",
+        indent,
+        key,
+        value,
+        if comma { "," } else { "" }
+    )
 }
 
-fn json_bool<W: Write>(w: &mut W, indent: &str, key: &str, value: bool, comma: bool) -> std::io::Result<()> {
-    writeln!(w, "{}\"{}\": {}{}",
-        indent, key, if value { "true" } else { "false" }, if comma { "," } else { "" })
+fn json_bool<W: Write>(
+    w: &mut W,
+    indent: &str,
+    key: &str,
+    value: bool,
+    comma: bool,
+) -> std::io::Result<()> {
+    writeln!(
+        w,
+        "{}\"{}\": {}{}",
+        indent,
+        key,
+        if value { "true" } else { "false" },
+        if comma { "," } else { "" }
+    )
 }
 
 fn json_null<W: Write>(w: &mut W, indent: &str, key: &str, comma: bool) -> std::io::Result<()> {
-    writeln!(w, "{}\"{}\": null{}",
-        indent, key, if comma { "," } else { "" })
+    writeln!(
+        w,
+        "{}\"{}\": null{}",
+        indent,
+        key,
+        if comma { "," } else { "" }
+    )
 }
 
-fn json_opt_int<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<usize>, comma: bool) -> std::io::Result<()> {
+fn json_opt_int<W: Write>(
+    w: &mut W,
+    indent: &str,
+    key: &str,
+    value: Option<usize>,
+    comma: bool,
+) -> std::io::Result<()> {
     match value {
         Some(v) => json_int(w, indent, key, v, comma),
         None => json_null(w, indent, key, comma),
     }
 }
 
-fn json_opt_float<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<f64>, comma: bool) -> std::io::Result<()> {
+fn json_opt_float<W: Write>(
+    w: &mut W,
+    indent: &str,
+    key: &str,
+    value: Option<f64>,
+    comma: bool,
+) -> std::io::Result<()> {
     match value {
         Some(v) => json_float(w, indent, key, v, comma),
         None => json_null(w, indent, key, comma),
@@ -722,7 +1070,11 @@ fn json_opt_float<W: Write>(w: &mut W, indent: &str, key: &str, value: Option<f6
 }
 
 /// Write the "No. of allowed errors" section (cosmetic, not parsed by MultiQC).
-fn write_allowed_errors<W: Write>(w: &mut W, adapter_len: usize, error_rate: f64) -> std::io::Result<()> {
+fn write_allowed_errors<W: Write>(
+    w: &mut W,
+    adapter_len: usize,
+    error_rate: f64,
+) -> std::io::Result<()> {
     writeln!(w, "No. of allowed errors:")?;
     let mut parts = Vec::new();
     let mut range_start = 1;
@@ -732,15 +1084,23 @@ fn write_allowed_errors<W: Write>(w: &mut W, adapter_len: usize, error_rate: f64
         let max_err = (len as f64 * error_rate).floor() as usize;
         if max_err != current_max_err {
             // Close previous range
-            if range_start <= len - 1 {
-                parts.push(format!("{}-{} bp: {}", range_start, len - 1, current_max_err));
+            if range_start < len {
+                parts.push(format!(
+                    "{}-{} bp: {}",
+                    range_start,
+                    len - 1,
+                    current_max_err
+                ));
             }
             range_start = len;
             current_max_err = max_err;
         }
     }
     // Close final range
-    parts.push(format!("{}-{} bp: {}", range_start, adapter_len, current_max_err));
+    parts.push(format!(
+        "{}-{} bp: {}",
+        range_start, adapter_len, current_max_err
+    ));
     writeln!(w, "{}", parts.join("; "))?;
 
     Ok(())
@@ -878,8 +1238,8 @@ mod tests {
         let mut buf = Vec::new();
         write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
 
-        let json: serde_json::Value = serde_json::from_slice(&buf)
-            .expect("JSON output must be valid");
+        let json: serde_json::Value =
+            serde_json::from_slice(&buf).expect("JSON output must be valid");
 
         assert_eq!(json["tool"], "Trim Galore");
         assert_eq!(json["schema_version"], 1);
@@ -890,8 +1250,14 @@ mod tests {
 
         // Parameters
         assert_eq!(json["parameters"]["quality_cutoff"], 20);
-        assert_eq!(json["parameters"]["adapters"][0]["sequence"], "AGATCGGAAGAGC");
-        assert_eq!(json["parameters"]["adapters_r2"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            json["parameters"]["adapters"][0]["sequence"],
+            "AGATCGGAAGAGC"
+        );
+        assert_eq!(
+            json["parameters"]["adapters_r2"].as_array().unwrap().len(),
+            0
+        );
         assert_eq!(json["parameters"]["times"], 1);
         assert_eq!(json["parameters"]["error_rate"], 0.1);
         assert_eq!(json["parameters"]["stringency"], 1);
@@ -1029,7 +1395,9 @@ mod tests {
         write_json_report(&mut buf2, &config, &stats, None, 1, &extra).unwrap();
         let json2: serde_json::Value = serde_json::from_slice(&buf2).unwrap();
 
-        let ld2 = json2["adapter_trimming"][0]["length_distribution"].as_object().unwrap();
+        let ld2 = json2["adapter_trimming"][0]["length_distribution"]
+            .as_object()
+            .unwrap();
         assert_eq!(ld2.len(), 2);
         assert_eq!(ld2["3"], 42);
         assert_eq!(ld2["7"], 7);
@@ -1038,7 +1406,8 @@ mod tests {
     #[test]
     fn test_write_json_report_special_characters() {
         let mut config = test_config();
-        config.command_line = r#"trim_galore --fastqc_args "--nogroup" "my file.fq.gz""#.to_string();
+        config.command_line =
+            r#"trim_galore --fastqc_args "--nogroup" "my file.fq.gz""#.to_string();
         config.input_filename = "my file.fq.gz".to_string();
         config.input_filenames = vec!["my file.fq.gz".to_string()];
 
@@ -1049,8 +1418,8 @@ mod tests {
         write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
 
         // Must produce valid JSON despite quotes and spaces in values
-        let json: serde_json::Value = serde_json::from_slice(&buf)
-            .expect("JSON with special characters must be valid");
+        let json: serde_json::Value =
+            serde_json::from_slice(&buf).expect("JSON with special characters must be valid");
 
         assert_eq!(json["input_filenames"][0], "my file.fq.gz");
         // Command line with embedded quotes is escaped correctly
@@ -1084,8 +1453,8 @@ mod tests {
         let extra = test_extra_params();
         let mut buf = Vec::new();
         write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&buf)
-            .expect("Multi-adapter JSON must be valid");
+        let json: serde_json::Value =
+            serde_json::from_slice(&buf).expect("Multi-adapter JSON must be valid");
 
         // Parameters: adapters array with 3 elements
         let params_adapters = json["parameters"]["adapters"].as_array().unwrap();
@@ -1153,9 +1522,9 @@ mod tests {
         worker_b.total_reads_with_adapter = 40;
         worker_b.reads_with_adapter = vec![30, 15, 0];
         worker_b.adapter_length_counts = vec![
-            vec![0, 10, 15, 5],  // adapter 0: longer length distribution than worker A
-            vec![0, 0, 8, 7],    // adapter 1: 8 at len=2, 7 at len=3
-            vec![],              // adapter 2: no matches
+            vec![0, 10, 15, 5], // adapter 0: longer length distribution than worker A
+            vec![0, 0, 8, 7],   // adapter 1: 8 at len=2, 7 at len=3
+            vec![],             // adapter 2: no matches
         ];
 
         main_stats.merge(&worker_a);
@@ -1188,8 +1557,8 @@ mod tests {
         let mut buf = Vec::new();
         write_json_report(&mut buf, &config, &stats, None, 1, &extra).unwrap();
 
-        let json: serde_json::Value = serde_json::from_slice(&buf)
-            .expect("All-zero JSON must be valid");
+        let json: serde_json::Value =
+            serde_json::from_slice(&buf).expect("All-zero JSON must be valid");
 
         assert_eq!(json["read_processing"]["total_reads"], 0);
         assert_eq!(json["read_processing"]["reads_written"], 0);

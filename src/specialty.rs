@@ -3,7 +3,7 @@
 //! These modes (--hardtrim5, --hardtrim3, --clock, --implicon) process
 //! input files with simple fixed operations and exit immediately.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 
 use crate::fastq::{FastqReader, FastqWriter};
@@ -21,8 +21,12 @@ pub fn hardtrim5(
     cores: usize,
 ) -> Result<()> {
     let output_path = hardtrim_output_name(input, keep, "5prime", output_dir, gzip);
-    eprintln!("Writing hard-trimmed (first {}bp) version of '{}' to '{}'",
-        keep, input.display(), output_path.display());
+    eprintln!(
+        "Writing hard-trimmed (first {}bp) version of '{}' to '{}'",
+        keep,
+        input.display(),
+        output_path.display()
+    );
 
     let mut reader = FastqReader::open(input)?;
     let mut writer = FastqWriter::create(&output_path, gzip, cores)?;
@@ -59,8 +63,12 @@ pub fn hardtrim3(
     cores: usize,
 ) -> Result<()> {
     let output_path = hardtrim_output_name(input, keep, "3prime", output_dir, gzip);
-    eprintln!("Writing hard-trimmed (last {}bp) version of '{}' to '{}'",
-        keep, input.display(), output_path.display());
+    eprintln!(
+        "Writing hard-trimmed (last {}bp) version of '{}' to '{}'",
+        keep,
+        input.display(),
+        output_path.display()
+    );
 
     let mut reader = FastqReader::open(input)?;
     let mut writer = FastqWriter::create(&output_path, gzip, cores)?;
@@ -110,8 +118,16 @@ pub fn clock(
     let out1 = clock_output_name(input_r1, "R1", output_dir, gzip);
     let out2 = clock_output_name(input_r2, "R2", output_dir, gzip);
 
-    eprintln!("Writing Clock-processed version of '{}' to '{}'", input_r1.display(), out1.display());
-    eprintln!("Writing Clock-processed version of '{}' to '{}'", input_r2.display(), out2.display());
+    eprintln!(
+        "Writing Clock-processed version of '{}' to '{}'",
+        input_r1.display(),
+        out1.display()
+    );
+    eprintln!(
+        "Writing Clock-processed version of '{}' to '{}'",
+        input_r2.display(),
+        out2.display()
+    );
 
     let mut reader_r1 = FastqReader::open(input_r1)?;
     let mut reader_r2 = FastqReader::open(input_r2)?;
@@ -139,7 +155,9 @@ pub fn clock(
                 if r1_seq.len() < 13 || r2_seq.len() < 15 {
                     bail!(
                         "Read too short for Clock processing at read {}: R1={}bp, R2={}bp (need >=13, >=15)",
-                        count, r1_seq.len(), r2_seq.len()
+                        count,
+                        r1_seq.len(),
+                        r2_seq.len()
                     );
                 }
 
@@ -188,7 +206,10 @@ pub fn clock(
         "N/A".to_string()
     };
     eprintln!("\nSequences processed in total: {}", count);
-    eprintln!("thereof had fixed sequence CAGT in both R1 and R2: {} ({}%)\n", filtered_count, perc);
+    eprintln!(
+        "thereof had fixed sequence CAGT in both R1 and R2: {} ({}%)\n",
+        filtered_count, perc
+    );
 
     Ok(())
 }
@@ -209,8 +230,16 @@ pub fn implicon(
     let out1 = implicon_output_name(input_r1, umi_length, "R1", output_dir, gzip);
     let out2 = implicon_output_name(input_r2, umi_length, "R2", output_dir, gzip);
 
-    eprintln!("Writing UMI-trimmed version of '{}' to '{}'", input_r1.display(), out1.display());
-    eprintln!("Writing UMI-trimmed version of '{}' to '{}'", input_r2.display(), out2.display());
+    eprintln!(
+        "Writing UMI-trimmed version of '{}' to '{}'",
+        input_r1.display(),
+        out1.display()
+    );
+    eprintln!(
+        "Writing UMI-trimmed version of '{}' to '{}'",
+        input_r2.display(),
+        out2.display()
+    );
 
     let mut reader_r1 = FastqReader::open(input_r1)?;
     let mut reader_r2 = FastqReader::open(input_r2)?;
@@ -233,7 +262,9 @@ pub fn implicon(
                 if r2.seq.len() < umi_length {
                     bail!(
                         "R2 read {} is shorter ({} bp) than UMI length ({})",
-                        count, r2.seq.len(), umi_length
+                        count,
+                        r2.seq.len(),
+                        umi_length
                     );
                 }
 
@@ -271,7 +302,13 @@ pub fn implicon(
 
 // --- Output naming helpers ---
 
-fn hardtrim_output_name(input: &Path, keep: usize, end: &str, output_dir: Option<&Path>, gzip: bool) -> PathBuf {
+fn hardtrim_output_name(
+    input: &Path,
+    keep: usize,
+    end: &str,
+    output_dir: Option<&Path>,
+    gzip: bool,
+) -> PathBuf {
     let stem = naming::strip_fastq_extensions(input);
     let ext = if gzip { ".fq.gz" } else { ".fq" };
     let filename = format!("{}.{}bp_{}{}", stem, keep, end, ext);
@@ -291,7 +328,13 @@ fn clock_output_name(input: &Path, read: &str, output_dir: Option<&Path>, gzip: 
     }
 }
 
-fn implicon_output_name(input: &Path, umi_len: usize, read: &str, output_dir: Option<&Path>, gzip: bool) -> PathBuf {
+fn implicon_output_name(
+    input: &Path,
+    umi_len: usize,
+    read: &str,
+    output_dir: Option<&Path>,
+    gzip: bool,
+) -> PathBuf {
     let mut stem = naming::strip_fastq_extensions(input);
     // TrimGalore strips _R1 from R1 stem and _R2/_R3/_R4 from R2 stem
     // to avoid double-R in the output filename (e.g., sample_R1_8bp_UMI_R1.fastq)

@@ -55,8 +55,8 @@ pub fn find_3prime_adapter(
     // First row: dp[0][j] = 0 for all j (adapter can start anywhere — free read prefix skip)
     // First column: dp[i][0] = i (aligning i adapter bases to nothing costs i deletions)
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
-    for i in 1..=m {
-        dp[i][0] = i;
+    for (i, row) in dp.iter_mut().enumerate().skip(1) {
+        row[0] = i;
     }
 
     for i in 1..=m {
@@ -64,8 +64,8 @@ pub fn find_3prime_adapter(
             let cost_sub = if adapter[i - 1] == read[j - 1] { 0 } else { 1 };
 
             dp[i][j] = (dp[i - 1][j - 1] + cost_sub) // match/mismatch
-                .min(dp[i - 1][j] + 1)                // deletion (gap in read)
-                .min(dp[i][j - 1] + 1);               // insertion (gap in adapter)
+                .min(dp[i - 1][j] + 1) // deletion (gap in read)
+                .min(dp[i][j - 1] + 1); // insertion (gap in adapter)
         }
     }
 
@@ -244,7 +244,11 @@ mod tests {
         let adapter = b"AGATCGGAAGAGC";
         let m = find_3prime_adapter(read, adapter, 0.1, 1).unwrap();
         // Must find the leftmost match (position ~1), not a later perfect match
-        assert!(m.read_start <= 1, "Expected read_start <= 1, got {}", m.read_start);
+        assert!(
+            m.read_start <= 1,
+            "Expected read_start <= 1, got {}",
+            m.read_start
+        );
         assert_eq!(m.overlap, 13);
     }
 

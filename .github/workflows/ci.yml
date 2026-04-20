@@ -4,11 +4,20 @@ on:
   push:
     branches: [master, dev, optimus_prime]
   pull_request:
-    branches: [master]
+    # Trigger on PRs targeting any active integration branch — `optimus_prime`
+    # is the active dev branch for the Oxidized Edition; `master` stays listed
+    # for the Perl release line.
+    branches: [master, optimus_prime]
+  # Weekly cron so the `audit` job surfaces new RustSec advisories even during
+  # quiet weeks (no pushes / PRs).  Non-audit jobs skip on schedule via the
+  # per-job `if: github.event_name != 'schedule'` guard below.
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 jobs:
   rust-tests:
     name: Rust Tests
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -34,10 +43,102 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      - name: Verify --version carries provenance
+        run: |
+          # Content-targeted grep (not line count): the provenance line must match
+          # <git-hash> — <os>/<arch> — built <ISO-8601-UTC>. The em-dash is literal.
+          ./target/release/trim_galore --version \
+            | grep -qE '^[0-9a-f]{7,40} — [a-z0-9_]+/[a-z0-9_]+ — built [0-9T:Z-]+$'
+          # -V must NOT carry the provenance line (stays the short form).
+          ! ./target/release/trim_galore -V \
+            | grep -qE '^[0-9a-f]{7,40} — '
+
+  reproducibility:
+    name: Reproducibility (SOURCE_DATE_EPOCH)
+    # Dedicated job with its own cache — `cargo clean` inside here would trash
+    # the `rust-tests` cache if co-located. Parallel to `rust-tests` so no
+    # wall-clock cost.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo (reproducibility job)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          # target/ intentionally excluded — this job does `cargo clean` twice.
+          key: ${{ runner.os }}-cargo-repro-${{ hashFiles('Cargo.lock') }}
+          # Narrow to the repro-specific prefix so we don't restore `target/`
+          # from the `rust-tests` cache (which would be wiped by `cargo clean`
+          # anyway — just avoids wasting restore bandwidth).
+          restore-keys: ${{ runner.os }}-cargo-repro-
+      - name: Build twice with same SOURCE_DATE_EPOCH, assert bit-identical
+        run: |
+          # `export` (not `VAR=x cmd1 && cmd2`) — the shell-prefix form only
+          # scopes the var to cmd1, so `cargo build` after the `&&` would fall
+          # back to wall-clock time and break bit-identity.
+          export SOURCE_DATE_EPOCH=1700000000
+          cargo clean && cargo build --release
+          sha256sum target/release/trim_galore | awk '{print $1}' > /tmp/sha_a
+          cargo clean && cargo build --release
+          sha256sum target/release/trim_galore | awk '{print $1}' > /tmp/sha_b
+          diff /tmp/sha_a /tmp/sha_b
+      - name: Malformed SOURCE_DATE_EPOCH hard-fails build
+        run: |
+          # Build script must panic with a message mentioning SOURCE_DATE_EPOCH,
+          # not silently fall back to wall-clock time.
+          set +e
+          SOURCE_DATE_EPOCH=garbage cargo clean
+          SOURCE_DATE_EPOCH=garbage cargo build --release 2>&1 | tee /tmp/sde.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "SOURCE_DATE_EPOCH" /tmp/sde.log
+
+  lint:
+    name: Lint (fmt + clippy)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (release, all targets, -D warnings)
+        run: cargo clippy --all-targets --release -- -D warnings
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   validation:
     name: Validate vs Perl TrimGalore
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    needs: [rust-tests]
+    needs: [rust-tests, lint]
     defaults:
       run:
         shell: bash -l {0}
