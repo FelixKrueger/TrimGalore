@@ -259,9 +259,13 @@ jobs:
       - name: Validate --basename rejected with multi-pair
         run: |
           set +e
+          # Use two DISTINCT pairs — R1/R2 repeated twice now trips the
+          # cross-pair duplicate check (added in PR #219) before the basename
+          # branch is reached. The assertion here is about basename rejection,
+          # not duplicate detection, so exercise with BS-seq + SRR24766921.
           ./target/release/trim_galore --paired --basename foo \
             test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz \
-            test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz 2>&1 | tee /tmp/bn.log
+            test_files/SRR24766921_RRBS_R1.fastq.gz test_files/SRR24766921_RRBS_R2.fastq.gz 2>&1 | tee /tmp/bn.log
           rc=${PIPESTATUS[0]}
           set -e
           test $rc -ne 0
@@ -317,7 +321,10 @@ jobs:
           set -e
           test $rc -ne 0
           grep -q "Output path collision" /tmp/case.log
-          grep -q "case-insensitive match" /tmp/case.log
+          # PR #219 reworded the qualifier from "case-insensitive match"
+          # to "case-insensitive, for APFS/NTFS safety" when it switched the
+          # error to name both colliding paths. Tighten grep to the new form.
+          grep -q "case-insensitive, for APFS/NTFS safety" /tmp/case.log
           test -z "$(ls /tmp/op_case/out/*.fq.gz 2>/dev/null)"
 
       - name: Validate multi-pair with --cores 1 (sequential path)

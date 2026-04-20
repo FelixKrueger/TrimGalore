@@ -40,6 +40,14 @@
   is case-insensitive (ASCII) so filenames differing only in letter-case are
   caught on APFS/NTFS (macOS/Windows default) as well as ext4 (Linux). Fixes
   issue #216.
+  - On opt-in case-sensitive APFS/ZFS volumes, filenames differing only in
+    letter-case are legitimately distinct; the pre-flight will still reject
+    them. Use distinct base names or `--basename` per sample to work around
+    this.
+  - On partial failure at pair K, pairs 1..K&#8722;1 retain their complete
+    outputs on disk and pair K may have a partial output file; pairs
+    K+1..N are not attempted. Inspect and re-run only the failing pair —
+    matches v0.6.x Perl behaviour (no rollback across pairs).
 
 
 ### Version 2.1.0 (Beta, Release on 18 Apr 2026)
