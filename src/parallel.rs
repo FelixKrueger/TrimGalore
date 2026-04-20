@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::mpsc;
 
 use crate::fastq::{FastqReader, FastqRecord};
-use crate::filters::{self, FilterResult, PairFilterResult};
+use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
 use crate::report::{PairValidationStats, TrimStats};
 use crate::trimmer::{self, TrimConfig, update_adapter_stats};
 
@@ -66,8 +66,7 @@ pub fn run_paired_end_parallel(
     config: &TrimConfig,
     cores: usize,
     gzip: bool,
-    unpaired_length_r1: usize,
-    unpaired_length_r2: usize,
+    unpaired: UnpairedLengths,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
     let retain_unpaired = unpaired_r1_path.is_some();
 
@@ -99,8 +98,7 @@ pub fn run_paired_end_parallel(
                         config,
                         gzip,
                         retain_unpaired,
-                        unpaired_length_r1,
-                        unpaired_length_r2,
+                        unpaired,
                     ) {
                         Ok(result) => {
                             if rtx.send(result).is_err() {
@@ -225,7 +223,6 @@ pub fn run_paired_end_parallel(
 }
 
 /// Process a batch of paired reads: trim, filter, compress into gzip blocks.
-#[allow(clippy::too_many_arguments)]
 fn process_paired_batch(
     batch_seq: u64,
     reads_r1: &mut [FastqRecord],
@@ -233,8 +230,7 @@ fn process_paired_batch(
     config: &TrimConfig,
     gzip: bool,
     retain_unpaired: bool,
-    unpaired_length_r1: usize,
-    unpaired_length_r2: usize,
+    unpaired: UnpairedLengths,
 ) -> Result<PairedBatchResult> {
     let mut stats_r1 = TrimStats::with_adapter_count(config.adapters.len());
     let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
@@ -274,8 +270,7 @@ fn process_paired_batch(
                 &mut gz_r2,
                 gz_up_r1.as_mut(),
                 gz_up_r2.as_mut(),
-                unpaired_length_r1,
-                unpaired_length_r2,
+                unpaired,
             )?;
 
             gz_r1.finish()?;
@@ -307,8 +302,7 @@ fn process_paired_batch(
             } else {
                 None
             },
-            unpaired_length_r1,
-            unpaired_length_r2,
+            unpaired,
         )?;
     }
 
@@ -340,8 +334,7 @@ fn process_pairs<W: Write>(
     writer_r2: &mut W,
     mut writer_up_r1: Option<&mut W>,
     mut writer_up_r2: Option<&mut W>,
-    unpaired_length_r1: usize,
-    unpaired_length_r2: usize,
+    unpaired: UnpairedLengths,
 ) -> Result<()> {
     for (r1, r2) in reads_r1.iter_mut().zip(reads_r2.iter_mut()) {
         stats_r1.total_reads += 1;
@@ -406,8 +399,7 @@ fn process_pairs<W: Write>(
             config.length_cutoff,
             config.max_length,
             config.max_n.clone(),
-            unpaired_length_r1,
-            unpaired_length_r2,
+            unpaired,
         ) {
             PairFilterResult::Pass => {
                 stats_r1.total_bp_written += r1.seq.len();

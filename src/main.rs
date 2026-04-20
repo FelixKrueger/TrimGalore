@@ -8,7 +8,7 @@ use trim_galore::adapter;
 use trim_galore::cli::Cli;
 use trim_galore::demux;
 use trim_galore::fastq::{FastqReader, FastqWriter};
-use trim_galore::filters::MaxNFilter;
+use trim_galore::filters::{MaxNFilter, UnpairedLengths};
 use trim_galore::io as naming;
 use trim_galore::parallel;
 use trim_galore::report;
@@ -625,8 +625,10 @@ fn run_paired(
             config,
             cli.cores,
             gzip,
-            cli.length_1,
-            cli.length_2,
+            UnpairedLengths {
+                r1: cli.length_1,
+                r2: cli.length_2,
+            },
         )?
     } else {
         // Sequential path (--cores 1)
@@ -651,8 +653,10 @@ fn run_paired(
             unpaired_w1.as_mut(),
             unpaired_w2.as_mut(),
             config,
-            cli.length_1,
-            cli.length_2,
+            UnpairedLengths {
+                r1: cli.length_1,
+                r2: cli.length_2,
+            },
         )?;
 
         writer_r1.flush()?;

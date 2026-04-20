@@ -56,6 +56,15 @@ pub enum PairFilterResult {
     TooLong,
 }
 
+/// Per-side minimum length thresholds for unpaired rescue under
+/// `--retain_unpaired`. When a pair fails the length check, a read survives
+/// on its own if its length meets the corresponding threshold.
+#[derive(Debug, Clone, Copy)]
+pub struct UnpairedLengths {
+    pub r1: usize,
+    pub r2: usize,
+}
+
 /// Check if a read pair passes filters.
 ///
 /// Key asymmetry: N-content failure always discards the entire pair (no
@@ -67,8 +76,7 @@ pub fn filter_paired_end(
     length_cutoff: usize,
     max_length: Option<usize>,
     max_n: Option<MaxNFilter>,
-    unpaired_length_r1: usize,
-    unpaired_length_r2: usize,
+    unpaired: UnpairedLengths,
 ) -> PairFilterResult {
     // N-content check — ALWAYS discards entire pair, no rescue
     if let Some(ref max_n_filter) = max_n {
@@ -83,8 +91,8 @@ pub fn filter_paired_end(
 
     if r1_short || r2_short {
         return PairFilterResult::TooShort {
-            r1_ok: !r1_short && r1.len() >= unpaired_length_r1,
-            r2_ok: !r2_short && r2.len() >= unpaired_length_r2,
+            r1_ok: !r1_short && r1.len() >= unpaired.r1,
+            r2_ok: !r2_short && r2.len() >= unpaired.r2,
         };
     }
 
@@ -182,7 +190,14 @@ mod tests {
     fn test_paired_n_filter_no_rescue() {
         let r1 = make_record("ACGTACGT");
         let r2 = make_record("NNNNNNNN"); // All N
-        let result = filter_paired_end(&r1, &r2, 5, None, Some(MaxNFilter::Count(2)), 35, 35);
+        let result = filter_paired_end(
+            &r1,
+            &r2,
+            5,
+            None,
+            Some(MaxNFilter::Count(2)),
+            UnpairedLengths { r1: 35, r2: 35 },
+        );
         assert_eq!(result, PairFilterResult::TooManyN);
     }
 
@@ -190,10 +205,10 @@ mod tests {
     fn test_paired_length_rescue() {
         let r1 = make_record("ACGTACGTACGT"); // 12bp, long enough
         let r2 = make_record("AC"); // 2bp, too short
-        let result = filter_paired_end(&r1, &r2, 5, None, None, 10, 10);
+        let result = filter_paired_end(&r1, &r2, 5, None, None, UnpairedLengths { r1: 10, r2: 10 });
         match result {
             PairFilterResult::TooShort { r1_ok, r2_ok } => {
-                assert!(r1_ok); // R1 is rescuable (>= unpaired_length_r1)
+                assert!(r1_ok); // R1 is rescuable (>= unpaired.r1)
                 assert!(!r2_ok); // R2 is too short even for unpaired
             }
             _ => panic!("Expected TooShort"),
