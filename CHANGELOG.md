@@ -3,6 +3,24 @@
 
 ### Version 2.1.0-beta.2 (Pending)
 
+#### New features (since v2.1.0-beta.1)
+- `--version` now prints build provenance on a second line: `<git-hash> — <target>
+  — built <ISO-8601 UTC timestamp>`. The short form `-V` remains unchanged (one
+  line, matches the original terse format). Useful for bug reports — users can
+  paste `trim_galore --version` to pinpoint the exact build.
+- Builds are now **reproducible**: setting `SOURCE_DATE_EPOCH` to a fixed Unix
+  timestamp (Debian reproducible-builds spec) produces a bit-identical binary
+  across runs. Unset, the build stamps the current wall-clock time as before.
+  Malformed values hard-fail the build rather than silently falling back.
+
+#### Infrastructure (contributor-facing, no runtime effect)
+- New CI gates on every PR: `cargo fmt --check` + `cargo clippy -D warnings`
+  (lint), a dedicated reproducibility job that builds the release binary twice
+  under a fixed `SOURCE_DATE_EPOCH` and asserts bit-identity, and a weekly
+  `rustsec/audit-check` for dependency advisories.
+- Dependabot enabled for cargo + github-actions ecosystems (weekly, Monday,
+  limit 5, routed to `@FelixKrueger`).
+
 #### Bug fixes (since v2.1.0-beta.1)
 - `--paired` now accepts any even number of input files and processes them as
   consecutive R1/R2 pairs, restoring v0.6.x Perl behaviour. Beta 1 rejected
