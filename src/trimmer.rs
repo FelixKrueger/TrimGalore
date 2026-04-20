@@ -355,8 +355,7 @@ pub fn run_paired_end(
     mut unpaired_r1: Option<&mut FastqWriter>,
     mut unpaired_r2: Option<&mut FastqWriter>,
     config: &TrimConfig,
-    unpaired_length_r1: usize,
-    unpaired_length_r2: usize,
+    unpaired: crate::filters::UnpairedLengths,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
     let mut stats_r1 = TrimStats::with_adapter_count(config.adapters.len());
     let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
@@ -433,8 +432,7 @@ pub fn run_paired_end(
                     config.length_cutoff,
                     config.max_length,
                     config.max_n.clone(),
-                    unpaired_length_r1,
-                    unpaired_length_r2,
+                    unpaired,
                 ) {
                     PairFilterResult::Pass => {
                         stats_r1.total_bp_written += r1.seq.len();
