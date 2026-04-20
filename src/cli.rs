@@ -302,6 +302,26 @@ impl Cli {
                     );
                 }
             }
+            // Catch accidental copy-paste of the same pair twice. Without this,
+            // a duplicate pair trips the case-insensitive output-collision
+            // pre-flight in main() with an APFS/NTFS message that misdirects
+            // the user — here we emit a precise "duplicate of pair N" error.
+            let pairs: Vec<(&std::path::PathBuf, &std::path::PathBuf)> =
+                self.input.chunks(2).map(|c| (&c[0], &c[1])).collect();
+            for (i, (r1, r2)) in pairs.iter().enumerate() {
+                for (j, (pr1, pr2)) in pairs.iter().enumerate().take(i) {
+                    if r1 == pr1 && r2 == pr2 {
+                        anyhow::bail!(
+                            "Pair {} ({}, {}) is a duplicate of pair {}. \
+                             Did you mean to pass different files?",
+                            i + 1,
+                            r1.display(),
+                            r2.display(),
+                            j + 1
+                        );
+                    }
+                }
+            }
         }
 
         if !self.paired && self.input.len() > 1 && self.basename.is_some() {
@@ -433,5 +453,102 @@ impl Cli {
     /// Otherwise uses the standard `--quality` value.
     pub fn effective_quality_cutoff(&self) -> u8 {
         self.nextseq.unwrap_or(self.quality)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    // All fixtures live in test_files/ and are guaranteed to exist under the
+    // repo root during `cargo test` (cwd = crate root).
+    const R1: &str = "test_files/BS-seq_10K_R1.fastq.gz";
+    const R2: &str = "test_files/BS-seq_10K_R2.fastq.gz";
+    const ALT_R1: &str = "test_files/SRR24766921_RRBS_R1.fastq.gz";
+    const ALT_R2: &str = "test_files/SRR24766921_RRBS_R2.fastq.gz";
+
+    #[test]
+    fn test_validate_paired_odd_count_rejected() {
+        for inputs in [
+            vec![R1],
+            vec![R1, R2, ALT_R1],
+            vec![R1, R2, ALT_R1, ALT_R2, R1],
+        ] {
+            let mut argv = vec!["trim_galore", "--paired"];
+            argv.extend(inputs.iter().copied());
+            let cli = Cli::parse_from(argv);
+            let err = cli.validate().unwrap_err().to_string();
+            assert!(
+                err.contains("even number of input files"),
+                "expected even-number error, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_paired_r1_r2_equal_rejected_within_pair() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", R1, R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("appear to be the same file"),
+            "expected within-pair duplicate error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_paired_duplicate_pair_rejected_across_pairs() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", R1, R2, R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("duplicate of pair"),
+            "expected cross-pair duplicate error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_paired_basename_rejected_multi_pair() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--basename",
+            "foo",
+            R1,
+            R2,
+            ALT_R1,
+            ALT_R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("basename cannot be used with multiple"),
+            "expected multi-pair basename rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_paired_single_end_basename_still_allowed() {
+        // Regression guard: SE `--basename` with a single input must still pass.
+        let cli = Cli::parse_from(["trim_galore", "--basename", "foo", R1]);
+        cli.validate()
+            .expect("SE --basename with one input should validate");
+    }
+
+    #[test]
+    fn test_validate_paired_two_files_accepted() {
+        // Regression guard: the 2-file golden path must keep working.
+        let cli = Cli::parse_from(["trim_galore", "--paired", R1, R2]);
+        cli.validate().expect("two-file paired-end should validate");
+    }
+
+    #[test]
+    fn test_validate_clock_still_requires_exactly_2() {
+        // Regression guard: --clock must not have been widened by the
+        // multi-pair --paired relaxation.
+        let cli = Cli::parse_from(["trim_galore", "--clock", R1, R2, ALT_R1, ALT_R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("clock requires exactly 2"),
+            "expected --clock strict-2 rejection, got: {err}"
+        );
     }
 }

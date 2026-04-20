@@ -86,7 +86,8 @@ fn main() -> Result<()> {
         // Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
         // false-positive, but the penalty is a loud early error rather than
         // silent data loss.
-        let mut out_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
+            std::collections::HashMap::new();
         let norm = |p: &std::path::Path| -> String { p.to_string_lossy().to_ascii_lowercase() };
         for chunk in cli.input.chunks(2) {
             let (o1, o2) = naming::paired_end_output_names(
@@ -109,12 +110,13 @@ fn main() -> Result<()> {
                 candidates.push(u2);
             }
             for p in candidates {
-                if !out_paths.insert(norm(&p)) {
+                if let Some(existing) = out_paths.insert(norm(&p), p.clone()) {
                     anyhow::bail!(
-                        "Output path collision: {} would be written twice \
-                         (case-insensitive match, for APFS/NTFS safety). \
+                        "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                         {} and {} would be written to the same file. \
                          Check that input pairs produce distinct output paths \
                          (e.g., different source directories or `--output-dir`).",
+                        existing.display(),
                         p.display()
                     );
                 }
