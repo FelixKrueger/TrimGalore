@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Version 2.1.0-beta.2 (Pending)
+### Version 2.1.0-beta.2 (Release on 20 Apr 2026)
 
 #### New features (since v2.1.0-beta.1)
 - `--version` now prints build provenance on a second line: `<git-hash> — <target>
