@@ -360,3 +360,250 @@ fn implicon_output_name(
         None => PathBuf::from(filename),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fastq::FastqRecord;
+
+    fn mk_rec(id: &str, seq: &str, qual: &str) -> FastqRecord {
+        FastqRecord {
+            id: id.to_string(),
+            seq: seq.to_string(),
+            qual: qual.to_string(),
+        }
+    }
+
+    fn write_fastq(path: &Path, records: &[FastqRecord]) -> Result<()> {
+        let mut w = FastqWriter::create(path, false, 1)?;
+        for r in records {
+            w.write_record(r)?;
+        }
+        w.flush()?;
+        Ok(())
+    }
+
+    fn read_fastq(path: &Path) -> Result<Vec<FastqRecord>> {
+        let mut reader = FastqReader::open(path)?;
+        let mut out = Vec::new();
+        while let Some(r) = reader.next_record()? {
+            out.push(r);
+        }
+        Ok(out)
+    }
+
+    // --- --clock ---
+
+    #[test]
+    fn test_clock_happy_path_extracts_umi_and_clips() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_clock_happy");
+        std::fs::create_dir_all(&dir)?;
+        let r1_path = dir.join("sample_R1.fq");
+        let r2_path = dir.join("sample_R2.fq");
+
+        // R1 layout: 8bp UMI + 4bp "CAGT" + 1bp + 7bp rest = 20bp, clipped at [13..] → 7bp rest
+        // R2 layout: 8bp UMI + 4bp "CAGT" + 3bp + 5bp rest = 20bp, clipped at [15..] → 5bp rest
+        write_fastq(
+            &r1_path,
+            &[
+                mk_rec("@read1", "AAAAAAAACAGTNCCCCCCC", "IIIIIIIIIIIIIIIIIIII"),
+                mk_rec("@read2", "GGGGGGGGCAGTNCCCCCCC", "IIIIIIIIIIIIIIIIIIII"),
+            ],
+        )?;
+        write_fastq(
+            &r2_path,
+            &[
+                mk_rec("@read1", "TTTTTTTTCAGTNNNGGGGG", "IIIIIIIIIIIIIIIIIIII"),
+                mk_rec("@read2", "AAAAAAAACAGTNNNGGGGG", "IIIIIIIIIIIIIIIIIIII"),
+            ],
+        )?;
+
+        clock(&r1_path, &r2_path, false, Some(&dir), 1)?;
+
+        let out_r1 = dir.join("sample_R1.clock_UMI.R1.fq");
+        let out_r2 = dir.join("sample_R2.clock_UMI.R2.fq");
+        assert!(out_r1.exists(), "R1 output should exist at {:?}", out_r1);
+        assert!(out_r2.exists(), "R2 output should exist at {:?}", out_r2);
+
+        let r1_recs = read_fastq(&out_r1)?;
+        let r2_recs = read_fastq(&out_r2)?;
+        assert_eq!(r1_recs.len(), 2);
+        assert_eq!(r2_recs.len(), 2);
+
+        // Read 1: both IDs get the same suffix (from R1 and R2 UMIs/fixes)
+        assert_eq!(
+            r1_recs[0].id,
+            "@read1:R1:AAAAAAAA:R2:TTTTTTTT:F1:CAGT:F2:CAGT"
+        );
+        assert_eq!(r2_recs[0].id, r1_recs[0].id);
+        assert_eq!(r1_recs[0].seq, "CCCCCCC"); // [13..] of AAAAAAAACAGTNCCCCCCC
+        assert_eq!(r2_recs[0].seq, "GGGGG"); // [15..] of TTTTTTTTCAGTNNNGGGGG
+        // Quality clipped to same length
+        assert_eq!(r1_recs[0].qual.len(), r1_recs[0].seq.len());
+        assert_eq!(r2_recs[0].qual.len(), r2_recs[0].seq.len());
+
+        // Read 2: different R1 UMI, same R2 UMI but different base
+        assert_eq!(
+            r1_recs[1].id,
+            "@read2:R1:GGGGGGGG:R2:AAAAAAAA:F1:CAGT:F2:CAGT"
+        );
+        assert_eq!(r1_recs[1].seq, "CCCCCCC");
+        assert_eq!(r2_recs[1].seq, "GGGGG");
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_clock_r1_too_short_errors() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_clock_r1_short");
+        std::fs::create_dir_all(&dir)?;
+        let r1_path = dir.join("short_R1.fq");
+        let r2_path = dir.join("short_R2.fq");
+
+        // R1 of 12bp — below the 13bp minimum
+        write_fastq(&r1_path, &[mk_rec("@r", "AAAAAAAACAGT", "IIIIIIIIIIII")])?;
+        write_fastq(
+            &r2_path,
+            &[mk_rec("@r", "TTTTTTTTCAGTNNNN", "IIIIIIIIIIIIIIII")],
+        )?;
+
+        let result = clock(&r1_path, &r2_path, false, Some(&dir), 1);
+        assert!(result.is_err(), "should bail on too-short R1");
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("too short"), "got: {}", err);
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_clock_r2_too_short_errors() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_clock_r2_short");
+        std::fs::create_dir_all(&dir)?;
+        let r1_path = dir.join("short_R1.fq");
+        let r2_path = dir.join("short_R2.fq");
+
+        // R1 OK (≥13), R2 only 14bp (below 15bp minimum)
+        write_fastq(
+            &r1_path,
+            &[mk_rec("@r", "AAAAAAAACAGTNC", "IIIIIIIIIIIIII")],
+        )?;
+        write_fastq(
+            &r2_path,
+            &[mk_rec("@r", "TTTTTTTTCAGTNN", "IIIIIIIIIIIIII")],
+        )?;
+
+        let result = clock(&r1_path, &r2_path, false, Some(&dir), 1);
+        assert!(result.is_err(), "should bail on too-short R2");
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    // --- --implicon ---
+
+    #[test]
+    fn test_implicon_happy_path_umi_8() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_implicon_happy");
+        std::fs::create_dir_all(&dir)?;
+        let r1_path = dir.join("sample_R1.fq");
+        let r2_path = dir.join("sample_R2.fq");
+
+        // R1 is untouched; R2 gets its first 8bp extracted as UMI, then clipped.
+        write_fastq(
+            &r1_path,
+            &[
+                mk_rec("@read1", "ACGTACGTACGTACGT", "IIIIIIIIIIIIIIII"),
+                mk_rec("@read2", "TTTTTTTTTTTTTTTT", "IIIIIIIIIIIIIIII"),
+            ],
+        )?;
+        write_fastq(
+            &r2_path,
+            &[
+                mk_rec("@read1", "AAAAAAAAGGGGGGGG", "IIIIIIIIIIIIIIII"),
+                mk_rec("@read2", "CCCCCCCCGGGGGGGG", "IIIIIIIIIIIIIIII"),
+            ],
+        )?;
+
+        implicon(&r1_path, &r2_path, 8, false, Some(&dir), 1)?;
+
+        // Filename pattern: {stem_minus_R1_suffix}_{umi}bp_UMI_R[12].fastq
+        let out_r1 = dir.join("sample_8bp_UMI_R1.fastq");
+        let out_r2 = dir.join("sample_8bp_UMI_R2.fastq");
+        assert!(out_r1.exists(), "R1 output should exist at {:?}", out_r1);
+        assert!(out_r2.exists(), "R2 output should exist at {:?}", out_r2);
+
+        let r1_recs = read_fastq(&out_r1)?;
+        let r2_recs = read_fastq(&out_r2)?;
+        assert_eq!(r1_recs.len(), 2);
+        assert_eq!(r2_recs.len(), 2);
+
+        // Read 1: R1 sequence unchanged; ID gets :AAAAAAAA barcode
+        assert_eq!(r1_recs[0].id, "@read1:AAAAAAAA");
+        assert_eq!(r1_recs[0].seq, "ACGTACGTACGTACGT"); // unchanged
+        assert_eq!(r1_recs[0].qual, "IIIIIIIIIIIIIIII");
+        // R2: same barcode on ID; sequence clipped by 8bp
+        assert_eq!(r2_recs[0].id, "@read1:AAAAAAAA");
+        assert_eq!(r2_recs[0].seq, "GGGGGGGG"); // R2[8..]
+        assert_eq!(r2_recs[0].qual.len(), r2_recs[0].seq.len());
+
+        // Read 2: different barcode
+        assert_eq!(r1_recs[1].id, "@read2:CCCCCCCC");
+        assert_eq!(r2_recs[1].id, "@read2:CCCCCCCC");
+        assert_eq!(r2_recs[1].seq, "GGGGGGGG");
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_implicon_custom_umi_length_6() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_implicon_umi6");
+        std::fs::create_dir_all(&dir)?;
+        let r1_path = dir.join("foo_R1.fq");
+        let r2_path = dir.join("foo_R2.fq");
+
+        write_fastq(&r1_path, &[mk_rec("@r", "ACGTACGT", "IIIIIIII")])?;
+        write_fastq(&r2_path, &[mk_rec("@r", "TTTTTTGGG", "IIIIIIIII")])?;
+
+        implicon(&r1_path, &r2_path, 6, false, Some(&dir), 1)?;
+
+        let out_r1 = dir.join("foo_6bp_UMI_R1.fastq");
+        let out_r2 = dir.join("foo_6bp_UMI_R2.fastq");
+        let r1_recs = read_fastq(&out_r1)?;
+        let r2_recs = read_fastq(&out_r2)?;
+
+        assert_eq!(r1_recs[0].id, "@r:TTTTTT"); // 6-bp barcode from R2
+        assert_eq!(r1_recs[0].seq, "ACGTACGT"); // R1 untouched
+        assert_eq!(r2_recs[0].id, "@r:TTTTTT");
+        assert_eq!(r2_recs[0].seq, "GGG"); // R2[6..]
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_implicon_r2_too_short_errors() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_implicon_short");
+        std::fs::create_dir_all(&dir)?;
+        let r1_path = dir.join("short_R1.fq");
+        let r2_path = dir.join("short_R2.fq");
+
+        // R2 is 5bp, umi_length=8 → should bail
+        write_fastq(&r1_path, &[mk_rec("@r", "ACGTACGT", "IIIIIIII")])?;
+        write_fastq(&r2_path, &[mk_rec("@r", "ACGTA", "IIIII")])?;
+
+        let result = implicon(&r1_path, &r2_path, 8, false, Some(&dir), 1);
+        assert!(result.is_err(), "should bail when R2 < umi_length");
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("shorter") || err.contains("UMI"),
+            "got: {}",
+            err
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+}
