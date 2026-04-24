@@ -300,12 +300,51 @@ pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
     }
 
     // Case 3: Single adapter sequence
-    let seq = raw.trim().to_uppercase();
+    let mut seq = raw.trim().to_uppercase();
     if seq.is_empty() {
         anyhow::bail!("Empty adapter sequence");
     }
+    // Perl-style brace shorthand: A{10} → AAAAAAAAAA. Only applied to the
+    // single-adapter case (not to multi-adapter elements or FASTA entries),
+    // matching `trim_galore:3105–3112` in the Perl source.
+    if let Some(expanded) = expand_brace_notation(&seq) {
+        if expanded.is_empty() {
+            anyhow::bail!(
+                "Adapter sequence {} expanded to an empty string (use N >= 1)",
+                seq
+            );
+        }
+        eprintln!("Adapter sequence {} expanded to {}", seq, expanded);
+        seq = expanded;
+    }
     validate_adapter_sequence(&seq)?;
     Ok(vec![("adapter_1".to_string(), seq)])
+}
+
+/// Expand Perl-style `X{N}` shorthand to `N` copies of `X`.
+///
+/// Matches the whole string against `^[ACTGN]\{(\d+)\}$` (uppercase only;
+/// the caller is expected to have upcased already). Returns `None` if the
+/// input doesn't match the pattern, so callers can fall through to normal
+/// adapter validation. Mirrors Perl's `extend_adapter_sequence` behaviour.
+fn expand_brace_notation(seq: &str) -> Option<String> {
+    let bytes = seq.as_bytes();
+    if bytes.len() < 4 {
+        return None; // minimum valid form is "A{0}"
+    }
+    let base = bytes[0];
+    if !matches!(base, b'A' | b'C' | b'T' | b'G' | b'N') {
+        return None;
+    }
+    if bytes[1] != b'{' || *bytes.last().unwrap() != b'}' {
+        return None;
+    }
+    let digits = &bytes[2..bytes.len() - 1];
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let n: usize = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    Some((base as char).to_string().repeat(n))
 }
 
 /// Read adapter sequences from a FASTA file.
@@ -519,5 +558,94 @@ mod tests {
     #[test]
     fn test_validate_adapter_sequence_invalid() {
         assert!(validate_adapter_sequence("ACGTZ").is_err());
+    }
+
+    // --- Brace-notation expansion (Perl parity: -a A{10} → -a AAAAAAAAAA) ---
+
+    #[test]
+    fn test_expand_brace_notation_basic_a10() {
+        assert_eq!(
+            expand_brace_notation("A{10}").as_deref(),
+            Some("AAAAAAAAAA")
+        );
+    }
+
+    #[test]
+    fn test_expand_brace_notation_all_valid_bases() {
+        assert_eq!(expand_brace_notation("C{3}").as_deref(), Some("CCC"));
+        assert_eq!(expand_brace_notation("T{5}").as_deref(), Some("TTTTT"));
+        assert_eq!(expand_brace_notation("G{1}").as_deref(), Some("G"));
+        assert_eq!(
+            expand_brace_notation("N{20}").as_deref(),
+            Some("NNNNNNNNNNNNNNNNNNNN")
+        );
+    }
+
+    #[test]
+    fn test_expand_brace_notation_zero_is_empty() {
+        // Perl accepts A{0} → empty; validate_adapter_sequence will reject
+        // the empty result downstream, not our job here.
+        assert_eq!(expand_brace_notation("A{0}").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_multi_char_prefix() {
+        // AG{10} is not a single-base shorthand; must not match.
+        assert_eq!(expand_brace_notation("AG{10}"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_non_dna_base() {
+        // X and Z are not in the [ACTGN] set.
+        assert_eq!(expand_brace_notation("X{5}"), None);
+        assert_eq!(expand_brace_notation("Z{5}"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_non_digit_count() {
+        assert_eq!(expand_brace_notation("A{abc}"), None);
+        assert_eq!(expand_brace_notation("A{}"), None);
+        assert_eq!(expand_brace_notation("A{-1}"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_plain_sequence() {
+        assert_eq!(expand_brace_notation("AGATCGGAAGAGC"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_lowercase() {
+        // Parser upcases the input before this is called; lowercase input
+        // to expand_brace_notation itself should not match.
+        assert_eq!(expand_brace_notation("a{10}"), None);
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_brace_expansion_end_to_end() {
+        let result = parse_adapter_spec("A{10}").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].1, "AAAAAAAAAA");
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_brace_expansion_lowercase_input() {
+        // Lowercase input gets upcased by the parser, then expanded.
+        // Rust is strictly more permissive than Perl here.
+        let result = parse_adapter_spec("a{5}").unwrap();
+        assert_eq!(result[0].1, "AAAAA");
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_brace_expansion_zero_errors() {
+        // A{0} → "" → validate_adapter_sequence rejects empty.
+        assert!(parse_adapter_spec("A{0}").is_err());
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_no_brace_expansion_in_multi() {
+        // Inside "SEQ1 -a SEQ2" syntax, elements are NOT brace-expanded.
+        // A{10} as a multi-adapter element fails DNA validation.
+        let result = parse_adapter_spec(" AGCT -a A{10}");
+        assert!(result.is_err());
     }
 }

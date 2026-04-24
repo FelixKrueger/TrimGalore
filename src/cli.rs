@@ -27,12 +27,14 @@ pub struct Cli {
     pub quality: u8,
 
     /// Adapter sequence for trimming. Auto-detected if not specified.
+    /// Supports A{N} shorthand for repeated single bases (e.g., -a A{10} → AAAAAAAAAA).
     /// For multiple adapters, repeat -a or use "file:adapters.fa".
     #[clap(short = 'a', long = "adapter")]
     pub adapter: Option<String>,
 
     /// Optional adapter sequence for Read 2 (paired-end only).
     /// Auto-set by --small_rna and --bgiseq presets.
+    /// Supports A{N} shorthand for repeated single bases (e.g., -a2 T{150} → 150 T's).
     /// For multiple adapters, repeat -a2 or use "file:adapters.fa".
     #[clap(long = "adapter2", alias = "a2")]
     pub adapter2: Option<String>,
