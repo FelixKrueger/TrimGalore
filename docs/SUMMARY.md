@@ -2,7 +2,7 @@
 
 ## What was built
 
-A complete **Rust rewrite of Trim Galore** that produces **byte-identical output** to the Perl original across every feature and test case. It's a true drop-in replacement — same CLI flags, same output filenames, same report format compatible with MultiQC.
+A **faithful Rust rewrite of Trim Galore**, designed as a drop-in replacement for v0.6.x — same CLI flags, same output filenames, same report format compatible with MultiQC. Outputs match the Perl original for the core flag set (verified end-to-end via the nf-core/rnaseq integration matrix). The rewrite also adds capabilities the Perl version lacked: `--poly_g` auto-detection and trimming for 2-colour instruments, a generic `--poly_a` trimmer, per-pair adapter auto-detection, cleaner multi-adapter invocation (repeatable `-a`/`-a2` plus `file:adapters.fa`), and more.
 
 **Architecture shift:** Trim Galore (Perl) is a wrapper that shells out to Cutadapt (Python/Cython) for adapter matching. The Oxidized Edition does everything in a single process — adapter detection, alignment, quality trimming, adapter removal, filtering — in one pass through the data. Paired-end reads are processed in a single pass rather than two sequential Cutadapt runs.
 

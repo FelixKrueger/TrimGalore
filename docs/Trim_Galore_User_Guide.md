@@ -40,7 +40,7 @@ We have tried to implement a method to rid RRBS libraries (or other kinds of seq
 Even though Trim Galore works for any (base space) high throughput dataset (e.g. downloaded from the SRA) this section describes its use mainly with respect to RRBS libraries.
 
 > [!NOTE]
-> In the Oxidized Edition (v2.x), all of the trimming steps described below happen in a single pass over the data rather than as sequential Cutadapt invocations. Outputs remain byte-identical to v0.6.x.
+> The Oxidized Edition (v2.x) is a faithful Rust rewrite designed as a drop-in replacement for v0.6.x. All of the trimming steps below happen in a single pass over the data rather than as sequential Cutadapt invocations. Outputs match v0.6.x for the core feature set; newer capabilities (e.g. `--poly_g` auto-detection, a generic `--poly_a` trimmer) extend beyond the Perl version.
 
 ### Step 1: Quality Trimming
 In the first step, low-quality base calls are trimmed off from the 3' end of the reads before adapter removal. This efficiently removes poor quality portions of the reads.

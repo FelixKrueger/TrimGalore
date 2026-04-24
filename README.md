@@ -7,12 +7,12 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
 
 > [!NOTE]
-> **Trim Galore v2.0** is a complete rewrite in Rust — a single binary with zero external dependencies, producing byte-identical output to v0.6.x. Same CLI, same output filenames, same report format. For details on what changed, benchmarks, and migration notes, see the [v2.0 writeup](docs/SUMMARY.md).
+> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 writeup](docs/SUMMARY.md).
 
 ## Features
 
-- **Adapter auto-detection** — automatically identifies Illumina, Nextera, and Small RNA adapters from the first 1M reads. Stranded Illumina and BGI/DNBSEQ adapters are selectable via explicit flags (`--stranded_illumina`, `--bgiseq`)
-- **Multi-adapter support** — specify multiple adapters via `-a " SEQ1 -a SEQ2"` or `-a "file:adapters.fa"`, with optional multi-round trimming (`-n`)
+- **Adapter auto-detection** — automatically identifies Illumina, Nextera, Small RNA, and BGI/DNBSEQ adapters from the first 1M reads. Stranded Illumina remains explicit (`--stranded_illumina`) because its sequence is ambiguous with Nextera.
+- **Multi-adapter support** — specify multiple adapters by repeating `-a`/`-a2` or via `-a "file:adapters.fa"`, with optional multi-round trimming (`-n`)
 - **Quality trimming** — Phred-based trimming from the 3' end (BWA algorithm)
 - **Paired-end** — single-pass processing of both reads with automatic pair validation
 - **RRBS** — MspI end-repair artifact removal, directional and non-directional libraries

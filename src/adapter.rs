@@ -98,13 +98,20 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
 ) -> Result<DetectionResult> {
     let mut reader = FastqReader::open(path)?;
 
+    // BGI/DNBSEQ added to the probe set: its 32bp adapter shares no
+    // meaningful subsequence with the other three and the per-match
+    // false-positive rate is vanishingly low, so including it is
+    // uncontentious. Stranded Illumina is intentionally omitted —
+    // its sequence differs from Nextera by a single base (A-tail),
+    // which would produce constant ambiguous ties.
     let adapters = [
         ("Illumina", ILLUMINA.seq),
         ("Nextera", NEXTERA.seq),
         ("smallRNA", SMALL_RNA.seq),
+        ("BGI/DNBSEQ", BGISEQ.seq),
     ];
 
-    let mut counts = [0usize; 3];
+    let mut counts = [0usize; 4];
     let mut reads_scanned = 0;
     let mut poly_g_count: usize = 0;
 
@@ -153,6 +160,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
         "Illumina" => ILLUMINA,
         "Nextera" => NEXTERA,
         "smallRNA" => SMALL_RNA,
+        "BGI/DNBSEQ" => BGISEQ,
         _ => ILLUMINA,
     };
 
@@ -300,12 +308,51 @@ pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
     }
 
     // Case 3: Single adapter sequence
-    let seq = raw.trim().to_uppercase();
+    let mut seq = raw.trim().to_uppercase();
     if seq.is_empty() {
         anyhow::bail!("Empty adapter sequence");
     }
+    // Perl-style brace shorthand: A{10} → AAAAAAAAAA. Only applied to the
+    // single-adapter case (not to multi-adapter elements or FASTA entries),
+    // matching `trim_galore:3105–3112` in the Perl source.
+    if let Some(expanded) = expand_brace_notation(&seq) {
+        if expanded.is_empty() {
+            anyhow::bail!(
+                "Adapter sequence {} expanded to an empty string (use N >= 1)",
+                seq
+            );
+        }
+        eprintln!("Adapter sequence {} expanded to {}", seq, expanded);
+        seq = expanded;
+    }
     validate_adapter_sequence(&seq)?;
     Ok(vec![("adapter_1".to_string(), seq)])
+}
+
+/// Expand Perl-style `X{N}` shorthand to `N` copies of `X`.
+///
+/// Matches the whole string against `^[ACTGN]\{(\d+)\}$` (uppercase only;
+/// the caller is expected to have upcased already). Returns `None` if the
+/// input doesn't match the pattern, so callers can fall through to normal
+/// adapter validation. Mirrors Perl's `extend_adapter_sequence` behaviour.
+fn expand_brace_notation(seq: &str) -> Option<String> {
+    let bytes = seq.as_bytes();
+    if bytes.len() < 4 {
+        return None; // minimum valid form is "A{0}"
+    }
+    let base = bytes[0];
+    if !matches!(base, b'A' | b'C' | b'T' | b'G' | b'N') {
+        return None;
+    }
+    if bytes[1] != b'{' || *bytes.last().unwrap() != b'}' {
+        return None;
+    }
+    let digits = &bytes[2..bytes.len() - 1];
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let n: usize = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    Some((base as char).to_string().repeat(n))
 }
 
 /// Read adapter sequences from a FASTA file.
@@ -519,5 +566,206 @@ mod tests {
     #[test]
     fn test_validate_adapter_sequence_invalid() {
         assert!(validate_adapter_sequence("ACGTZ").is_err());
+    }
+
+    // --- Brace-notation expansion (Perl parity: -a A{10} → -a AAAAAAAAAA) ---
+
+    #[test]
+    fn test_expand_brace_notation_basic_a10() {
+        assert_eq!(
+            expand_brace_notation("A{10}").as_deref(),
+            Some("AAAAAAAAAA")
+        );
+    }
+
+    #[test]
+    fn test_expand_brace_notation_all_valid_bases() {
+        assert_eq!(expand_brace_notation("C{3}").as_deref(), Some("CCC"));
+        assert_eq!(expand_brace_notation("T{5}").as_deref(), Some("TTTTT"));
+        assert_eq!(expand_brace_notation("G{1}").as_deref(), Some("G"));
+        assert_eq!(
+            expand_brace_notation("N{20}").as_deref(),
+            Some("NNNNNNNNNNNNNNNNNNNN")
+        );
+    }
+
+    #[test]
+    fn test_expand_brace_notation_zero_is_empty() {
+        // Perl accepts A{0} → empty; validate_adapter_sequence will reject
+        // the empty result downstream, not our job here.
+        assert_eq!(expand_brace_notation("A{0}").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_multi_char_prefix() {
+        // AG{10} is not a single-base shorthand; must not match.
+        assert_eq!(expand_brace_notation("AG{10}"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_non_dna_base() {
+        // X and Z are not in the [ACTGN] set.
+        assert_eq!(expand_brace_notation("X{5}"), None);
+        assert_eq!(expand_brace_notation("Z{5}"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_non_digit_count() {
+        assert_eq!(expand_brace_notation("A{abc}"), None);
+        assert_eq!(expand_brace_notation("A{}"), None);
+        assert_eq!(expand_brace_notation("A{-1}"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_plain_sequence() {
+        assert_eq!(expand_brace_notation("AGATCGGAAGAGC"), None);
+    }
+
+    #[test]
+    fn test_expand_brace_notation_rejects_lowercase() {
+        // Parser upcases the input before this is called; lowercase input
+        // to expand_brace_notation itself should not match.
+        assert_eq!(expand_brace_notation("a{10}"), None);
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_brace_expansion_end_to_end() {
+        let result = parse_adapter_spec("A{10}").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].1, "AAAAAAAAAA");
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_brace_expansion_lowercase_input() {
+        // Lowercase input gets upcased by the parser, then expanded.
+        // Rust is strictly more permissive than Perl here.
+        let result = parse_adapter_spec("a{5}").unwrap();
+        assert_eq!(result[0].1, "AAAAA");
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_brace_expansion_zero_errors() {
+        // A{0} → "" → validate_adapter_sequence rejects empty.
+        assert!(parse_adapter_spec("A{0}").is_err());
+    }
+
+    #[test]
+    fn test_parse_adapter_spec_no_brace_expansion_in_multi() {
+        // Inside "SEQ1 -a SEQ2" syntax, elements are NOT brace-expanded.
+        // A{10} as a multi-adapter element fails DNA validation.
+        let result = parse_adapter_spec(" AGCT -a A{10}");
+        assert!(result.is_err());
+    }
+
+    // --- Auto-detection probe set (Illumina + Nextera + smallRNA + BGI) ---
+
+    fn write_fastq_with_adapter(
+        path: &std::path::Path,
+        adapter_seq: &str,
+        num_reads: usize,
+    ) -> Result<()> {
+        use crate::fastq::{FastqRecord, FastqWriter};
+        let mut writer = FastqWriter::create(path, false, 1)?;
+        // Prepend a 20bp random-ish prefix so reads are plausibly long;
+        // the probe is looking for adapter_seq as a substring anywhere.
+        let prefix = "ACGTACGTACGTACGTACGT";
+        for i in 0..num_reads {
+            let seq = format!("{}{}", prefix, adapter_seq);
+            let rec = FastqRecord {
+                id: format!("@r{}", i),
+                seq: seq.clone(),
+                qual: "I".repeat(seq.len()),
+            };
+            writer.write_record(&rec)?;
+        }
+        writer.flush()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_picks_bgi_when_bgi_adapter_dominant() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_autodetect_bgi");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("bgi.fq");
+        write_fastq_with_adapter(&path, BGISEQ.seq, 100)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "BGI/DNBSEQ");
+        // BGI count should be high; other probes near zero (32bp probe vs
+        // 20bp random prefix — no chance collision).
+        let bgi_count = result
+            .counts
+            .iter()
+            .find(|(name, _)| name == "BGI/DNBSEQ")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        assert_eq!(bgi_count, 100);
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_picks_illumina_when_illumina_adapter_dominant() -> Result<()> {
+        // Regression guard: BGI addition must not break Illumina detection.
+        let dir = std::env::temp_dir().join("tg_test_autodetect_illumina_regression");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("illumina.fq");
+        write_fastq_with_adapter(&path, ILLUMINA.seq, 100)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "Illumina");
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_zero_match_defaults_to_illumina() -> Result<()> {
+        // Regression guard: with all 4 probes at zero, the tie-break (lowest
+        // index wins) must still select Illumina (index 0), not BGI (index 3).
+        let dir = std::env::temp_dir().join("tg_test_autodetect_zero");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("none.fq");
+        // Sequences with no known adapter substring.
+        write_fastq_with_adapter(&path, "ACACACACACAC", 10)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "Illumina"); // zero-count fallback
+        // Confirm all four probes are in the counts report
+        assert_eq!(result.counts.len(), 4);
+        let names: Vec<&str> = result.counts.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"Illumina"));
+        assert!(names.contains(&"Nextera"));
+        assert!(names.contains(&"smallRNA"));
+        assert!(names.contains(&"BGI/DNBSEQ"));
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_counts_all_four_probes() -> Result<()> {
+        // The detection report must surface all four probe counts, so
+        // downstream reporting (report.rs) has the full breakdown.
+        let dir = std::env::temp_dir().join("tg_test_autodetect_all_four");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("nextera.fq");
+        write_fastq_with_adapter(&path, NEXTERA.seq, 50)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "Nextera");
+        assert_eq!(result.counts.len(), 4);
+        // Nextera should be at 50; others at 0 (short sequences, no chance collision).
+        let nextera_count = result
+            .counts
+            .iter()
+            .find(|(n, _)| n == "Nextera")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        assert_eq!(nextera_count, 50);
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
     }
 }

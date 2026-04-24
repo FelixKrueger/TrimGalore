@@ -52,7 +52,7 @@
 
 ### Version 2.1.0 (Beta, Release on 18 Apr 2026)
 
-**Major release — Rust rewrite (Oxidized Edition).** Single-binary drop-in replacement for the Perl Trim Galore. Same CLI, same outputs, plus a JSON MultiQC-native report and multi-adapter support. Built from `src/main.rs` (Cargo crate at repo root); the historical Perl script will be preserved at `legacy/trim_galore` once v2.1.0 GA ships (retained in the `0.6.11` tag during the beta window).
+**Major release — Rust rewrite (Oxidized Edition).** Faithful Rust rewrite of Trim Galore, delivered as a single binary with zero external dependencies and designed as a drop-in replacement for v0.6.x workflows. Outputs match v0.6.x for the core feature set; new capabilities beyond the Perl version include poly-G auto-detection and trimming, a generic poly-A trimmer, per-pair adapter auto-detection, cleaner multi-adapter invocation, a JSON MultiQC-native report, and other extensions. Built from `src/main.rs` (Cargo crate at repo root); the historical Perl script will be preserved at `legacy/trim_galore` once v2.1.0 GA ships (retained in the `0.6.11` tag during the beta window).
 
 **Note on v2.0.0:** v2.0.0 was a pre-release cut inadvertently published to crates.io on 13 Apr 2026. It will be yanked when v2.1.0 GA ships. Users should install v2.1.0 or later.
 

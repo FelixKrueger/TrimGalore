@@ -5,7 +5,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use trim_galore::adapter;
-use trim_galore::cli::Cli;
+use trim_galore::cli::{Cli, rewrite_perl_short_flags};
 use trim_galore::demux;
 use trim_galore::fastq::{FastqReader, FastqWriter};
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
@@ -22,7 +22,8 @@ type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, 
 fn main() -> Result<()> {
     env_logger::init();
 
-    let cli = Cli::parse();
+    // Pre-parse rewrite for Perl-era `-r1`/`-r2` short flags before clap sees them.
+    let cli = Cli::parse_from(rewrite_perl_short_flags(std::env::args()));
     cli.validate()?;
 
     // Input sanity check on first file
