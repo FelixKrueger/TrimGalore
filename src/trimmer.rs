@@ -216,8 +216,12 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         }
     }
 
-    // 3. Trim Ns from both ends
-    if config.trim_n {
+    // 3. Trim Ns from both ends.
+    // Suppressed under --rrbs to match Perl v0.6.x: Perl's RRBS code path
+    // omits `$trim_n` from its Cutadapt invocations (trim_galore:876–915,
+    // 1353/1358/1365 in the non-RRBS path for contrast). Keeps v2.x output
+    // byte-identical to v0.6.x for --trim-n + --rrbs users.
+    if config.trim_n && !config.rrbs {
         record.trim_ns();
     }
 
@@ -688,5 +692,44 @@ mod tests {
         assert_eq!(result.adapter_matches.len(), 1);
         // The first (leftmost) match wins, trimming at position 16
         assert_eq!(record.seq, "ACGTACGTACGTACGT");
+    }
+
+    // ── --trim-n × --rrbs interaction (Perl v0.6.x parity) ──────
+
+    #[test]
+    fn test_trim_n_without_rrbs_trims_trailing_ns() {
+        let mut config = test_config_with_adapters(vec![], 1);
+        config.trim_n = true;
+        config.rrbs = false;
+
+        let mut record = make_record("ACGTACGTACGTNNNN");
+        trim_read(&mut record, &config, false);
+        assert_eq!(record.seq, "ACGTACGTACGT"); // 4 trailing Ns trimmed
+    }
+
+    #[test]
+    fn test_trim_n_with_rrbs_suppressed() {
+        // Perl v0.6.x parity: --trim-n is a no-op under --rrbs because Perl's
+        // RRBS code path omits $trim_n from its Cutadapt invocations.
+        let mut config = test_config_with_adapters(vec![], 1);
+        config.trim_n = true;
+        config.rrbs = true;
+
+        let mut record = make_record("ACGTACGTACGTNNNN");
+        trim_read(&mut record, &config, false);
+        assert_eq!(record.seq, "ACGTACGTACGTNNNN"); // Ns preserved
+    }
+
+    #[test]
+    fn test_trim_n_rrbs_also_preserves_leading_ns() {
+        // trim_ns() handles both ends — verify the RRBS suppression covers
+        // the leading-N case too, not just trailing.
+        let mut config = test_config_with_adapters(vec![], 1);
+        config.trim_n = true;
+        config.rrbs = true;
+
+        let mut record = make_record("NNACGTACGT");
+        trim_read(&mut record, &config, false);
+        assert_eq!(record.seq, "NNACGTACGT");
     }
 }

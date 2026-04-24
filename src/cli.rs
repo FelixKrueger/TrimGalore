@@ -92,7 +92,7 @@ pub struct Cli {
     #[clap(long = "max_n")]
     pub max_n: Option<f64>,
 
-    /// Trim N bases from both ends of reads.
+    /// Trim N bases from both ends of reads. Suppressed under --rrbs (matches Perl v0.6.x).
     #[clap(long = "trim-n", alias = "trim_n")]
     pub trim_n: bool,
 
