@@ -295,6 +295,35 @@ pub struct Cli {
     pub hulu: bool,
 }
 
+/// Rewrite Perl-era `-r1` / `-r2` short flags as their clap-compatible
+/// `--r1` / `--r2` long-alias forms before parsing.
+///
+/// Clap derives single-character short flags only, so `-r1 40` would parse
+/// as `-r=1` with `40` becoming a stray positional, producing a confusing
+/// "odd count of input files" error for users migrating Perl v0.6.x scripts.
+/// This pre-parse hook transparently rewrites the exact tokens `-r1` and
+/// `-r2` (and their `=VALUE` variants) to the existing `--r1` / `--r2`
+/// aliases so Perl-era invocations keep working.
+///
+/// Only exact-match tokens are rewritten — `-r10` (legitimate clap
+/// `-r=10`) and any other value-suffixed form pass through unchanged.
+pub fn rewrite_perl_short_flags<I>(args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    args.into_iter()
+        .map(|a| {
+            if a == "-r1" || a.starts_with("-r1=") {
+                format!("--r1{}", &a[3..])
+            } else if a == "-r2" || a.starts_with("-r2=") {
+                format!("--r2{}", &a[3..])
+            } else {
+                a
+            }
+        })
+        .collect()
+}
+
 impl Cli {
     /// Validate CLI arguments after parsing.
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -567,5 +596,98 @@ mod tests {
             err.contains("clock requires exactly 2"),
             "expected --clock strict-2 rejection, got: {err}"
         );
+    }
+
+    // ── Perl-migration short-flag rewrite (-r1 → --r1, -r2 → --r2) ──
+
+    fn rewrite(args: &[&str]) -> Vec<String> {
+        super::rewrite_perl_short_flags(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn test_rewrite_r1_bare() {
+        assert_eq!(
+            rewrite(&["trim_galore", "-r1", "40"]),
+            vec!["trim_galore", "--r1", "40"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_r2_bare() {
+        assert_eq!(
+            rewrite(&["trim_galore", "-r2", "35"]),
+            vec!["trim_galore", "--r2", "35"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_r1_equals_form() {
+        assert_eq!(
+            rewrite(&["trim_galore", "-r1=40"]),
+            vec!["trim_galore", "--r1=40"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_r2_equals_form() {
+        assert_eq!(
+            rewrite(&["trim_galore", "-r2=35"]),
+            vec!["trim_galore", "--r2=35"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_leaves_r_alone() {
+        // -r 40 is valid clap short; must not be disturbed.
+        assert_eq!(
+            rewrite(&["trim_galore", "-r", "40"]),
+            vec!["trim_galore", "-r", "40"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_leaves_r10_alone() {
+        // -r10 is clap's short-with-value syntax (-r=10); must not be rewritten.
+        assert_eq!(
+            rewrite(&["trim_galore", "-r10"]),
+            vec!["trim_galore", "-r10"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_leaves_r20_alone() {
+        // -r20 is clap's short-with-value (-r=20); not a Perl `-r2` + value.
+        assert_eq!(
+            rewrite(&["trim_galore", "-r20"]),
+            vec!["trim_galore", "-r20"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_leaves_unrelated_alone() {
+        assert_eq!(
+            rewrite(&["trim_galore", "--paired", "-a", "AGCT", "-o", "outdir"]),
+            vec!["trim_galore", "--paired", "-a", "AGCT", "-o", "outdir"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_end_to_end_via_parse_from() {
+        // Verify that after rewriting, Cli::parse_from successfully parses
+        // -r1 / -r2 style invocations (this is the whole point of the rewrite).
+        let args = rewrite(&[
+            "trim_galore",
+            "--paired",
+            "--retain_unpaired",
+            "-r1",
+            "40",
+            "-r2",
+            "30",
+            "test_files/BS-seq_10K_R1.fastq.gz",
+            "test_files/BS-seq_10K_R2.fastq.gz",
+        ]);
+        let cli = Cli::parse_from(args);
+        assert_eq!(cli.length_1, 40);
+        assert_eq!(cli.length_2, 30);
     }
 }
