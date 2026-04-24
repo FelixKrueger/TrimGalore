@@ -1,12 +1,7 @@
-# Taking appropriate QC measures for RRBS-type or other -seq applications with Trim Galore!
-
-[<img title="Babraham Bioinformatics" style="float:right;margin:20px 20 20 600px" id="Babraham Bioinformatics" src="Images/logo.png" height="88" >](http://www.bioinformatics.babraham.ac.uk/index.html)
-
-
-Last update: 24/02/2026
+# Taking appropriate QC measures for RRBS-type or other -seq applications with Trim Galore
 
 #### Table of Contents
-* [Introduction](#version-0611)
+* [Introduction](#introduction)
 * [Methodology](#adaptive-quality-and-adapter-trimming-with-trim-galore)
   1. [Quality Trimming](#step-1-quality-trimming)
   2. [Adapter Trimming](#step-2-adapter-trimming)
@@ -20,7 +15,7 @@ Last update: 24/02/2026
   * [Adapter specification — recap](#adapter-specification--recap)
 * [Appendix: Understanding the trimming report](#understanding-the-trimming-reports) 
 
-## Version 0.6.11
+## Introduction
 
 For all high throughput sequencing applications, we would recommend performing some quality control on the data, as it can often straight away point you towards the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). Thorough quality control and taking appropriate steps to remove problems is vital for the analysis of almost all sequencing applications. This is even more critical for the proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In our [brief guide to RRBS](https://github.com/FelixKrueger/TrimGalore/blob/master/Docs/RRBS_Guide.pdf) we discuss the following points:
 
@@ -118,13 +113,13 @@ Tolerating adapter contamination is most likely detrimental to the results, but 
 Trim galore! also has an `--rrbs` option for DNA material that was digested with the restriction enzyme MspI. In this mode, Trim Galore identifies sequences that were adapter-trimmed and removes another 2 bp from the 3' end of Read 1, and for paired-end libraries also the first 2 bp of Read 2 (which is equally affected by the fill-in procedure). This is to avoid that the filled-in cytosine position close to the second MspI site in a sequence is used for methylation calls. Sequences which were merely trimmed because of poor quality will not be shortened any further.
 
 #### Non-directional mode
-Trim Galore! also has a `--non_directional` option, which will screen adapter-trimmed sequences for the presence of either CAA or CGA at the start of sequences and clip off the first 2 bases if found. If CAA or CGA are found at the start, no bases will be trimmed off from the 3’ end even if the sequence had some contaminating adapter sequence removed (in this case the sequence read likely originated from either the CTOT or CTOB strand; refer to [the RRBS guide](https://github.com/FelixKrueger/TrimGalore/blob/master/Docs/RRBS_Guide.pdf) for the meaning of CTOT and CTOB strands).
+Trim Galore also has a `--non_directional` option, which will screen adapter-trimmed sequences for the presence of either CAA or CGA at the start of sequences and clip off the first 2 bases if found. If CAA or CGA are found at the start, no bases will be trimmed off from the 3’ end even if the sequence had some contaminating adapter sequence removed (in this case the sequence read likely originated from either the CTOT or CTOB strand; refer to [the RRBS guide](https://github.com/FelixKrueger/TrimGalore/blob/master/Docs/RRBS_Guide.pdf) for the meaning of CTOT and CTOB strands).
 
 ### Step 3: Removing Short Sequences
-Lastly, since quality and/or adapter trimming may result in very short sequences (sometimes as short as 0 bp), Trim Galore! can filter trimmed reads based on their sequence length (default: 20 bp). This is to reduce the size of the output file and to avoid crashes of alignment programs which require sequences with a certain minimum length.
+Lastly, since quality and/or adapter trimming may result in very short sequences (sometimes as short as 0 bp), Trim Galore can filter trimmed reads based on their sequence length (default: 20 bp). This is to reduce the size of the output file and to avoid crashes of alignment programs which require sequences with a certain minimum length.
 
 #### Paired-End Data
-Note that it is not recommended to remove too-short sequences if the analysed FastQ file is one of a pair of paired-end files, since this confuses the sequence-by-sequence order of paired-end reads which is again required by many aligners. For paired-end files, Trim Galore! has an option `--paired` which runs a paired-end validation on both trimmed `_1` and `_2` FastQ files once the trimming has completed. This step removes entire read pairs if at least one of the two sequences became shorter than a certain threshold. If only one of the two reads is longer than the set threshold, e.g. when one read has very poor qualities throughout, this singleton read can be written out to unpaired files (see option `retain_unpaired`) which may be aligned in a single-end manner.
+Note that it is not recommended to remove too-short sequences if the analysed FastQ file is one of a pair of paired-end files, since this confuses the sequence-by-sequence order of paired-end reads which is again required by many aligners. For paired-end files, Trim Galore has an option `--paired` which runs a paired-end validation on both trimmed `_1` and `_2` FastQ files once the trimming has completed. This step removes entire read pairs if at least one of the two sequences became shorter than a certain threshold. If only one of the two reads is longer than the set threshold, e.g. when one read has very poor qualities throughout, this singleton read can be written out to unpaired files (see option `retain_unpaired`) which may be aligned in a single-end manner.
 
 
 Applying these steps to both self-generated and downloaded data can ensure that you really only use the high quality portion of the data for alignments and further downstream analyses and conclusions.
@@ -323,3 +318,7 @@ Number of sequence pairs removed because at least one read was shorter than the 
 ```
 
 It is this number — `3,357,967 (0.29%)` at the end of the Read 2 trimming report — that represents the total number of read pairs removed from both Read 1 and Read 2 files because of filtering (min length, max length, or max N).
+
+---
+
+*Trim Galore was originally developed at [Babraham Bioinformatics](https://www.bioinformatics.babraham.ac.uk/). Current development is at [github.com/FelixKrueger/TrimGalore](https://github.com/FelixKrueger/TrimGalore).*
