@@ -7,7 +7,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
 
 > [!NOTE]
-> **Trim Galore v2.0** is a complete rewrite in Rust — a single binary with zero external dependencies, producing byte-identical output to v0.6.x. Same CLI, same output filenames, same report format. For details on what changed, benchmarks, and migration notes, see the [v2.0 writeup](docs/SUMMARY.md).
+> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 writeup](docs/SUMMARY.md).
 
 ## Features
 

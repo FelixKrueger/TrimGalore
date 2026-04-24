@@ -5,8 +5,9 @@ use std::path::PathBuf;
 
 /// Trim Galore - Oxidized Edition: A fast, single-pass NGS adapter and quality trimmer.
 ///
-/// Drop-in replacement for Trim Galore, rewritten in Rust. Produces byte-identical
-/// output, compatible with MultiQC and existing pipelines.
+/// Drop-in replacement for Trim Galore, rewritten in Rust. Matches v0.6.x outputs
+/// for the core feature set and extends it with poly-G / generic poly-A auto-trimming
+/// and other additions. Compatible with MultiQC and existing pipelines.
 #[derive(Parser, Debug)]
 #[clap(
     name = "trim_galore",
