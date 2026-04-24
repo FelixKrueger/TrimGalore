@@ -29,16 +29,16 @@ pub struct Cli {
 
     /// Adapter sequence for trimming. Auto-detected if not specified.
     /// Supports A{N} shorthand for repeated single bases (e.g., -a A{10} → AAAAAAAAAA).
-    /// For multiple adapters, repeat -a or use "file:adapters.fa".
+    /// For multiple adapters, repeat -a (e.g., -a SEQ1 -a SEQ2) or use "file:adapters.fa".
     #[clap(short = 'a', long = "adapter")]
-    pub adapter: Option<String>,
+    pub adapter: Vec<String>,
 
     /// Optional adapter sequence for Read 2 (paired-end only).
     /// Auto-set by --small_rna and --bgiseq presets.
     /// Supports A{N} shorthand for repeated single bases (e.g., -a2 T{150} → 150 T's).
-    /// For multiple adapters, repeat -a2 or use "file:adapters.fa".
+    /// For multiple adapters, repeat -a2 (e.g., -a2 SEQ1 -a2 SEQ2) or use "file:adapters.fa".
     #[clap(long = "adapter2", alias = "a2")]
-    pub adapter2: Option<String>,
+    pub adapter2: Vec<String>,
 
     /// Use Illumina universal adapter (AGATCGGAAGAGC). Also the auto-detect fallback.
     #[clap(long = "illumina", conflicts_with_all = &["nextera", "small_rna", "stranded_illumina", "bgiseq"])]
@@ -295,15 +295,16 @@ pub struct Cli {
     pub hulu: bool,
 }
 
-/// Rewrite Perl-era `-r1` / `-r2` short flags as their clap-compatible
-/// `--r1` / `--r2` long-alias forms before parsing.
+/// Rewrite Perl-era multi-character short flags (`-r1`, `-r2`, `-a2`) as
+/// their clap-compatible long-alias forms (`--r1`, `--r2`, `--a2`) before
+/// parsing.
 ///
-/// Clap derives single-character short flags only, so `-r1 40` would parse
-/// as `-r=1` with `40` becoming a stray positional, producing a confusing
-/// "odd count of input files" error for users migrating Perl v0.6.x scripts.
-/// This pre-parse hook transparently rewrites the exact tokens `-r1` and
-/// `-r2` (and their `=VALUE` variants) to the existing `--r1` / `--r2`
-/// aliases so Perl-era invocations keep working.
+/// Clap derives single-character short flags only, so e.g. `-r1 40` would
+/// parse as `-r=1` with `40` becoming a stray positional, producing a
+/// confusing "odd count of input files" error. `-a2 SEQ` would similarly
+/// parse as `-a=2` with `SEQ` becoming a positional input file. This
+/// pre-parse hook transparently rewrites the exact tokens so Perl-era
+/// invocations keep working.
 ///
 /// Only exact-match tokens are rewritten — `-r10` (legitimate clap
 /// `-r=10`) and any other value-suffixed form pass through unchanged.
@@ -317,6 +318,8 @@ where
                 format!("--r1{}", &a[3..])
             } else if a == "-r2" || a.starts_with("-r2=") {
                 format!("--r2{}", &a[3..])
+            } else if a == "-a2" || a.starts_with("-a2=") {
+                format!("--a2{}", &a[3..])
             } else {
                 a
             }
@@ -689,5 +692,51 @@ mod tests {
         let cli = Cli::parse_from(args);
         assert_eq!(cli.length_1, 40);
         assert_eq!(cli.length_2, 30);
+    }
+
+    #[test]
+    fn test_rewrite_a2_bare() {
+        assert_eq!(
+            rewrite(&["trim_galore", "-a2", "GCAT"]),
+            vec!["trim_galore", "--a2", "GCAT"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_a2_equals_form() {
+        assert_eq!(
+            rewrite(&["trim_galore", "-a2=GCAT"]),
+            vec!["trim_galore", "--a2=GCAT"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_leaves_a10_alone() {
+        // -a10 is clap's short-with-value (-a=10) — not a Perl `-a2` construct.
+        // `10` isn't a valid DNA sequence but that's for validation to catch,
+        // not for the rewrite to mangle.
+        assert_eq!(
+            rewrite(&["trim_galore", "-a10"]),
+            vec!["trim_galore", "-a10"]
+        );
+    }
+
+    #[test]
+    fn test_rewrite_a2_end_to_end_via_parse_from() {
+        let args = rewrite(&[
+            "trim_galore",
+            "--paired",
+            "-a",
+            "AGCT",
+            "-a2",
+            "GCAT",
+            "-a2",
+            "AAAA",
+            "test_files/BS-seq_10K_R1.fastq.gz",
+            "test_files/BS-seq_10K_R2.fastq.gz",
+        ]);
+        let cli = Cli::parse_from(args);
+        assert_eq!(cli.adapter, vec!["AGCT"]);
+        assert_eq!(cli.adapter2, vec!["GCAT", "AAAA"]);
     }
 }
