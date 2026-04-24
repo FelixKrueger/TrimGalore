@@ -13,7 +13,7 @@ Last update: 24/02/2026
     - [Auto-detection](#adapter-auto-detection)
     - [Manual adapter sequence specification](#manual-adapter-sequence-specification)
   3. [Removing Short Sequences](#step-3-removing-short-sequences)
-  4. [Specialised Trimming - hard- and Epigenetic Clock Trimming](#step-4-specialised-trimming)
+  4. [Specialised Trimming — hard-trim, Epigenetic Clock, IMPLICON](#step-4-specialised-trimming)
 * [Flag reference](#flag-reference)
   * [Cross-flag interactions](#cross-flag-interactions)
   * [RRBS-specific guidance](#rrbs-specific-guidance)
@@ -151,7 +151,7 @@ before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATG
 #### Mouse Epigenetic Clock trimming
 The option `--clock` trims reads in a specific way that is currently used for the Mouse Epigenetic Clock (see here: [Multi-tissue DNA methylation age predictor in mouse, Stubbs et al., Genome Biology, 2017 18:68](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-017-1203-5)). Following the trimming, Trim Galore exits.
 
-In it's current implementation, the dual-UMI RRBS reads come in the following format:
+In its current implementation, the dual-UMI RRBS reads come in the following format:
 
 ```
 Read 1  5' UUUUUUUU CAGTA FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF TACTG UUUUUUUU 3'
@@ -174,12 +174,21 @@ R1: @HWI-D00436:407:CCAETANXX:1:1101:4105:1905 1:N:0: CGATGTTT:R1:ATCTAGTT:R2:CA
 R2: @HWI-D00436:407:CCAETANXX:1:1101:4105:1905 3:N:0: CGATGTTT:R1:ATCTAGTT:R2:CAATTTTG:F1:CAGT:F2:CAGT
                  CAAAAATAATACCTCCTCTATTTATCCAAAATCACAAAAAACCACCCACTTAACTTTCCCTAA
 ```
-Following clock trimming, the resulting files (.clock_UMI.R1.fq(.gz) and .clock_UMI.R2.fq(.gz))
-should be adapter- and quality trimmed with a second Trim Galore run. Even though the data is technically RRBS, it doesn't require the `--rrbs` option. Instead the reads need to be trimmed by 15bp from their 3' end to get rid of potential UMI and fixed sequences. All this is accomplished with this additional trimming command:
+Following clock trimming, the resulting files (`.clock_UMI.R1.fq(.gz)` and `.clock_UMI.R2.fq(.gz)`) should be adapter- and quality-trimmed with a second Trim Galore run. Even though the data is technically RRBS, it doesn't require the `--rrbs` option. Instead the reads need to be trimmed by 15 bp from their 3' end to get rid of potential UMI and fixed sequences. For a single sample:
 
-`trim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 *.clock_UMI.R1.fq.gz *.clock_UMI.R2.fq.gz`
+```
+trim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 sample.clock_UMI.R1.fq.gz sample.clock_UMI.R2.fq.gz
+```
 
-Following this, reads should be aligned with Bismark and deduplicated with UmiBam in `--dual_index` mode (see here: https://github.com/FelixKrueger/Umi-Grinder). UmiBam recognises the UMIs within this pattern: R1:(**ATCTAGTT**):R2:(**CAATTTTG**): as (UMI R1=**ATCTAGTT**) and (UMI R2=**CAATTTTG**).
+For multiple samples, `--paired` requires input files in pairwise (R1, R2, R1, R2, …) order — don't use `*R1.fq.gz *R2.fq.gz` globs which produce all-R1s-then-all-R2s. Either invoke once per sample, or interleave explicitly.
+
+Following this, reads should be aligned with Bismark and deduplicated with UmiBam in `--dual_index` mode (see here: https://github.com/FelixKrueger/Umi-Grinder). UmiBam recognises the UMIs within this pattern: `R1:(`**ATCTAGTT**`):R2:(`**CAATTTTG**`):` as UMI R1 = **ATCTAGTT** and UMI R2 = **CAATTTTG**.
+
+#### IMPLICON UMI transfer
+
+The option `--implicon` is a similar run-and-exit specialty mode for paired-end libraries where the UMI lives at the 5' end of Read 2 only. It transfers the first `N` bases of R2 into the read ID of both reads (as `:BARCODE`), then clips R2 by `N` bases. Read 1 is otherwise untouched. In Perl v0.6.x the UMI length was hardcoded at 8 bp; v2.x takes an optional value (`--implicon=12`, for example) with a default of 8.
+
+Output filenames follow the pattern `{stem}_{N}bp_UMI_R1.fastq(.gz)` / `{stem}_{N}bp_UMI_R2.fastq(.gz)`. Like `--clock`, Trim Galore exits after the transfer; the resulting files are then run through a second Trim Galore invocation for adapter and quality trimming.
 
 
 ## Flag reference
