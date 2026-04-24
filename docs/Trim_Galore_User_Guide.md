@@ -35,7 +35,7 @@ Poor base call qualities or adapter contamination are however just as relevant f
 
 ## Adaptive quality and adapter trimming with Trim Galore
 
-We have tried to implement a method to rid RRBS libraries (or other kinds of sequencing datasets) of potential problems in one convenient process. For this we have developed a wrapper script (trim_galore) that makes use of the publicly available adapter trimming tool [Cutadapt](https://cutadapt.readthedocs.io/en/stable/) and [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) for optional quality control once the trimming process has completed.
+Trim Galore handles quality trimming, adapter detection, adapter removal, length filtering, and specialty modes in a single pass over the data, with optional post-trimming quality reporting via [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/). Originally a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/en/stable/), v2.x is a faithful Rust rewrite that consolidates those passes while preserving the CLI and output filename conventions.
 
 Even though Trim Galore works for any (base space) high throughput dataset (e.g. downloaded from the SRA) this section describes its use mainly with respect to RRBS libraries.
 
@@ -54,38 +54,49 @@ In the first step, low-quality base calls are trimmed off from the 3' end of the
 > Here is an example of a dataset downloaded from the SRA which was trimmed with a Phred score threshold of 20 (data set DRR001650_1 from Kobayashi et al., 2012).
 
 ### Step 2: Adapter Trimming
-In the next step, Cutadapt finds and removes adapter sequences from the 3’ end of reads. 
+In the next step, Trim Galore finds and removes adapter sequences from the 3’ end of reads.
 
 #### Adapter auto-detection
-If no sequence was supplied, Trim Galore will attempt to auto-detect the adapter which has been used. For this it will analyse the first 1 million sequences of the first specified file and attempt to find the first 12 or 13bp of the following standard adapters:
+If no sequence was supplied, Trim Galore will attempt to auto-detect the adapter that has been used. For this it will analyse the first 1 million sequences of the first specified file and count exact substring matches against a set of standard adapter probes:
 
 ```
-Illumina:   AGATCGGAAGAGC
-Small RNA:  TGGAATTCTCGG
-Nextera:    CTGTCTCTTATA
+Illumina:   AGATCGGAAGAGC                     (13 bp)
+Small RNA:  TGGAATTCTCGG                      (12 bp)
+Nextera:    CTGTCTCTTATA                      (12 bp)
+BGI/DNBSEQ: AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA  (32 bp; v2.x addition)
 ```
 
-If no adapter contamination can be detected within the first 1 million sequences, or in case of a tie between several different adapters, Trim Galore defaults to `--illumina`, as long as the Illumina adapter sequence was one of the options. If there was a tie between the Nextera and small RNA adapter, the default is `--nextera`. The auto-detection results are shown on screen and printed to the trimming report for future reference.
+If no adapter contamination can be detected within the first 1 million sequences — or in case of a tie — Trim Galore defaults to `--illumina`. The auto-detection results are shown on screen and printed to the trimming report for future reference.
+
+The Stranded Illumina adapter (`ACTGTCTCTTATA`) is intentionally not auto-detected: it differs from the Nextera adapter by a single A-tail base, so probing both would produce constant ambiguous ties. Pass `--stranded_illumina` explicitly when working with those libraries.
 
 
 #### Multiple adapter sequences
 
-At a special request, multiple adapters can also be specified like so:
+Multiple adapters can be specified in three equivalent ways. The cleanest (v2.x) is simply to repeat `-a` and/or `-a2`:
 
 ```
--a  " AGCTCCCG -a TTTCATTATAT -a TTTATTCGGATTTAT -n 3"
--a2 " AGCTAGCG -a TCTCTTATAT -a TTTCGGATTTAT -n 3"
+-a AGCTCCCG -a TTTCATTATAT -a TTTATTCGGATTTAT -n 3
+-a2 AGCTAGCG -a2 TCTCTTATAT -a2 TTTCGGATTTAT -n 3
 ```
 
-or so:
+The v0.6.x embedded-string form is still accepted for backwards compatibility:
+
+```
+-a  " AGCTCCCG -a TTTCATTATAT -a TTTATTCGGATTTAT"
+-a2 " AGCTAGCG -a TCTCTTATAT -a TTTCGGATTTAT"
+```
+
+Or load adapters from a FASTA file:
 
 ```
 -a "file:../multiple_adapters.fa"
 -a2 "file:../different_adapters.fa"
 ```
 
-Potentially in conjucntion with the parameter `-n 3` to trim all adapters. Please note
-that this is NOT required for standard trimming! More information can be found in [Issue 86](https://github.com/FelixKrueger/TrimGalore/issues/86).
+For all three forms, adding `-n 3` lets Trim Galore strip up to three adapter occurrences from each read — useful when adapter contamination can appear multiple times in the same read. Standard trimming does not require `-n`. More information can be found in [Issue 86](https://github.com/FelixKrueger/TrimGalore/issues/86).
+
+Single-base expansion (`A{10}` → `AAAAAAAAAA`) is also supported for both `-a` and `-a2`, matching Perl v0.6.x syntax.
 
 #### Manual adapter sequence specification
 The auto-detection behaviour can be overruled by specifying an adapter sequence manually or by using `--illumina`, `--nextera` or `--small_rna`, or `--stranded_illumina` (see `--help` for more details). **Please note**: the first 13 bp of the standard Illumina paired-end adapters (`AGATCGGAAGAGC`) recognise and removes adapter from most standard libraries, including the Illumina TruSeq and Sanger iTag adapters. This sequence is present on both sides of paired-end sequences, and is present in all adapters before the unique Index sequence occurs. So for any 'normal' kind of sequencing you do not need to specify anything but `--illumina`, or better yet just use the auto-detection. 
@@ -99,7 +110,7 @@ Tolerating adapter contamination is most likely detrimental to the results, but 
 |  ![image](Images/adapters.png)  | ![image](Images/adapters_fixed.png)  |
 
 
-> This example (same dataset as above) shows the dramatic effect of adapter contamination on the base composition of the analysed library, e.g. the C content rises from ~1% at the start of reads to around 22% (!) towards the end of reads. Adapter trimming with Cutadapt gets rid of most signs of adapter contamination efficiently. Note that the sharp decrease of A at the last position is a result of removing the adapter sequence very stringently, i.e. even a single trailing A at the end is removed.
+> This example (same dataset as above) shows the dramatic effect of adapter contamination on the base composition of the analysed library, e.g. the C content rises from ~1% at the start of reads to around 22% (!) towards the end of reads. Adapter trimming gets rid of most signs of adapter contamination efficiently. Note that the sharp decrease of A at the last position is a result of removing the adapter sequence very stringently, i.e. even a single trailing A at the end is removed.
 
 
 #### RRBS Mode
