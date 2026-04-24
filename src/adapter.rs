@@ -98,13 +98,20 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
 ) -> Result<DetectionResult> {
     let mut reader = FastqReader::open(path)?;
 
+    // BGI/DNBSEQ added to the probe set: its 32bp adapter shares no
+    // meaningful subsequence with the other three and the per-match
+    // false-positive rate is vanishingly low, so including it is
+    // uncontentious. Stranded Illumina is intentionally omitted —
+    // its sequence differs from Nextera by a single base (A-tail),
+    // which would produce constant ambiguous ties.
     let adapters = [
         ("Illumina", ILLUMINA.seq),
         ("Nextera", NEXTERA.seq),
         ("smallRNA", SMALL_RNA.seq),
+        ("BGI/DNBSEQ", BGISEQ.seq),
     ];
 
-    let mut counts = [0usize; 3];
+    let mut counts = [0usize; 4];
     let mut reads_scanned = 0;
     let mut poly_g_count: usize = 0;
 
@@ -153,6 +160,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
         "Illumina" => ILLUMINA,
         "Nextera" => NEXTERA,
         "smallRNA" => SMALL_RNA,
+        "BGI/DNBSEQ" => BGISEQ,
         _ => ILLUMINA,
     };
 
@@ -647,5 +655,117 @@ mod tests {
         // A{10} as a multi-adapter element fails DNA validation.
         let result = parse_adapter_spec(" AGCT -a A{10}");
         assert!(result.is_err());
+    }
+
+    // --- Auto-detection probe set (Illumina + Nextera + smallRNA + BGI) ---
+
+    fn write_fastq_with_adapter(
+        path: &std::path::Path,
+        adapter_seq: &str,
+        num_reads: usize,
+    ) -> Result<()> {
+        use crate::fastq::{FastqRecord, FastqWriter};
+        let mut writer = FastqWriter::create(path, false, 1)?;
+        // Prepend a 20bp random-ish prefix so reads are plausibly long;
+        // the probe is looking for adapter_seq as a substring anywhere.
+        let prefix = "ACGTACGTACGTACGTACGT";
+        for i in 0..num_reads {
+            let seq = format!("{}{}", prefix, adapter_seq);
+            let rec = FastqRecord {
+                id: format!("@r{}", i),
+                seq: seq.clone(),
+                qual: "I".repeat(seq.len()),
+            };
+            writer.write_record(&rec)?;
+        }
+        writer.flush()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_picks_bgi_when_bgi_adapter_dominant() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_autodetect_bgi");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("bgi.fq");
+        write_fastq_with_adapter(&path, BGISEQ.seq, 100)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "BGI/DNBSEQ");
+        // BGI count should be high; other probes near zero (32bp probe vs
+        // 20bp random prefix — no chance collision).
+        let bgi_count = result
+            .counts
+            .iter()
+            .find(|(name, _)| name == "BGI/DNBSEQ")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        assert_eq!(bgi_count, 100);
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_picks_illumina_when_illumina_adapter_dominant() -> Result<()> {
+        // Regression guard: BGI addition must not break Illumina detection.
+        let dir = std::env::temp_dir().join("tg_test_autodetect_illumina_regression");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("illumina.fq");
+        write_fastq_with_adapter(&path, ILLUMINA.seq, 100)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "Illumina");
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_zero_match_defaults_to_illumina() -> Result<()> {
+        // Regression guard: with all 4 probes at zero, the tie-break (lowest
+        // index wins) must still select Illumina (index 0), not BGI (index 3).
+        let dir = std::env::temp_dir().join("tg_test_autodetect_zero");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("none.fq");
+        // Sequences with no known adapter substring.
+        write_fastq_with_adapter(&path, "ACACACACACAC", 10)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "Illumina"); // zero-count fallback
+        // Confirm all four probes are in the counts report
+        assert_eq!(result.counts.len(), 4);
+        let names: Vec<&str> = result.counts.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"Illumina"));
+        assert!(names.contains(&"Nextera"));
+        assert!(names.contains(&"smallRNA"));
+        assert!(names.contains(&"BGI/DNBSEQ"));
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn test_autodetect_counts_all_four_probes() -> Result<()> {
+        // The detection report must surface all four probe counts, so
+        // downstream reporting (report.rs) has the full breakdown.
+        let dir = std::env::temp_dir().join("tg_test_autodetect_all_four");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("nextera.fq");
+        write_fastq_with_adapter(&path, NEXTERA.seq, 50)?;
+
+        let result = autodetect_adapter(&path, None)?;
+        assert_eq!(result.adapter.name, "Nextera");
+        assert_eq!(result.counts.len(), 4);
+        // Nextera should be at 50; others at 0 (short sequences, no chance collision).
+        let nextera_count = result
+            .counts
+            .iter()
+            .find(|(n, _)| n == "Nextera")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        assert_eq!(nextera_count, 50);
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
     }
 }

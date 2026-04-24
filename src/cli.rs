@@ -58,8 +58,7 @@ pub struct Cli {
     #[clap(long = "stranded_illumina", conflicts_with_all = &["illumina", "nextera", "small_rna", "bgiseq"])]
     pub stranded_illumina: bool,
 
-    /// Use BGI/DNBSEQ adapter. Sets --adapter2 for Read 2.
-    /// Not covered by auto-detection — must be set explicitly.
+    /// Use BGI/DNBSEQ adapter. Sets --adapter2 for Read 2. Also probed by auto-detection.
     #[clap(long = "bgiseq", conflicts_with_all = &["illumina", "nextera", "small_rna", "stranded_illumina"])]
     pub bgiseq: bool,
 
