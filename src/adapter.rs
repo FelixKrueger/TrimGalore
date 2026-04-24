@@ -329,6 +329,24 @@ pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
     Ok(vec![("adapter_1".to_string(), seq)])
 }
 
+/// Parse a slice of adapter CLI strings, concatenating results with
+/// sequential `adapter_N` names regardless of which input produced them.
+///
+/// This is the entry point when a user passes multiple `-a` (or `-a2`)
+/// flags — each string goes through `parse_adapter_spec` independently,
+/// so mixing forms is supported: `-a " SEQ -a SEQ2" -a SEQ3` or
+/// `-a SEQ -a "file:adapters.fa"` all work and produce a flat,
+/// renumbered list.
+pub fn parse_adapter_specs(specs: &[String]) -> Result<Vec<(String, String)>> {
+    let mut result: Vec<(String, String)> = Vec::new();
+    for spec in specs {
+        for (_name, seq) in parse_adapter_spec(spec)? {
+            result.push((format!("adapter_{}", result.len() + 1), seq));
+        }
+    }
+    Ok(result)
+}
+
 /// Expand Perl-style `X{N}` shorthand to `N` copies of `X`.
 ///
 /// Matches the whole string against `^[ACTGN]\{(\d+)\}$` (uppercase only;
@@ -655,6 +673,44 @@ mod tests {
         // A{10} as a multi-adapter element fails DNA validation.
         let result = parse_adapter_spec(" AGCT -a A{10}");
         assert!(result.is_err());
+    }
+
+    // --- parse_adapter_specs: multi-flag + mixed-form path ---
+
+    #[test]
+    fn test_parse_adapter_specs_repeated_single_sequences() {
+        // Simulates: -a AGCT -a TTTA
+        let specs = vec!["AGCT".to_string(), "TTTA".to_string()];
+        let result = parse_adapter_specs(&specs).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("adapter_1".to_string(), "AGCT".to_string()));
+        assert_eq!(result[1], ("adapter_2".to_string(), "TTTA".to_string()));
+    }
+
+    #[test]
+    fn test_parse_adapter_specs_mixed_embedded_plus_single() {
+        // Simulates: -a " ACT -a TCCTTTG" -a GTGTGTGCTTT
+        // First spec is the v0.6.x embedded-string form (expands to 2
+        // adapters); second spec is a plain single sequence. The
+        // concatenated, renumbered list should have 3 adapters with
+        // sequential names.
+        let specs = vec![" ACT -a TCCTTTG".to_string(), "GTGTGTGCTTT".to_string()];
+        let result = parse_adapter_specs(&specs).unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], ("adapter_1".to_string(), "ACT".to_string()));
+        assert_eq!(result[1], ("adapter_2".to_string(), "TCCTTTG".to_string()));
+        assert_eq!(
+            result[2],
+            ("adapter_3".to_string(), "GTGTGTGCTTT".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_adapter_specs_empty_list_yields_empty() {
+        // Regression guard: empty input (user didn't pass any -a) → empty Vec.
+        let specs: Vec<String> = Vec::new();
+        let result = parse_adapter_specs(&specs).unwrap();
+        assert!(result.is_empty());
     }
 
     // --- Auto-detection probe set (Illumina + Nextera + smallRNA + BGI) ---

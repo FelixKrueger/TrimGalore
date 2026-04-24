@@ -232,16 +232,19 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
         "Minimum required adapter overlap (stringency): {} bp",
         config.stringency
     )?;
-    writeln!(
-        w,
-        "Minimum required sequence length {}-end: {} bp",
-        if config.paired {
-            "for both reads before a sequence pair gets removed"
-        } else {
-            "single"
-        },
-        config.length_cutoff
-    )?;
+    if config.paired {
+        writeln!(
+            w,
+            "Minimum required sequence length for both reads before a sequence pair gets removed: {} bp",
+            config.length_cutoff
+        )?;
+    } else {
+        writeln!(
+            w,
+            "Minimum required sequence length single-end: {} bp",
+            config.length_cutoff
+        )?;
+    }
     if config.trim_n {
         writeln!(w, "Removing Ns from the end of reads")?;
     }

@@ -353,12 +353,9 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
 /// None when the adapter was user-specified or preset-selected (poly-G must be
 /// detected separately via `adapter::detect_poly_g()`).
 fn resolve_adapter(cli: &Cli, input_file: &Path) -> ResolvedAdapter {
-    if let Some(ref spec) = cli.adapter {
-        let adapters_r1 = adapter::parse_adapter_spec(spec)?;
-        let adapters_r2 = match &cli.adapter2 {
-            Some(spec2) => adapter::parse_adapter_spec(spec2)?,
-            None => Vec::new(),
-        };
+    if !cli.adapter.is_empty() {
+        let adapters_r1 = adapter::parse_adapter_specs(&cli.adapter)?;
+        let adapters_r2 = adapter::parse_adapter_specs(&cli.adapter2)?;
         let label = "user-specified".to_string();
         return Ok((label, adapters_r1, adapters_r2, None));
     }
