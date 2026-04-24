@@ -354,22 +354,8 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
 /// detected separately via `adapter::detect_poly_g()`).
 fn resolve_adapter(cli: &Cli, input_file: &Path) -> ResolvedAdapter {
     if !cli.adapter.is_empty() {
-        // Each -a can be a single sequence, the embedded " SEQ -a SEQ" form,
-        // or a "file:adapters.fa" spec. We parse each independently and
-        // renumber the combined list so names stay sequential (adapter_1,
-        // adapter_2, ...) regardless of how many -a flags the user passed.
-        let mut adapters_r1: Vec<(String, String)> = Vec::new();
-        for spec in &cli.adapter {
-            for (_name, seq) in adapter::parse_adapter_spec(spec)? {
-                adapters_r1.push((format!("adapter_{}", adapters_r1.len() + 1), seq));
-            }
-        }
-        let mut adapters_r2: Vec<(String, String)> = Vec::new();
-        for spec in &cli.adapter2 {
-            for (_name, seq) in adapter::parse_adapter_spec(spec)? {
-                adapters_r2.push((format!("adapter_{}", adapters_r2.len() + 1), seq));
-            }
-        }
+        let adapters_r1 = adapter::parse_adapter_specs(&cli.adapter)?;
+        let adapters_r2 = adapter::parse_adapter_specs(&cli.adapter2)?;
         let label = "user-specified".to_string();
         return Ok((label, adapters_r1, adapters_r2, None));
     }
