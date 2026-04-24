@@ -27,15 +27,17 @@ pub struct Cli {
     pub quality: u8,
 
     /// Adapter sequence for trimming. Auto-detected if not specified.
+    /// For multiple adapters, repeat -a or use "file:adapters.fa".
     #[clap(short = 'a', long = "adapter")]
     pub adapter: Option<String>,
 
     /// Optional adapter sequence for Read 2 (paired-end only).
     /// Auto-set by --small_rna and --bgiseq presets.
+    /// For multiple adapters, repeat -a2 or use "file:adapters.fa".
     #[clap(long = "adapter2", alias = "a2")]
     pub adapter2: Option<String>,
 
-    /// Use Illumina universal adapter (AGATCGGAAGAGC). This is the default.
+    /// Use Illumina universal adapter (AGATCGGAAGAGC). Also the auto-detect fallback.
     #[clap(long = "illumina", conflicts_with_all = &["nextera", "small_rna", "stranded_illumina", "bgiseq"])]
     pub illumina: bool,
 
@@ -43,19 +45,23 @@ pub struct Cli {
     #[clap(long = "nextera", conflicts_with_all = &["illumina", "small_rna", "stranded_illumina", "bgiseq"])]
     pub nextera: bool,
 
-    /// Use Illumina Small RNA adapter (TGGAATTCTCGG). Sets --adapter2 for Read 2.
+    /// Use Illumina Small RNA adapter (TGGAATTCTCGG).
+    /// Also lowers --length default to 18 and sets --adapter2 (GATCGTCGGACT, Illumina small RNA 5').
     #[clap(long = "small_rna", conflicts_with_all = &["illumina", "nextera", "stranded_illumina", "bgiseq"])]
     pub small_rna: bool,
 
     /// Use Illumina Stranded mRNA adapter (ACTGTCTCTTATA).
+    /// Not covered by auto-detection — must be set explicitly.
     #[clap(long = "stranded_illumina", conflicts_with_all = &["illumina", "nextera", "small_rna", "bgiseq"])]
     pub stranded_illumina: bool,
 
     /// Use BGI/DNBSEQ adapter. Sets --adapter2 for Read 2.
+    /// Not covered by auto-detection — must be set explicitly.
     #[clap(long = "bgiseq", conflicts_with_all = &["illumina", "nextera", "small_rna", "stranded_illumina"])]
     pub bgiseq: bool,
 
-    /// Paired-end mode. Expects exactly 2 input files.
+    /// Paired-end mode. Accepts an even number of input files as consecutive R1/R2 pairs
+    /// (e.g. --paired R1.fq.gz R2.fq.gz, or a glob matching multiple samples).
     #[clap(long = "paired")]
     pub paired: bool,
 
@@ -69,15 +75,18 @@ pub struct Cli {
 
     /// Minimum required sequence length after trimming.
     /// Default: 20 (18 for smallRNA adapter).
+    /// In paired-end mode, both reads must pass; see --retain_unpaired to keep single survivors.
     #[clap(long = "length")]
     pub length: Option<usize>,
 
     /// Maximum allowed sequence length (discard reads longer than this).
+    /// Typically only useful for smallRNA-seq to remove non-small-RNA reads.
     #[clap(long = "max_length")]
     pub max_length: Option<usize>,
 
     /// Maximum number of N bases allowed in a read.
     /// Integer: absolute count. Decimal (0-1): fraction of read length.
+    /// In paired-end mode, either read over the limit removes the whole pair.
     #[clap(long = "max_n")]
     pub max_n: Option<f64>,
 
@@ -85,19 +94,20 @@ pub struct Cli {
     #[clap(long = "trim-n", alias = "trim_n")]
     pub trim_n: bool,
 
-    /// Remove N bases from the 5' end of Read 1.
+    /// Remove N bases from the 5' end of Read 1. Useful for removing 5' quality-bias regions.
     #[clap(long = "clip_R1")]
     pub clip_r1: Option<usize>,
 
     /// Remove N bases from the 5' end of Read 2 (paired-end only).
+    /// For paired-end bisulfite-seq, the end-repair step can introduce methylation bias; see Bismark User Guide.
     #[clap(long = "clip_R2")]
     pub clip_r2: Option<usize>,
 
-    /// Remove N bases from the 3' end of Read 1.
+    /// Remove N bases from the 3' end of Read 1, after adapter/quality trimming.
     #[clap(long = "three_prime_clip_R1")]
     pub three_prime_clip_r1: Option<usize>,
 
-    /// Remove N bases from the 3' end of Read 2 (paired-end only).
+    /// Remove N bases from the 3' end of Read 2 (paired-end only), after adapter/quality trimming.
     #[clap(long = "three_prime_clip_R2")]
     pub three_prime_clip_r2: Option<usize>,
 
@@ -115,11 +125,12 @@ pub struct Cli {
     #[clap(long = "phred33")]
     pub phred33: bool,
 
-    /// Output directory for trimmed files.
+    /// Output directory for trimmed files. Created if it doesn't exist.
     #[clap(short = 'o', long = "output_dir")]
     pub output_dir: Option<PathBuf>,
 
     /// Custom basename for output files (replaces input filename stem).
+    /// Only valid for a single file (single-end) or a single pair (paired-end).
     #[clap(long = "basename")]
     pub basename: Option<String>,
 
@@ -132,6 +143,7 @@ pub struct Cli {
     pub no_report_file: bool,
 
     /// Retain unpaired reads when the mate is too short (paired-end only).
+    /// Cutoff via --length_1 / --length_2 (default 35 each).
     #[clap(long = "retain_unpaired")]
     pub retain_unpaired: bool,
 
@@ -143,7 +155,8 @@ pub struct Cli {
     #[clap(long = "length_2", default_value = "35", alias = "r2")]
     pub length_2: usize,
 
-    /// Add clipped sequences to read IDs (format: :clip5:SEQ:clip3:SEQ).
+    /// Add clipped sequences to read IDs for --clip_R1/R2, --three_prime_clip_R1/R2, and --hardtrim5/3.
+    /// Appends :clip5:SEQ and/or :clip3:SEQ to the read ID (each half only when that side was clipped). Useful for UMI handling.
     #[clap(long = "rename")]
     pub rename: bool,
 
@@ -157,11 +170,13 @@ pub struct Cli {
     /// RRBS mode for MspI-digested samples. Removes 2bp end-repair artifacts
     /// at MspI cut sites after adapter trimming. In paired-end directional mode,
     /// automatically sets --clip_R2 2 unless the user provides their own value.
+    /// Do not use with Tecan Ovation RRBS kits — those use a diversity-trimming step instead.
     #[clap(long = "rrbs")]
     pub rrbs: bool,
 
     /// Non-directional RRBS libraries. Reads starting with CAA or CGA get 2bp
     /// trimmed from the 5' end. Requires --rrbs.
+    /// Unlike directional --rrbs, does not auto-set --clip_R2 2 in paired-end mode.
     #[clap(long = "non_directional", requires = "rrbs")]
     pub non_directional: bool,
 
@@ -175,7 +190,7 @@ pub struct Cli {
 
     /// Number of worker threads for parallel processing (default: 1).
     /// Values > 1 run trimming and gzip compression across multiple threads.
-    /// Near-linear speedup up to ~16 cores; diminishing returns beyond ~20
+    /// Near-linear speedup through at least 16 cores; diminishing returns beyond ~20
     /// (typically I/O-bound at that point, not algorithmic).
     #[clap(short = 'j', long = "cores", default_value = "1")]
     pub cores: usize,
@@ -218,12 +233,12 @@ pub struct Cli {
 
     // --- Specialty modes (run-and-exit, bypass normal trimming) ---
     /// Hard-trim to keep only the first N bases from the 5' end.
-    /// Bypasses adapter/quality trimming entirely.
+    /// Bypasses adapter/quality trimming entirely. Output filenames end in .<N>bp_5prime.fq(.gz).
     #[clap(long = "hardtrim5")]
     pub hardtrim5: Option<usize>,
 
     /// Hard-trim to keep only the last N bases from the 3' end.
-    /// Bypasses adapter/quality trimming entirely.
+    /// Bypasses adapter/quality trimming entirely. Output filenames end in .<N>bp_3prime.fq(.gz).
     #[clap(long = "hardtrim3")]
     pub hardtrim3: Option<usize>,
 
@@ -261,7 +276,7 @@ pub struct Cli {
     #[clap(long = "cutadapt_args", hide = true, allow_hyphen_values = true)]
     pub cutadapt_args: Option<String>,
 
-    /// [Deprecated] No longer needed — no Cutadapt subprocess.
+    /// [Deprecated] v2.0 emits only essential progress output; use shell redirection if quieter output is needed.
     #[clap(long = "suppress_warn", hide = true)]
     pub suppress_warn: bool,
 
@@ -269,7 +284,7 @@ pub struct Cli {
     #[clap(long = "report", hide = true)]
     pub report: bool,
 
-    /// [Deprecated] Not yet supported in v2.0.
+    /// [Deprecated] The v2.0 single-pass architecture has no quality-trim intermediate file to keep.
     #[clap(long = "keep", hide = true)]
     pub keep: bool,
 
