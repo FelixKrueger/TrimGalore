@@ -1,6 +1,81 @@
 # Trim Galore Changelog
 
 
+### Version 2.1.0-beta.3 (Release on 24 Apr 2026)
+
+#### New features (since v2.1.0-beta.2)
+- **BGI/DNBSEQ added to adapter auto-detection.** Users running
+  BGI/MGI/DNBSEQ data no longer need to pass `--bgiseq` explicitly; the
+  32 bp BGI adapter is now probed alongside Illumina, Nextera, and
+  smallRNA on the first 1 M reads. Stranded Illumina stays
+  explicit-only (`--stranded_illumina`) because its sequence differs
+  from Nextera by a single A-tail base and would produce constant
+  ambiguous ties if probed. Tie-break semantics unchanged — the
+  zero-count fallback is still Illumina.
+- **Repeatable `-a` / `-a2` multi-adapter syntax.** `-a SEQ1 -a SEQ2`
+  now works directly — no need for the v0.6.x embedded-string
+  (`-a " SEQ -a SEQ"`) or FASTA file workaround. Embedded-string and
+  `file:adapters.fa` forms still work and can be mixed with repeated
+  flags in a single invocation (e.g. `-a " SEQ1 -a SEQ2" -a SEQ3`).
+- **Perl-style `A{N}` single-base expansion** for `-a` / `-a2` — e.g.
+  `-a A{10}` expands to `-a AAAAAAAAAA`, matching Perl v0.6.x syntax.
+  Only applied to the single-adapter case (not to multi-adapter or
+  FASTA entries), mirroring Perl behaviour.
+- **Perl-era `-r1` / `-r2` / `-a2` short-flag forms are accepted.**
+  Clap's single-character short-flag rule meant `-r1 40` previously
+  parsed as `-r=1` with `40` becoming a stray positional (producing
+  a confusing "odd count" error). A small pre-parse hook now
+  transparently rewrites the exact tokens `-r1`, `-r2`, `-a2` (and
+  their `=VALUE` variants) to the existing `--r1`, `--r2`, `--a2`
+  long-alias forms so Perl-era scripts keep working.
+
+#### Bug fixes (since v2.1.0-beta.2)
+- `--trim-n` is now suppressed under `--rrbs`, restoring Perl v0.6.x
+  byte-identical output for users who combine both flags. Perl's RRBS
+  code path omitted `$trim_n` from its Cutadapt invocations; beta.2
+  was applying N-trimming unconditionally, which narrowly violated the
+  byte-identity guarantee for that specific flag combination.
+- The paired-end parameter-summary line in the text trimming report
+  previously emitted a stray `-end` suffix
+  (`...before a sequence pair gets removed-end: 20 bp`). Now correctly
+  emits `...before a sequence pair gets removed: 20 bp`. Single-end
+  output (`...length single-end: 20 bp`) is unchanged.
+
+#### Documentation
+- **Flag-by-flag help-text polish (#221).** 25 docstring edits across
+  `src/cli.rs`. Most notable: `--paired` no longer claims "exactly 2
+  input files" (the multi-pair fix from beta.2 made this stale);
+  `--rrbs` help now warns against Tecan Ovation kit incompatibility;
+  `--small_rna` surfaces its length auto-lowering side-effect;
+  `--bgiseq` notes it is also probed by auto-detection.
+- **Positioning reframed from "byte-identical" to "faithful rewrite
+  with useful additions" (#222).** The original framing no longer held
+  given new capabilities (poly-G handling, generic poly-A trimmer,
+  per-pair adapter detection, the above BGI auto-detect, etc.).
+  Updated in README, SUMMARY, User Guide, CHANGELOG, and the
+  `--help` preamble. Benchmarks' "byte-identical across core counts"
+  claims (which are about `--cores` determinism, not Perl equivalence)
+  are retained where accurate.
+- **User guide refreshed (#223).** 534 → 325 lines. Dropped a ~220-line
+  duplicate of `--help` that had been drifting out of sync on every
+  polish cut; replaced with a curated "Flag reference" section on
+  cross-flag interactions, RRBS-specific guidance (Tecan, MseI), and
+  adapter-specification recap. Added IMPLICON coverage (missing from
+  the original guide). Modernised the intro/framing, removed the
+  floating Babraham logo (project now maintained solo outside
+  Babraham), dropped the hand-maintained "Last update" line, and
+  renamed the `Version 0.6.11` section heading to `Introduction`.
+  Historical attribution preserved as a footer credit.
+
+#### Infrastructure
+- Test count grew from **106 → 147** across the beta.2→beta.3 window.
+  New coverage: multi-pair validation branches, specialty modes
+  (`--clock`, `--implicon` end-to-end), adapter brace expansion,
+  four-probe auto-detection set, Perl-era flag rewriting,
+  `--trim-n`/`--rrbs` interaction, `parse_adapter_specs` mixed-form
+  path.
+
+
 ### Version 2.1.0-beta.2 (Release on 20 Apr 2026)
 
 #### New features (since v2.1.0-beta.1)
