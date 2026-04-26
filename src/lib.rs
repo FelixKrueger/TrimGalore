@@ -3,6 +3,7 @@ pub mod alignment;
 pub mod cli;
 pub mod demux;
 pub mod fastq;
+pub mod fastqc;
 pub mod filters;
 pub mod io;
 pub mod parallel;

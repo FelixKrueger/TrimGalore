@@ -20,7 +20,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **NextSeq / 2-colour quality trim** — `--nextseq N` / `--2colour N` applies 2-colour-aware quality trimming (opt-in; replaces `-q`)
 - **Poly-A trimming** — built-in removal of poly-A tails without external tools; recommended for mRNA-seq / poly-A-selected RNA-seq libraries
 - **Parallel processing** — `--cores N` runs trimming and gzip compression in worker threads for near-linear speedup on multi-core systems
-- **FastQC integration** — optional post-trimming quality reports (FastQC v0.12.1 bundled in the Docker image; for `cargo`/source installs, requires FastQC on `$PATH`)
+- **FastQC integration** — optional post-trimming quality reports built in via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library; produces FastQC 0.12.1-compatible HTML + ZIP outputs without requiring Java or an external `fastqc` on `$PATH`
 - **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
 - **Demultiplexing** — 3' inline barcode demultiplexing
 
@@ -77,7 +77,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore trim_galore input.fastq.gz
 ```
 
-The image bundles FastQC v0.12.1 and a Java runtime, so `--fastqc` works out of the box. The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.1.0`) are published on release.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.1.0`) are published on release.
 
 ### Prebuilt binaries
 

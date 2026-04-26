@@ -8,6 +8,7 @@ use trim_galore::adapter;
 use trim_galore::cli::{Cli, rewrite_perl_short_flags};
 use trim_galore::demux;
 use trim_galore::fastq::{FastqReader, FastqWriter};
+use trim_galore::fastqc;
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
 use trim_galore::io as naming;
 use trim_galore::parallel;
@@ -576,9 +577,14 @@ fn run_single_file(
         eprintln!("JSON report: {}", json_path.display());
     }
 
-    // Run FastQC if requested
+    // Run FastQC if requested (bundled fastqc-rust library — no shell-out)
     if cli.fastqc || cli.fastqc_args.is_some() {
-        run_fastqc(&output_path, cli.fastqc_args.as_deref(), output_dir)?;
+        fastqc::run(
+            &output_path,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
+        )?;
     }
 
     // Demultiplex if requested
@@ -853,42 +859,23 @@ fn run_paired(
         }
     }
 
-    // Run FastQC if requested
+    // Run FastQC if requested (bundled fastqc-rust library — no shell-out)
     if cli.fastqc || cli.fastqc_args.is_some() {
-        run_fastqc(&output_r1, cli.fastqc_args.as_deref(), output_dir)?;
-        run_fastqc(&output_r2, cli.fastqc_args.as_deref(), output_dir)?;
+        fastqc::run(
+            &output_r1,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
+        )?;
+        fastqc::run(
+            &output_r2,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
+        )?;
     }
 
     Ok(())
-}
-
-fn run_fastqc(
-    output_path: &Path,
-    fastqc_args: Option<&str>,
-    output_dir: Option<&Path>,
-) -> Result<()> {
-    let mut cmd = std::process::Command::new("fastqc");
-    if let Some(args) = fastqc_args {
-        for arg in args.split_whitespace() {
-            cmd.arg(arg);
-        }
-    }
-    if let Some(dir) = output_dir {
-        cmd.arg("-o").arg(dir);
-    }
-    cmd.arg(output_path);
-    eprintln!("\nRunning FastQC on {}", output_path.display());
-    let status = cmd.status();
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => {
-            eprintln!("Warning: FastQC exited with status {}", s);
-            Ok(())
-        }
-        Err(e) => {
-            anyhow::bail!("Failed to run FastQC: {}. Is it installed and in PATH?", e);
-        }
-    }
 }
 
 fn pct(part: usize, total: usize) -> f64 {
