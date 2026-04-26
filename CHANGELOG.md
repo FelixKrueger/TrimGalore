@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Unreleased (queued for v2.1.0-beta.4)
+### Version 2.1.0-beta.4 (Release on 26 Apr 2026)
 
 #### New features (since v2.1.0-beta.3)
 - **Bundled FastQC.** `--fastqc` now uses the
@@ -14,12 +14,16 @@
   image), so MultiQC parsers and downstream pipelines see identical
   structure. The Docker image is correspondingly slimmer (no
   `default-jre-headless`, no `perl`, no FastQC tarball; saves
-  approximately 350 MB at the runtime layer).
+  approximately 350 MB at the runtime layer). (#226)
   - `--fastqc_args` continues to accept the common subset (`--nogroup`,
     `--expgroup`, `--quiet`, `--svg`, `--nano`, `--nofilter`,
     `--casava`, `-t`/`--threads`, `-o`/`--outdir`); other flags emit a
     warning and are ignored — forward-compat with future fastqc-rust
     additions.
+  - `--help` text for `--fastqc` and `--fastqc_args` refreshed to
+    describe the bundled integration and enumerate the translated flag
+    set; `docs/SUMMARY.md` architecture-shift paragraph and parity
+    table updated accordingly. (#227)
 
 #### Bug fixes (since v2.1.0-beta.3)
 - `--clock` and `--implicon` now accept multi-pair input (an even
