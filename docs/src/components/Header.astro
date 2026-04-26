@@ -1,0 +1,178 @@
+---
+import config from 'virtual:starlight/user-config';
+import LanguageSelect from 'virtual:starlight/components/LanguageSelect';
+import Search from 'virtual:starlight/components/Search';
+import SiteTitle from 'virtual:starlight/components/SiteTitle';
+import SocialIcons from 'virtual:starlight/components/SocialIcons';
+import ThemeSelect from 'virtual:starlight/components/ThemeSelect';
+
+const shouldRenderSearch =
+  config.pagefind || config.components.Search !== '@astrojs/starlight/components/Search.astro';
+
+const navLinks = [
+  { label: 'Quickstart', href: '/TrimGalore/quickstart/' },
+  { label: 'Guide',      href: '/TrimGalore/guide/overview/' },
+  { label: 'RRBS',       href: '/TrimGalore/rrbs/guide/' },
+  { label: 'Benchmarks', href: '/TrimGalore/performance/benchmarks/' },
+];
+
+// Resolve the latest GitHub release at build time (the docs ship on every
+// commit, so Cargo.toml is too noisy a source — most builds wouldn't match
+// a real release tag). Includes pre-releases. If the API call fails (rate
+// limit, network), fall back to the /releases listing page.
+let versionLabel = 'Releases';
+let versionUrl = 'https://github.com/FelixKrueger/TrimGalore/releases';
+try {
+  const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const res = await fetch(
+    'https://api.github.com/repos/FelixKrueger/TrimGalore/releases?per_page=1',
+    { headers },
+  );
+  if (res.ok) {
+    const releases = (await res.json()) as Array<{ tag_name: string; html_url: string }>;
+    if (Array.isArray(releases) && releases.length > 0) {
+      versionLabel = releases[0].tag_name;
+      versionUrl = releases[0].html_url;
+    }
+  }
+} catch {
+  // Keep fallback.
+}
+---
+
+<div class="header tg-header">
+  <div class="title-wrapper sl-flex">
+    <SiteTitle />
+  </div>
+
+  <nav class="tg-topnav sl-hidden md:sl-flex" aria-label="Primary">
+    {navLinks.map(({ label, href }) => (
+      <a href={href}>{label}</a>
+    ))}
+    <a class="tg-version" href={versionUrl} aria-label={`Release notes for ${versionLabel}`}>{versionLabel}</a>
+  </nav>
+
+  <div class="sl-flex print:hidden tg-search-cell">
+    {shouldRenderSearch && <Search />}
+  </div>
+
+  <div class="sl-hidden md:sl-flex print:hidden right-group">
+    <div class="sl-flex social-icons">
+      <SocialIcons />
+    </div>
+    <ThemeSelect />
+    <LanguageSelect />
+  </div>
+</div>
+
+<style>
+  @layer starlight.core {
+    .tg-header {
+      display: flex;
+      gap: var(--sl-nav-gap);
+      justify-content: space-between;
+      align-items: center;
+      height: 100%;
+    }
+    .title-wrapper {
+      overflow: clip;
+      padding: 0.25rem;
+      margin: -0.25rem;
+      min-width: 0;
+    }
+    .right-group,
+    .social-icons {
+      gap: 1rem;
+      align-items: center;
+    }
+    .social-icons::after {
+      content: '';
+      height: 2rem;
+      border-inline-end: 1px solid var(--sl-color-gray-5);
+    }
+
+    .tg-topnav {
+      gap: 1.6rem;
+      align-items: center;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--brand-ink-soft);
+    }
+    .tg-topnav a:not(.tg-version) {
+      color: var(--brand-ink-soft);
+      text-decoration: none;
+      padding: 0.25rem 0;
+      border-bottom: 2px solid transparent;
+      transition: color 150ms var(--brand-ease), border-color 150ms var(--brand-ease);
+    }
+    .tg-topnav a:not(.tg-version):hover,
+    .tg-topnav a:not(.tg-version)[aria-current="page"] {
+      color: var(--brand-ink);
+      border-bottom-color: var(--brand-lime);
+    }
+    .tg-version {
+      font-family: var(--sl-font-system-mono);
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--brand-ink-soft);
+      padding: 0.25rem 0.65rem;
+      border: 1px solid var(--brand-rule-strong);
+      border-radius: 999px;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      align-items: center;
+      text-decoration: none;
+      transition: color 150ms var(--brand-ease), border-color 150ms var(--brand-ease);
+    }
+    .tg-version:hover {
+      color: var(--brand-ink);
+      border-color: var(--brand-ink);
+    }
+
+    /* Wide viewports (≥ ~1740px): pull the version pill out of the nav flow
+       and pin it to the right edge of the content column so it doesn't sit
+       adjacent to the search bar. Below this breakpoint, the pill stays
+       inside the nav cluster next to the link list. */
+    @media (min-width: 108.75rem) {
+      .tg-header { position: relative; }
+      .tg-version {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        right: max(2rem, calc(50% - var(--sl-content-width, 45rem) / 2 + 1rem));
+      }
+    }
+
+    @media (min-width: 50rem) {
+      :global(:root[data-has-sidebar]) {
+        --__sidebar-pad: calc(2 * var(--sl-nav-pad-x));
+      }
+      :global(:root:not([data-has-toc])) {
+        --__toc-width: 0rem;
+      }
+      .tg-header {
+        --__sidebar-width: max(0rem, var(--sl-content-inline-start, 0rem) - var(--sl-nav-pad-x));
+        --__main-column-fr: calc(
+          (
+              100% + var(--__sidebar-pad, 0rem) - var(--__toc-width, var(--sl-sidebar-width)) -
+                (2 * var(--__toc-width, var(--sl-nav-pad-x))) - var(--sl-content-inline-start, 0rem) -
+                var(--sl-content-width)
+            ) / 2
+        );
+        display: grid;
+        grid-template-columns:
+          minmax(
+            calc(var(--__sidebar-width) + max(0rem, var(--__main-column-fr) - var(--sl-nav-gap))),
+            auto
+          )
+          auto
+          1fr
+          auto;
+        align-content: center;
+      }
+      .tg-topnav { justify-self: start; }
+      .tg-search-cell { justify-self: end; }
+    }
+  }
+</style>
