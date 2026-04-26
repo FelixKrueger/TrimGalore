@@ -415,20 +415,22 @@ impl Cli {
         }
 
         if let Some(val) = self.nextseq
-            && (val == 0 || val >= 200) {
-                anyhow::bail!(
-                    "NextSeq quality cutoff must be between 1 and 199, got {}",
-                    val
-                );
-            }
+            && (val == 0 || val >= 200)
+        {
+            anyhow::bail!(
+                "NextSeq quality cutoff must be between 1 and 199, got {}",
+                val
+            );
+        }
 
         if let Some(threshold) = self.consider_already_trimmed
-            && threshold > 10000 {
-                anyhow::bail!(
-                    "consider_already_trimmed value must be between 0 and 10000, got {}",
-                    threshold
-                );
-            }
+            && threshold > 10000
+        {
+            anyhow::bail!(
+                "consider_already_trimmed value must be between 0 and 10000, got {}",
+                threshold
+            );
+        }
 
         if self.times == 0 || self.times > 10 {
             anyhow::bail!("--times/-n must be between 1 and 10, got {}", self.times);
@@ -439,13 +441,15 @@ impl Cli {
         }
 
         if let Some(n) = self.hardtrim5
-            && (n == 0 || n >= 1000) {
-                anyhow::bail!("--hardtrim5 must be between 1 and 999, got {}", n);
-            }
+            && (n == 0 || n >= 1000)
+        {
+            anyhow::bail!("--hardtrim5 must be between 1 and 999, got {}", n);
+        }
         if let Some(n) = self.hardtrim3
-            && (n == 0 || n >= 1000) {
-                anyhow::bail!("--hardtrim3 must be between 1 and 999, got {}", n);
-            }
+            && (n == 0 || n >= 1000)
+        {
+            anyhow::bail!("--hardtrim3 must be between 1 and 999, got {}", n);
+        }
         if self.clock {
             self.validate_paired_input("--clock")?;
         }

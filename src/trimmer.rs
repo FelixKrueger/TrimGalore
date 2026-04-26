@@ -242,17 +242,19 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         let clipped = record.clip_5prime(n);
         clip_5prime_applied = clipped.is_some();
         if config.rename
-            && let Some(seq) = clipped {
-                record.append_to_id(&format!(":clip5:{}", seq));
-            }
+            && let Some(seq) = clipped
+        {
+            record.append_to_id(&format!(":clip5:{}", seq));
+        }
     }
 
     if let Some(n) = clip_3 {
         let clipped = record.clip_3prime(n);
         if config.rename
-            && let Some(seq) = clipped {
-                record.append_to_id(&format!(":clip3:{}", seq));
-            }
+            && let Some(seq) = clipped
+        {
+            record.append_to_id(&format!(":clip3:{}", seq));
+        }
     }
 
     TrimResult {
@@ -458,15 +460,17 @@ pub fn run_paired_end(
 
                         // Rescue individual reads if --retain_unpaired
                         if let Some(ref mut w) = unpaired_r1.as_deref_mut()
-                            && r1_ok {
-                                w.write_record(&r1)?;
-                                pair_stats.r1_unpaired += 1;
-                            }
+                            && r1_ok
+                        {
+                            w.write_record(&r1)?;
+                            pair_stats.r1_unpaired += 1;
+                        }
                         if let Some(ref mut w) = unpaired_r2.as_deref_mut()
-                            && r2_ok {
-                                w.write_record(&r2)?;
-                                pair_stats.r2_unpaired += 1;
-                            }
+                            && r2_ok
+                        {
+                            w.write_record(&r2)?;
+                            pair_stats.r2_unpaired += 1;
+                        }
                     }
                     PairFilterResult::TooLong => {
                         pair_stats.pairs_removed += 1;

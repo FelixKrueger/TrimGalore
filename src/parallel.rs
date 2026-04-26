@@ -195,13 +195,15 @@ pub fn run_paired_end_parallel(
                 out_r1.write_all(&r.compressed_r1)?;
                 out_r2.write_all(&r.compressed_r2)?;
                 if let Some(ref mut f) = out_up_r1
-                    && !r.compressed_unpaired_r1.is_empty() {
-                        f.write_all(&r.compressed_unpaired_r1)?;
-                    }
+                    && !r.compressed_unpaired_r1.is_empty()
+                {
+                    f.write_all(&r.compressed_unpaired_r1)?;
+                }
                 if let Some(ref mut f) = out_up_r2
-                    && !r.compressed_unpaired_r2.is_empty() {
-                        f.write_all(&r.compressed_unpaired_r2)?;
-                    }
+                    && !r.compressed_unpaired_r2.is_empty()
+                {
+                    f.write_all(&r.compressed_unpaired_r2)?;
+                }
                 total_r1.merge(&r.stats_r1);
                 total_r2.merge(&r.stats_r2);
                 total_pair.merge(&r.pair_stats);
@@ -418,15 +420,17 @@ fn process_pairs<W: Write>(
                 stats_r1.too_short += 1;
                 stats_r2.too_short += 1;
                 if let Some(ref mut w) = writer_up_r1
-                    && r1_ok {
-                        r1.write_to(*w)?;
-                        pair_stats.r1_unpaired += 1;
-                    }
+                    && r1_ok
+                {
+                    r1.write_to(*w)?;
+                    pair_stats.r1_unpaired += 1;
+                }
                 if let Some(ref mut w) = writer_up_r2
-                    && r2_ok {
-                        r2.write_to(*w)?;
-                        pair_stats.r2_unpaired += 1;
-                    }
+                    && r2_ok
+                {
+                    r2.write_to(*w)?;
+                    pair_stats.r2_unpaired += 1;
+                }
             }
             PairFilterResult::TooLong => {
                 pair_stats.pairs_removed += 1;
