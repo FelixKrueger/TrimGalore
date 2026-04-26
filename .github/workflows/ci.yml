@@ -271,16 +271,63 @@ jobs:
           test $rc -ne 0
           grep -q "basename cannot be used with multiple" /tmp/bn.log
 
-      - name: Validate --clock still requires exactly 2 inputs (no multi-pair widening)
+      - name: Validate multi-pair --clock (regression guard for the v2.x widening)
+        run: |
+          rm -rf /tmp/clock_multi; mkdir -p /tmp/clock_multi
+          for sample in A B; do
+            cp test_files/clock_10K_R1.fastq.gz /tmp/clock_multi/${sample}_R1.fastq.gz
+            cp test_files/clock_10K_R2.fastq.gz /tmp/clock_multi/${sample}_R2.fastq.gz
+          done
+          ./target/release/trim_galore --clock -o /tmp/clock_multi \
+            /tmp/clock_multi/A_R1.fastq.gz /tmp/clock_multi/A_R2.fastq.gz \
+            /tmp/clock_multi/B_R1.fastq.gz /tmp/clock_multi/B_R2.fastq.gz 2>&1 | tee /tmp/clock_multi.log
+          # Per-pair header should be emitted in multi-pair mode
+          grep -q 'Clock pair 1 of 2' /tmp/clock_multi.log
+          grep -q 'Clock pair 2 of 2' /tmp/clock_multi.log
+          # Per-pair output files should exist
+          for sample in A B; do
+            test -f /tmp/clock_multi/${sample}_R1.clock_UMI.R1.fq.gz
+            test -f /tmp/clock_multi/${sample}_R2.clock_UMI.R2.fq.gz
+          done
+
+      - name: Validate multi-pair --implicon
+        run: |
+          rm -rf /tmp/implicon_multi; mkdir -p /tmp/implicon_multi
+          for sample in A B; do
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/implicon_multi/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/implicon_multi/${sample}_R2.fastq.gz
+          done
+          ./target/release/trim_galore --implicon -o /tmp/implicon_multi \
+            /tmp/implicon_multi/A_R1.fastq.gz /tmp/implicon_multi/A_R2.fastq.gz \
+            /tmp/implicon_multi/B_R1.fastq.gz /tmp/implicon_multi/B_R2.fastq.gz 2>&1 | tee /tmp/implicon_multi.log
+          grep -q 'IMPLICON pair 1 of 2' /tmp/implicon_multi.log
+          grep -q 'IMPLICON pair 2 of 2' /tmp/implicon_multi.log
+          for sample in A B; do
+            test -f /tmp/implicon_multi/${sample}_8bp_UMI_R1.fastq.gz
+            test -f /tmp/implicon_multi/${sample}_8bp_UMI_R2.fastq.gz
+          done
+
+      - name: Validate --clock duplicate-pair rejection (regression guard)
         run: |
           set +e
           ./target/release/trim_galore --clock \
             test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz \
-            test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz 2>&1 | tee /tmp/clock.log
+            test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz 2>&1 | tee /tmp/clock_dup.log
           rc=${PIPESTATUS[0]}
           set -e
           test $rc -ne 0
-          grep -q "clock requires exactly 2" /tmp/clock.log
+          grep -q 'duplicate of pair' /tmp/clock_dup.log
+
+      - name: Validate --clock odd-count rejection (regression guard)
+        run: |
+          set +e
+          ./target/release/trim_galore --clock \
+            test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz \
+            test_files/clock_10K_R1.fastq.gz 2>&1 | tee /tmp/clock_odd.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q 'even number' /tmp/clock_odd.log
 
       - name: Validate paired-end output-path collision pre-flight
         run: |
