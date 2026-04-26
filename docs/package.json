@@ -13,7 +13,10 @@
   "dependencies": {
     "@astrojs/mdx": "^5.0.4",
     "@astrojs/starlight": "^0.38.4",
+    "@resvg/resvg-js": "^2.6.2",
     "astro": "^6.1.9",
+    "canvaskit-wasm": "^0.41.1",
+    "satori": "^0.26.0",
     "sharp": "^0.34.5"
   }
 }
