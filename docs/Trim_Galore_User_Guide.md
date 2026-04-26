@@ -31,7 +31,7 @@ Poor base call qualities or adapter contamination are however just as relevant f
 
 ## Adaptive quality and adapter trimming with Trim Galore
 
-Trim Galore handles quality trimming, adapter detection, adapter removal, length filtering, and specialty modes in a single pass over the data, with optional post-trimming quality reporting via [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/). Originally a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/en/stable/), v2.x is a faithful Rust rewrite that consolidates those passes while preserving the CLI and output filename conventions.
+Trim Galore handles quality trimming, adapter detection, adapter removal, length filtering, and specialty modes in a single pass over the data, with optional post-trimming quality reporting via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library (FastQC 0.12.1-compatible HTML + ZIP outputs; no Java required). Originally a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/en/stable/) and an external [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) install, v2.x is a faithful Rust rewrite that consolidates those passes while preserving the CLI and output filename conventions.
 
 Even though Trim Galore works for any (base space) high throughput dataset (e.g. downloaded from the SRA) this section describes its use mainly with respect to RRBS libraries.
 

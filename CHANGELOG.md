@@ -1,6 +1,44 @@
 # Trim Galore Changelog
 
 
+### Unreleased (queued for v2.1.0-beta.4)
+
+#### New features (since v2.1.0-beta.3)
+- **Bundled FastQC.** `--fastqc` now uses the
+  [fastqc-rust](https://crates.io/crates/fastqc-rust) library directly
+  instead of shelling out to an external `fastqc` binary. Removes Java
+  and the FastQC tarball as runtime dependencies — completes the
+  "single static binary, zero external runtime deps" story for v2.x.
+  Output files (`*_fastqc.html`, `*_fastqc.zip`) are FastQC 0.12.1-
+  compatible (the same version we previously bundled in the Docker
+  image), so MultiQC parsers and downstream pipelines see identical
+  structure. The Docker image is correspondingly slimmer (no
+  `default-jre-headless`, no `perl`, no FastQC tarball; saves
+  approximately 350 MB at the runtime layer).
+  - `--fastqc_args` continues to accept the common subset (`--nogroup`,
+    `--expgroup`, `--quiet`, `--svg`, `--nano`, `--nofilter`,
+    `--casava`, `-t`/`--threads`, `-o`/`--outdir`); other flags emit a
+    warning and are ignored — forward-compat with future fastqc-rust
+    additions.
+
+#### Bug fixes (since v2.1.0-beta.3)
+- `--clock` and `--implicon` now accept multi-pair input (an even
+  number of files as consecutive R1/R2 pairs), restoring v0.6.x
+  semantics that the v2.x rewrite had narrowed to "exactly 2 input
+  files". Same widening as the `--paired` fix in beta.2 — the two
+  specialty run-and-exit modes had their own validation that wasn't
+  updated at the time. Each pair gets a per-pair header
+  (`=== Clock pair N of M ===` / `=== IMPLICON pair N of M ===`) and
+  the same output-collision pre-flight (case-insensitive on full path)
+  that `--paired` runs. (#224)
+
+#### Infrastructure (contributor-facing)
+- `rust-version` bumped from 1.85 → 1.88 (required by fastqc-rust).
+- `.gitattributes` added so the GitHub repo language bar reflects the
+  actual Rust content rather than HTML in `docs/`. (#225, contributed
+  by @ewels)
+
+
 ### Version 2.1.0-beta.3 (Release on 24 Apr 2026)
 
 #### New features (since v2.1.0-beta.2)
