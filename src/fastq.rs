@@ -427,13 +427,12 @@ impl FastqWriter {
         let path = path.as_ref();
 
         // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
+        if let Some(parent) = path.parent()
+            && !parent.exists() {
                 std::fs::create_dir_all(parent).with_context(|| {
                     format!("Failed to create output directory: {}", parent.display())
                 })?;
             }
-        }
 
         let file = File::create(path)
             .with_context(|| format!("Failed to create output file: {}", path.display()))?;

@@ -144,7 +144,7 @@ pub fn clock(
         match (rec1, rec2) {
             (Some(mut r1), Some(mut r2)) => {
                 count += 1;
-                if count % 1_000_000 == 0 {
+                if count.is_multiple_of(1_000_000) {
                     eprintln!("Processed {} sequences so far...", count);
                 }
 
@@ -255,7 +255,7 @@ pub fn implicon(
         match (rec1, rec2) {
             (Some(mut r1), Some(mut r2)) => {
                 count += 1;
-                if count % 1_000_000 == 0 {
+                if count.is_multiple_of(1_000_000) {
                     eprintln!("Processed {} sequences so far...", count);
                 }
 

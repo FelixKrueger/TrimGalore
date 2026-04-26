@@ -171,7 +171,7 @@ pub fn demultiplex(
 
     while let Some(mut record) = reader.next_record()? {
         total += 1;
-        if total % 10_000_000 == 0 {
+        if total.is_multiple_of(10_000_000) {
             eprintln!("{} sequences processed", total);
         }
 

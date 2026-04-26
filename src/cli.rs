@@ -342,7 +342,7 @@ impl Cli {
     /// `mode_label` is used in the user-facing error string, e.g.
     /// `"Paired-end"`, `"--clock"`, `"--implicon"`.
     fn validate_paired_input(&self, mode_label: &str) -> anyhow::Result<()> {
-        if self.input.len() % 2 != 0 {
+        if !self.input.len().is_multiple_of(2) {
             anyhow::bail!(
                 "{} mode requires an even number of input files (R1/R2 pairs), got {}",
                 mode_label,
@@ -414,23 +414,21 @@ impl Cli {
             );
         }
 
-        if let Some(val) = self.nextseq {
-            if val == 0 || val >= 200 {
+        if let Some(val) = self.nextseq
+            && (val == 0 || val >= 200) {
                 anyhow::bail!(
                     "NextSeq quality cutoff must be between 1 and 199, got {}",
                     val
                 );
             }
-        }
 
-        if let Some(threshold) = self.consider_already_trimmed {
-            if threshold > 10000 {
+        if let Some(threshold) = self.consider_already_trimmed
+            && threshold > 10000 {
                 anyhow::bail!(
                     "consider_already_trimmed value must be between 0 and 10000, got {}",
                     threshold
                 );
             }
-        }
 
         if self.times == 0 || self.times > 10 {
             anyhow::bail!("--times/-n must be between 1 and 10, got {}", self.times);
@@ -440,16 +438,14 @@ impl Cli {
             anyhow::bail!("--cores must be at least 1");
         }
 
-        if let Some(n) = self.hardtrim5 {
-            if n == 0 || n >= 1000 {
+        if let Some(n) = self.hardtrim5
+            && (n == 0 || n >= 1000) {
                 anyhow::bail!("--hardtrim5 must be between 1 and 999, got {}", n);
             }
-        }
-        if let Some(n) = self.hardtrim3 {
-            if n == 0 || n >= 1000 {
+        if let Some(n) = self.hardtrim3
+            && (n == 0 || n >= 1000) {
                 anyhow::bail!("--hardtrim3 must be between 1 and 999, got {}", n);
             }
-        }
         if self.clock {
             self.validate_paired_input("--clock")?;
         }
