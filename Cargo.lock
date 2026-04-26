@@ -527,9 +527,9 @@ dependencies = [
 
 [[package]]
 name = "fastqc-rust"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0becf98187630da8d8af7871e523b52e6e6ef9a99ed1479cde2af894e3f6fd56"
+checksum = "f6543746fca2a17af70ee607cfd035f5345a426072bc45518ebf1e4f1ad1c6ae"
 dependencies = [
  "base64",
  "bzip2-rs",
@@ -1724,7 +1724,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "trim-galore"
-version = "2.1.0-beta.4"
+version = "2.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clap",

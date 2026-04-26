@@ -27,10 +27,10 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 ## Installation
 
 > [!IMPORTANT]
-> **Beta testing v2.1.0-beta.4.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
+> **Beta testing v2.1.0-beta.5.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
 >
 > ```bash
-> cargo install trim-galore --version 2.1.0-beta.4
+> cargo install trim-galore --version 2.1.0-beta.5
 > docker pull ghcr.io/felixkrueger/trimgalore:beta
 > ```
 >

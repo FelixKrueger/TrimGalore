@@ -1,6 +1,6 @@
 [package]
 name = "trim-galore"
-version = "2.1.0-beta.4"
+version = "2.1.0-beta.5"
 edition = "2024"
 rust-version = "1.88"
 description = "Fast adapter and quality trimming for NGS data — Oxidized Edition"
@@ -37,7 +37,10 @@ env_logger = "0.11"
 # Bundled FastQC integration. Exact-pin: brand-new crate (v1.0.0 published
 # 2026-04-26) — treat upstream bumps as deliberate-test events. See
 # /Users/fkrueger/.claude/plans/bundled-fastqc-rust.md for the design notes.
-fastqc-rust = "=1.0.0"
+# v1.0.1 (2026-04-26) fixes percentage-precision in >>Overrepresented sequences
+# (ewels/FastQC-Rust#2); restored byte-identity to Java FastQC 0.12.1 for that
+# section.
+fastqc-rust = "=1.0.1"
 
 [dev-dependencies]
 serde_json = "1"

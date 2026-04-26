@@ -1,6 +1,25 @@
 # Trim Galore Changelog
 
 
+### Version 2.1.0-beta.5 (Release on 27 Apr 2026)
+
+#### Bug fixes (since v2.1.0-beta.4)
+- **Bundled FastQC: percentage precision in `>>Overrepresented sequences`.**
+  Bumps `fastqc-rust` dep from v1.0.0 to v1.0.1, which restores Java
+  FastQC 0.12.1 byte-identity in that section. v1.0.0 rounded the
+  percentage column to 2 decimals (`7.16`) instead of emitting Java's
+  full `Double.toString()` precision (`7.160449112640348`). Detected
+  during the `nf-core/rnaseq#1789` integration matrix on NF 25.04.3,
+  where the older pinned MultiQC preserves the literal percentage
+  string when aggregating into `fastqc_trimmed_overrepresented_sequences_plot.txt`,
+  so the truncated value cascaded into a downstream MD5 mismatch. Fix
+  filed and merged upstream as
+  [ewels/FastQC-Rust#2](https://github.com/ewels/FastQC-Rust/pull/2).
+  Detected sequences, counts, and source classification were always
+  correct — this was a cosmetic formatting deviation, not a scientific
+  one.
+
+
 ### Version 2.1.0-beta.4 (Release on 26 Apr 2026)
 
 #### New features (since v2.1.0-beta.3)
