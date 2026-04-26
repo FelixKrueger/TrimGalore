@@ -318,7 +318,12 @@ fn hardtrim_output_name(
     }
 }
 
-fn clock_output_name(input: &Path, read: &str, output_dir: Option<&Path>, gzip: bool) -> PathBuf {
+pub fn clock_output_name(
+    input: &Path,
+    read: &str,
+    output_dir: Option<&Path>,
+    gzip: bool,
+) -> PathBuf {
     let stem = naming::strip_fastq_extensions(input);
     let ext = if gzip { ".fq.gz" } else { ".fq" };
     let filename = format!("{}.clock_UMI.{}{}", stem, read, ext);
@@ -328,7 +333,7 @@ fn clock_output_name(input: &Path, read: &str, output_dir: Option<&Path>, gzip: 
     }
 }
 
-fn implicon_output_name(
+pub fn implicon_output_name(
     input: &Path,
     umi_len: usize,
     read: &str,
