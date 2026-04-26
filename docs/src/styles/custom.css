@@ -167,6 +167,20 @@ html { overflow-x: clip; }
   letter-spacing: -0.02em;
   color: var(--brand-ink);
 }
+/* Inner-page title (rendered by Starlight's PageTitle, sits outside the
+   markdown content). Bricolage display, tight tracking. */
+main h1[data-page-title],
+main h1#_top {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif !important;
+  font-variation-settings: "opsz" 96, "wdth" 100;
+  font-weight: 700 !important;
+  font-size: clamp(40px, 4.4vw, 56px) !important;
+  line-height: 1 !important;
+  letter-spacing: -0.035em !important;
+  color: var(--brand-ink) !important;
+  margin-bottom: 1.5rem;
+}
+
 .sl-markdown-content h2 {
   font-variation-settings: "opsz" 60, "wdth" 100;
   font-weight: 500;
@@ -261,6 +275,27 @@ html { overflow-x: clip; }
 .expressive-code .copy button:hover {
   border-color: var(--brand-ink) !important;
   color: var(--brand-ink) !important;
+}
+
+/* Code frame chrome. Terminal-style frames keep the window dots; titled
+   frames get a brand-tinted bar. Inactive title bar uses ink-soft so the
+   frame feels of-a-piece with the body. */
+.expressive-code .frame .header {
+  background: var(--brand-bg-deep);
+  border-bottom: 1px solid var(--brand-rule);
+}
+.expressive-code .frame.is-terminal .header {
+  background: var(--brand-bg-deep);
+}
+.expressive-code .frame .title {
+  color: var(--brand-ink-soft) !important;
+  font-family: var(--sl-font-system-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.expressive-code .frame.has-title .title::before,
+.expressive-code .frame.has-title .title::after {
+  display: none;
 }
 
 /* -----------------------------------------------------------
@@ -613,18 +648,98 @@ html { overflow-x: clip; }
 .sidebar-content li:has(> a[aria-current="page"]) {
   border-inline-start-color: var(--brand-lime) !important;
 }
+/* Subtle hover feedback on sidebar links: tint + ink colour. */
+.sidebar-content a:not([aria-current="page"]):hover {
+  color: var(--brand-ink) !important;
+  background: var(--brand-bg-soft) !important;
+}
 starlight-toc nav a[aria-current="true"] {
   color: var(--brand-ink) !important;
   font-weight: 600;
 }
 
-/* Pagination links */
-.pagination-links a {
+/* -----------------------------------------------------------
+   Asides (note / tip / caution / danger). Starlight's defaults use a
+   0.25rem side stripe (banned by the design system) plus blue/purple/
+   orange/red bg tints (off-brand). Replace with a hairline full border,
+   warm-soft bg, and a per-variant icon-and-title accent.
+   ----------------------------------------------------------- */
+.starlight-aside {
+  padding: 1rem 1.25rem !important;
   border: 1px solid var(--brand-rule) !important;
-  border-radius: 4px !important;
+  border-inline-start: 1px solid var(--brand-rule) !important;
+  border-radius: 6px;
+  background: var(--brand-bg-soft) !important;
+  color: var(--brand-ink) !important;
+  margin: 1.5rem 0 !important;
+}
+.starlight-aside__title {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--brand-ink) !important;
+}
+.starlight-aside__icon {
+  color: var(--brand-ink-soft);
+}
+.starlight-aside__content a {
+  color: var(--brand-ink) !important;
+}
+
+/* Severity comes through in the icon hue + a subtle title accent. */
+.starlight-aside--note .starlight-aside__icon,
+.starlight-aside--tip .starlight-aside__icon {
+  color: var(--brand-lime-deep);
+}
+.starlight-aside--caution {
+  background: oklch(0.96 0.04 80) !important;
+  border-color: oklch(0.78 0.10 75) !important;
+}
+:root[data-theme='dark'] .starlight-aside--caution {
+  background: oklch(0.27 0.05 75) !important;
+  border-color: oklch(0.45 0.10 75) !important;
+}
+.starlight-aside--caution .starlight-aside__icon {
+  color: oklch(0.55 0.16 65);
+}
+.starlight-aside--danger {
+  background: oklch(0.95 0.03 30) !important;
+  border-color: oklch(0.75 0.10 30) !important;
+}
+:root[data-theme='dark'] .starlight-aside--danger {
+  background: oklch(0.25 0.06 30) !important;
+  border-color: oklch(0.45 0.12 30) !important;
+}
+.starlight-aside--danger .starlight-aside__icon {
+  color: oklch(0.50 0.18 25);
+}
+
+/* Inline code inside asides keeps the lime chip but the bg around it has
+   already shifted, so just pin the contrast in the danger/caution variants. */
+.starlight-aside--caution :not(pre) > code,
+.starlight-aside--danger :not(pre) > code {
+  color: var(--brand-text-on-lime);
+  background: var(--brand-lime);
+}
+
+/* Pagination "Previous / Next" cards. Match the V4 card aesthetic:
+   warm-soft bg, hairline border, ink hover. */
+.pagination-links a {
+  background: var(--brand-bg-soft) !important;
+  border: 1px solid var(--brand-rule) !important;
+  border-radius: 6px !important;
+  padding: 1rem 1.25rem !important;
+  transition: border-color 150ms var(--brand-ease), background 150ms var(--brand-ease);
 }
 .pagination-links a:hover {
   border-color: var(--brand-ink) !important;
+  background: var(--brand-bg) !important;
+}
+.pagination-links a .link-title {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 /* Keep flag references like --adapter2 on one line */
