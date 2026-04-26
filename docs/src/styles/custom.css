@@ -199,7 +199,7 @@ html { overflow-x: clip; }
 .sl-markdown-content h3 em::before {
   content: "";
   position: absolute;
-  inset: 14% -4px 14% -4px;
+  inset: 14% -4px 14% 4px;
   background: var(--brand-lime);
   transform: skewX(calc(-1 * var(--brand-slash)));
   z-index: -1;
@@ -457,19 +457,16 @@ html { overflow-x: clip; }
 }
 
 /* -----------------------------------------------------------
-   Section divider: sheared lime band.
+   Section divider: heading-style label above a 1px full-width lime line.
    ----------------------------------------------------------- */
-/* Divider: a heading-sized section marker stacked over a lime band rotated
-   at the same -14° as the hero band, so the angle reads as one gesture
-   throughout the page. */
 .tg-divider {
   width: 100vw;
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
-  margin-block: 96px 56px;
+  margin-block: 80px 32px;
   display: grid;
-  grid-template-rows: auto 70px;
-  gap: 16px;
+  grid-template-rows: auto 1px;
+  gap: 14px;
 }
 .tg-divider .label {
   margin-inline: auto;
@@ -488,18 +485,9 @@ html { overflow-x: clip; }
   line-height: 1;
 }
 .tg-divider .band {
-  position: relative;
-  overflow: hidden;
-}
-.tg-divider .band::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  height: 28px;
-  width: 130%;
+  width: 100%;
+  height: 1px;
   background: var(--brand-lime);
-  transform: translate(-50%, -50%) rotate(-14deg);
 }
 
 /* -----------------------------------------------------------
@@ -615,20 +603,15 @@ html { overflow-x: clip; }
 .sl-markdown-content td img { padding: 0.4rem; }
 
 /* -----------------------------------------------------------
-   Sidebar: lime tick on the current page.
+   Sidebar: replace the default 1px indent rule on the active item with a
+   2px lime stripe so it lines up with the other items' indent line.
    ----------------------------------------------------------- */
 .sidebar-content a[aria-current="page"] {
   color: var(--brand-ink) !important;
   background: transparent !important;
-  position: relative;
 }
-.sidebar-content a[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  left: -2px; top: 25%; bottom: 25%;
-  width: 4px;
-  background: var(--brand-lime);
-  transform: skewY(calc(-1 * var(--brand-slash)));
+.sidebar-content li:has(> a[aria-current="page"]) {
+  border-inline-start-color: var(--brand-lime) !important;
 }
 starlight-toc nav a[aria-current="true"] {
   color: var(--brand-ink) !important;

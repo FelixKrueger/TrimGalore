@@ -1,12 +1,11 @@
 ---
 title: Trim Galore
-description: Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS libraries.
+description: Adapter and quality trimming for NGS data. A single Rust binary, drop-in compatible with v0.6.x scripts and pipelines.
 hero:
   tagline: Adapter and quality trimming for NGS data. A single Rust binary, drop-in compatible with v0.6.x scripts and pipelines.
   actions:
     - text: Get started
       link: /TrimGalore/quickstart/
-      icon: right-arrow
       variant: primary
     - text: View on GitHub
       link: https://github.com/FelixKrueger/TrimGalore
@@ -14,39 +13,76 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
 
-## What's new in v2
+<div class="tg-proof not-content">
+  <div class="tg-proof-item">
+    <div class="num">1.9<em>×</em></div>
+    <div class="label">faster vs v0.6 · 8 cores</div>
+  </div>
+  <div class="tg-proof-item">
+    <div class="num">5<em>MB</em></div>
+    <div class="label">memory single-threaded</div>
+  </div>
+  <div class="tg-proof-item">
+    <div class="num">0<em>deps</em></div>
+    <div class="label">no Python, Cutadapt, pigz</div>
+  </div>
+  <div class="tg-proof-item">
+    <div class="num">10<em>+</em></div>
+    <div class="label">years on the shelf</div>
+  </div>
+</div>
 
-Trim Galore v2 is a Rust rewrite of the Perl wrapper. Same CLI, same output filenames, same report format. The binary has no external dependencies, and it adds a few capabilities the Perl version did not have.
+## What's new in <em>v2</em>
 
-<CardGrid>
-  <Card title="Single binary" icon="rocket">
-    No Python, no Cutadapt, no pigz. `cargo install trim-galore`, install from bioconda, or pull a Docker image. 5 MB RAM single-threaded.
-  </Card>
-  <Card title="Single-pass paired-end" icon="random">
-    Both reads are processed together in one pass. No temp files, no three-pass Cutadapt orchestration.
-  </Card>
-  <Card title="Poly-G auto-detect" icon="seti:graphql">
-    Trims no-signal G-runs from 2-colour instruments (NovaSeq, NextSeq, NovaSeq X). Auto-enabled when the data looks 2-colour. Independent of `--nextseq` quality trimming.
-  </Card>
-  <Card title="Multi-adapter input" icon="setting">
-    Repeatable `-a` / `-a2`, FASTA file input (`file:adapters.fa`), and `A{N}` brace expansion. Adapter auto-detection runs per pair.
-  </Card>
-  <Card title="Faster on the same cores" icon="bars">
-    1.9× faster than v0.6.x at the nf-core 8-core allocation, using 2.6× less CPU time. 4.4× faster at `--cores 24`.
-  </Card>
-  <Card title="MultiQC compatible" icon="document">
-    The text trimming report parses cleanly in existing MultiQC dashboards. v2 also writes a structured JSON report alongside it.
-  </Card>
-</CardGrid>
 
-## Get started
+
+Same CLI, same output filenames, same report format. A few capabilities the Perl version did not have.
+
+<div class="tg-news not-content">
+  <div class="tg-news-item">
+    <div class="num">01</div>
+    <h3>Single binary</h3>
+    <p>No Python, no Cutadapt, no pigz. <code>cargo install trim-galore</code>, install from bioconda, or pull a Docker image. 5 MB resident memory single-threaded.</p>
+  </div>
+  <div class="tg-news-item">
+    <div class="num">02</div>
+    <h3>Single-pass paired-end</h3>
+    <p>Both reads are processed together in one pass. No temp files, no three-pass Cutadapt orchestration.</p>
+  </div>
+  <div class="tg-news-item">
+    <div class="num">03</div>
+    <h3>Poly-G auto-detect</h3>
+    <p>Trims no-signal G-runs from 2-colour instruments. Auto-enabled when the data looks 2-colour. Independent of <code>--nextseq</code> quality trimming.</p>
+  </div>
+  <div class="tg-news-item">
+    <div class="num">04</div>
+    <h3>Multi-adapter input</h3>
+    <p>Repeatable <code>-a</code> / <code>-a2</code>, FASTA file input (<code>file:adapters.fa</code>), and <code>A&#123;N&#125;</code> brace expansion. Adapter auto-detection runs per pair.</p>
+  </div>
+</div>
+
+<div class="tg-divider">
+  <span class="label">// usage</span>
+  <span class="band" aria-hidden="true"></span>
+</div>
+
+## One command
+
+Defaults work for most Illumina libraries. Auto-detected adapter, Phred quality trimming, paired-end validation.
+
+```bash
+# Paired-end with parallel processing
+trim_galore --cores 8 --paired sample_R1.fastq.gz sample_R2.fastq.gz
+```
+
+## Where next
 
 <CardGrid>
   <LinkCard
     title="Installation"
-    description="Install via cargo, bioconda, Docker, or prebuilt binaries."
+    description="cargo, bioconda, Docker, or prebuilt binaries."
     href="/TrimGalore/install/"
   />
   <LinkCard
@@ -61,7 +97,17 @@ Trim Galore v2 is a Rust rewrite of the Perl wrapper. Same CLI, same output file
   />
   <LinkCard
     title="Bisulfite & RRBS"
-    description="The biology of RRBS, the strand types, and how Trim Galore handles each one."
+    description="The biology, the strand types, and how Trim Galore handles each."
     href="/TrimGalore/rrbs/guide/"
+  />
+  <LinkCard
+    title="Benchmarks"
+    description="Performance numbers and the reasons behind them."
+    href="/TrimGalore/performance/benchmarks/"
+  />
+  <LinkCard
+    title="Migrating from v0.6.x"
+    description="What changed and how to update existing pipelines."
+    href="/TrimGalore/reference/migration/"
   />
 </CardGrid>
