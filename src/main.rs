@@ -53,17 +53,30 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if cli.clock {
-        specialty::clock(&cli.input[0], &cli.input[1], gzip, output_dir, cli.cores)?;
+        run_specialty_paired(
+            &cli,
+            "Clock",
+            |r1, r2| {
+                (
+                    specialty::clock_output_name(r1, "R1", output_dir, gzip),
+                    specialty::clock_output_name(r2, "R2", output_dir, gzip),
+                )
+            },
+            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores),
+        )?;
         return Ok(());
     }
     if let Some(umi_len) = cli.implicon {
-        specialty::implicon(
-            &cli.input[0],
-            &cli.input[1],
-            umi_len,
-            gzip,
-            output_dir,
-            cli.cores,
+        run_specialty_paired(
+            &cli,
+            "IMPLICON",
+            |r1, r2| {
+                (
+                    specialty::implicon_output_name(r1, umi_len, "R1", output_dir, gzip),
+                    specialty::implicon_output_name(r2, umi_len, "R2", output_dir, gzip),
+                )
+            },
+            |r1, r2| specialty::implicon(r1, r2, umi_len, gzip, output_dir, cli.cores),
         )?;
         return Ok(());
     }
@@ -884,4 +897,65 @@ fn pct(part: usize, total: usize) -> f64 {
     } else {
         part as f64 / total as f64 * 100.0
     }
+}
+
+/// Multi-pair driver for the run-and-exit specialty modes (`--clock`,
+/// `--implicon`). Iterates over `cli.input.chunks(2)`, prints a per-pair
+/// header for multi-pair invocations, and runs the supplied per-pair
+/// function. Mirrors `--paired`'s output-collision pre-flight (case-
+/// insensitive on full path) so two pairs that would write to the same
+/// output file fail loudly before any I/O.
+fn run_specialty_paired<NameFn, RunFn>(
+    cli: &Cli,
+    mode_label: &str,
+    mut output_names: NameFn,
+    mut run_pair: RunFn,
+) -> Result<()>
+where
+    NameFn: FnMut(&Path, &Path) -> (std::path::PathBuf, std::path::PathBuf),
+    RunFn: FnMut(&Path, &Path) -> Result<()>,
+{
+    // Pre-flight: detect output-path collisions across pairs (same shape
+    // as the --paired pre-flight at lines 82–125).
+    let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    let norm = |p: &std::path::Path| -> String { p.to_string_lossy().to_ascii_lowercase() };
+    for chunk in cli.input.chunks(2) {
+        let (o1, o2) = output_names(&chunk[0], &chunk[1]);
+        for p in [o1, o2] {
+            if let Some(existing) = out_paths.insert(norm(&p), p.clone()) {
+                anyhow::bail!(
+                    "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                     {} and {} would be written to the same file. \
+                     Check that input pairs produce distinct output paths \
+                     (e.g., different source directories or `--output_dir`).",
+                    existing.display(),
+                    p.display()
+                );
+            }
+        }
+    }
+
+    let total_pairs = cli.input.len() / 2;
+    for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
+        if total_pairs > 1 {
+            eprintln!(
+                "\n=== {} pair {} of {} ===",
+                mode_label,
+                pair_idx + 1,
+                total_pairs
+            );
+        }
+        run_pair(&chunk[0], &chunk[1]).with_context(|| {
+            format!(
+                "processing {} pair {} of {} (R1={}, R2={})",
+                mode_label,
+                pair_idx + 1,
+                total_pairs,
+                chunk[0].display(),
+                chunk[1].display()
+            )
+        })?;
+    }
+    Ok(())
 }

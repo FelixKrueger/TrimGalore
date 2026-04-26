@@ -126,6 +126,9 @@ Applying these steps to both self-generated and downloaded data can ensure that 
 
 ### Step 4: Specialised Trimming
 
+> [!NOTE]
+> All specialty modes accept multi-pair input. `--hardtrim5` / `--hardtrim3` are single-end-shaped and just process every input file independently. `--clock` and `--implicon` are paired-end-shaped and accept any even number of inputs as consecutive R1/R2 pairs (e.g. `--clock A_R1.fq.gz A_R2.fq.gz B_R1.fq.gz B_R2.fq.gz`). Same pairwise-order requirement as `--paired` applies — a glob like `*fastq.gz` produces alphabetically-sorted output, which for `_R1`/`_R2` naming gives the right pairwise order, but mixed naming may not.
+
 #### Hard-trimming to leave bases at the 5'-end
 The option `--hardtrim5 INT` allows you to hard-clip sequences from their 3' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in `.{INT}bp_5prime.fq(.gz)`. This is useful when you want to shorten reads to a certain read length. Here is an example:
 

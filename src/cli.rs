@@ -328,49 +328,61 @@ where
 }
 
 impl Cli {
+    /// Shared validation for any paired-end mode (`--paired`, `--clock`,
+    /// `--implicon`) that takes input files in pairwise (R1, R2, R1, R2, …)
+    /// order. Checks:
+    ///   1. Even count of input files.
+    ///   2. Within each pair, R1 ≠ R2 byte-equal (matches Perl's
+    ///      `$ARGV[$i] eq $ARGV[$i+1]` check at `trim_galore:3208`; does not
+    ///      follow symlinks or canonicalise).
+    ///   3. Across pairs, no duplicate pair (catches accidental copy-paste
+    ///      and emits a precise error rather than the case-insensitive
+    ///      output-collision pre-flight's APFS/NTFS message).
+    ///
+    /// `mode_label` is used in the user-facing error string, e.g.
+    /// `"Paired-end"`, `"--clock"`, `"--implicon"`.
+    fn validate_paired_input(&self, mode_label: &str) -> anyhow::Result<()> {
+        if self.input.len() % 2 != 0 {
+            anyhow::bail!(
+                "{} mode requires an even number of input files (R1/R2 pairs), got {}",
+                mode_label,
+                self.input.len()
+            );
+        }
+        for chunk in self.input.chunks(2) {
+            if chunk[0] == chunk[1] {
+                anyhow::bail!(
+                    "Read 1 and Read 2 appear to be the same file: {}. \
+                     Did you mean to pass distinct R1 and R2 files?",
+                    chunk[0].display()
+                );
+            }
+        }
+        let pairs: Vec<(&std::path::PathBuf, &std::path::PathBuf)> =
+            self.input.chunks(2).map(|c| (&c[0], &c[1])).collect();
+        for (i, (r1, r2)) in pairs.iter().enumerate() {
+            for (j, (pr1, pr2)) in pairs.iter().enumerate().take(i) {
+                if r1 == pr1 && r2 == pr2 {
+                    anyhow::bail!(
+                        "Pair {} ({}, {}) is a duplicate of pair {}. \
+                         Did you mean to pass different files?",
+                        i + 1,
+                        r1.display(),
+                        r2.display(),
+                        j + 1
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Validate CLI arguments after parsing.
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.paired {
             // `#[clap(required = true)]` on `input` guarantees at least one file
             // reaches validate(), so no is_empty() check is needed.
-            if self.input.len() % 2 != 0 {
-                anyhow::bail!(
-                    "Paired-end mode requires an even number of input files (R1/R2 pairs), got {}",
-                    self.input.len()
-                );
-            }
-            // Catch common user error: same file passed twice. Matches Perl's
-            // byte-equality check at trim_galore:3208 (`$ARGV[$i] eq $ARGV[$i+1]`).
-            // Does not follow symlinks or canonicalise.
-            for chunk in self.input.chunks(2) {
-                if chunk[0] == chunk[1] {
-                    anyhow::bail!(
-                        "Read 1 and Read 2 appear to be the same file: {}. \
-                         Did you mean to pass distinct R1 and R2 files?",
-                        chunk[0].display()
-                    );
-                }
-            }
-            // Catch accidental copy-paste of the same pair twice. Without this,
-            // a duplicate pair trips the case-insensitive output-collision
-            // pre-flight in main() with an APFS/NTFS message that misdirects
-            // the user — here we emit a precise "duplicate of pair N" error.
-            let pairs: Vec<(&std::path::PathBuf, &std::path::PathBuf)> =
-                self.input.chunks(2).map(|c| (&c[0], &c[1])).collect();
-            for (i, (r1, r2)) in pairs.iter().enumerate() {
-                for (j, (pr1, pr2)) in pairs.iter().enumerate().take(i) {
-                    if r1 == pr1 && r2 == pr2 {
-                        anyhow::bail!(
-                            "Pair {} ({}, {}) is a duplicate of pair {}. \
-                             Did you mean to pass different files?",
-                            i + 1,
-                            r1.display(),
-                            r2.display(),
-                            j + 1
-                        );
-                    }
-                }
-            }
+            self.validate_paired_input("Paired-end")?;
         }
 
         if !self.paired && self.input.len() > 1 && self.basename.is_some() {
@@ -438,11 +450,11 @@ impl Cli {
                 anyhow::bail!("--hardtrim3 must be between 1 and 999, got {}", n);
             }
         }
-        if self.clock && self.input.len() != 2 {
-            anyhow::bail!("--clock requires exactly 2 paired-end input files");
+        if self.clock {
+            self.validate_paired_input("--clock")?;
         }
-        if self.implicon.is_some() && self.input.len() != 2 {
-            anyhow::bail!("--implicon requires exactly 2 paired-end input files");
+        if self.implicon.is_some() {
+            self.validate_paired_input("--implicon")?;
         }
         if let Some(ref demux_file) = self.demux {
             if self.paired {
@@ -589,15 +601,72 @@ mod tests {
         cli.validate().expect("two-file paired-end should validate");
     }
 
+    // ── Multi-pair widening for --clock and --implicon ──
+    // (Replaces the earlier "strict-2" regression guard. Specialty
+    // run-and-exit modes now share the same pairwise validation as
+    // --paired itself.)
+
     #[test]
-    fn test_validate_clock_still_requires_exactly_2() {
-        // Regression guard: --clock must not have been widened by the
-        // multi-pair --paired relaxation.
+    fn test_validate_clock_two_pairs_accepted() {
         let cli = Cli::parse_from(["trim_galore", "--clock", R1, R2, ALT_R1, ALT_R2]);
+        cli.validate()
+            .expect("two distinct pairs should validate under --clock");
+    }
+
+    #[test]
+    fn test_validate_clock_odd_count_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", R1, R2, ALT_R1]);
         let err = cli.validate().unwrap_err().to_string();
         assert!(
-            err.contains("clock requires exactly 2"),
-            "expected --clock strict-2 rejection, got: {err}"
+            err.contains("--clock") && err.contains("even number"),
+            "expected --clock even-count rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_clock_r1_equal_r2_within_pair_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", R1, R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("appear to be the same file"),
+            "expected R1==R2 rejection under --clock, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_clock_duplicate_pair_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", R1, R2, R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("duplicate of pair"),
+            "expected duplicate-pair rejection under --clock, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_implicon_two_pairs_accepted() {
+        let cli = Cli::parse_from(["trim_galore", "--implicon", R1, R2, ALT_R1, ALT_R2]);
+        cli.validate()
+            .expect("two distinct pairs should validate under --implicon");
+    }
+
+    #[test]
+    fn test_validate_implicon_odd_count_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--implicon", R1, R2, ALT_R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--implicon") && err.contains("even number"),
+            "expected --implicon even-count rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_implicon_duplicate_pair_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--implicon", R1, R2, R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("duplicate of pair"),
+            "expected duplicate-pair rejection under --implicon, got: {err}"
         );
     }
 
