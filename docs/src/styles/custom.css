@@ -1,0 +1,56 @@
+/* Brand colours derived from the Trim Galore green */
+:root {
+  --sl-color-accent-low: #173a1f;
+  --sl-color-accent: #2f9e44;
+  --sl-color-accent-high: #b9e6c4;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d3f0db;
+  --sl-color-accent: #2b8a3e;
+  --sl-color-accent-high: #154a23;
+}
+
+/* Tighter inline-code so flag references read more cleanly. */
+/* Also keep inline code on a single line so CLI flags like --adapter2 */
+/* don't get split after the leading double-dash. */
+:not(pre) > code {
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+
+/* Inline images in markdown body content. */
+/* Horizontal centring + a small white inset and slightly rounded corners. */
+/* Renders consistently in both light and dark themes because the inset is */
+/* white and the rounded box-shadow (instead of border) avoids 1-px halos. */
+.sl-markdown-content img {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  height: auto;
+  padding: 0.75rem;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+/* Tighter handling inside table cells so two-up screenshot grids don't grow */
+/* outsized padding around their thumbnails. */
+.sl-markdown-content td img {
+  padding: 0.4rem;
+}
+
+/* The .tg-figure helper kept for future use (centred image + caption). */
+.tg-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
+}
+
+.tg-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--sl-color-gray-3);
+  text-align: center;
+}

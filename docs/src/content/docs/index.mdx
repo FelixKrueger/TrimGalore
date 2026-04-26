@@ -1,0 +1,67 @@
+---
+title: Trim Galore
+description: Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS libraries.
+hero:
+  tagline: Adapter and quality trimming for NGS data. A single Rust binary, drop-in compatible with v0.6.x scripts and pipelines.
+  actions:
+    - text: Get started
+      link: /TrimGalore/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/FelixKrueger/TrimGalore
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What's new in v2
+
+Trim Galore v2 is a Rust rewrite of the Perl wrapper. Same CLI, same output filenames, same report format. The binary has no external dependencies, and it adds a few capabilities the Perl version did not have.
+
+<CardGrid>
+  <Card title="Single binary" icon="rocket">
+    No Python, no Cutadapt, no pigz. `cargo install trim-galore`, install from bioconda, or pull a Docker image. 5 MB RAM single-threaded.
+  </Card>
+  <Card title="Single-pass paired-end" icon="random">
+    Both reads are processed together in one pass. No temp files, no three-pass Cutadapt orchestration.
+  </Card>
+  <Card title="Poly-G auto-detect" icon="seti:graphql">
+    Trims no-signal G-runs from 2-colour instruments (NovaSeq, NextSeq, NovaSeq X). Auto-enabled when the data looks 2-colour. Independent of `--nextseq` quality trimming.
+  </Card>
+  <Card title="Multi-adapter input" icon="setting">
+    Repeatable `-a` / `-a2`, FASTA file input (`file:adapters.fa`), and `A{N}` brace expansion. Adapter auto-detection runs per pair.
+  </Card>
+  <Card title="Faster on the same cores" icon="bars">
+    1.9× faster than v0.6.x at the nf-core 8-core allocation, using 2.6× less CPU time. 4.4× faster at `--cores 24`.
+  </Card>
+  <Card title="MultiQC compatible" icon="document">
+    The text trimming report parses cleanly in existing MultiQC dashboards. v2 also writes a structured JSON report alongside it.
+  </Card>
+</CardGrid>
+
+## Get started
+
+<CardGrid>
+  <LinkCard
+    title="Installation"
+    description="Install via cargo, bioconda, Docker, or prebuilt binaries."
+    href="/TrimGalore/install/"
+  />
+  <LinkCard
+    title="Quick start"
+    description="Run your first trim. Single-end, paired-end, RRBS."
+    href="/TrimGalore/quickstart/"
+  />
+  <LinkCard
+    title="User guide"
+    description="How quality and adapter trimming work, step by step."
+    href="/TrimGalore/guide/overview/"
+  />
+  <LinkCard
+    title="Bisulfite & RRBS"
+    description="The biology of RRBS, the strand types, and how Trim Galore handles each one."
+    href="/TrimGalore/rrbs/guide/"
+  />
+</CardGrid>
