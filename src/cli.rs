@@ -182,11 +182,16 @@ pub struct Cli {
     #[clap(long = "non_directional", requires = "rrbs")]
     pub non_directional: bool,
 
-    /// Run FastQC on the trimmed output files.
+    /// Run FastQC on the trimmed output files (built in via the bundled
+    /// fastqc-rust library; no external Java or FastQC binary needed).
+    /// Produces FastQC 0.12.1-compatible *_fastqc.html / *_fastqc.zip artifacts.
     #[clap(long = "fastqc")]
     pub fastqc: bool,
 
     /// Additional arguments to pass to FastQC. Implies --fastqc.
+    /// Common flags are translated to the bundled engine: --nogroup, --expgroup,
+    /// --quiet, --svg, --nano, --nofilter, --casava, -t/--threads, -o/--outdir.
+    /// Unrecognised flags emit a warning and are ignored.
     #[clap(long = "fastqc_args", allow_hyphen_values = true)]
     pub fastqc_args: Option<String>,
 
