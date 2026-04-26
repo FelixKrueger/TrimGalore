@@ -23,10 +23,10 @@ pub fn filter_single_end(
     max_n: Option<MaxNFilter>,
 ) -> FilterResult {
     // N-content check first (matches TrimGalore order)
-    if let Some(ref max_n_filter) = max_n {
-        if exceeds_n_threshold(record, max_n_filter) {
-            return FilterResult::TooManyN;
-        }
+    if let Some(ref max_n_filter) = max_n
+        && exceeds_n_threshold(record, max_n_filter)
+    {
+        return FilterResult::TooManyN;
     }
 
     // Length checks
@@ -34,10 +34,10 @@ pub fn filter_single_end(
         return FilterResult::TooShort;
     }
 
-    if let Some(max) = max_length {
-        if record.len() > max {
-            return FilterResult::TooLong;
-        }
+    if let Some(max) = max_length
+        && record.len() > max
+    {
+        return FilterResult::TooLong;
     }
 
     FilterResult::Pass
@@ -79,10 +79,10 @@ pub fn filter_paired_end(
     unpaired: UnpairedLengths,
 ) -> PairFilterResult {
     // N-content check — ALWAYS discards entire pair, no rescue
-    if let Some(ref max_n_filter) = max_n {
-        if exceeds_n_threshold(r1, max_n_filter) || exceeds_n_threshold(r2, max_n_filter) {
-            return PairFilterResult::TooManyN;
-        }
+    if let Some(ref max_n_filter) = max_n
+        && (exceeds_n_threshold(r1, max_n_filter) || exceeds_n_threshold(r2, max_n_filter))
+    {
+        return PairFilterResult::TooManyN;
     }
 
     // Length check — can rescue individual reads with --retain_unpaired
@@ -97,10 +97,10 @@ pub fn filter_paired_end(
     }
 
     // Max-length check — discards entire pair
-    if let Some(max) = max_length {
-        if r1.len() > max || r2.len() > max {
-            return PairFilterResult::TooLong;
-        }
+    if let Some(max) = max_length
+        && (r1.len() > max || r2.len() > max)
+    {
+        return PairFilterResult::TooLong;
     }
 
     PairFilterResult::Pass

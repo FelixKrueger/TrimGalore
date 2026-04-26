@@ -329,6 +329,29 @@ jobs:
           test $rc -ne 0
           grep -q 'even number' /tmp/clock_odd.log
 
+      - name: Validate bundled FastQC produces canonical output files
+        run: |
+          # Smoke test for the bundled fastqc-rust integration. Validates:
+          #   1. --fastqc produces *_fastqc.html and *_fastqc.zip alongside
+          #      the trimmed output (canonical Java FastQC filename pattern).
+          #   2. The .zip contains the expected directory layout that
+          #      MultiQC parsers latch onto (summary.txt, fastqc_data.txt,
+          #      Images/, Icons/).
+          #   3. No external `fastqc` is on $PATH inside the CI runner
+          #      (the dtolnay/rust-toolchain base image doesn't ship it),
+          #      so a green run here proves the bundled library is doing
+          #      the work — not an accidental shell-out.
+          rm -rf /tmp/op_fastqc; mkdir -p /tmp/op_fastqc
+          ! command -v fastqc  # confirm no external fastqc on PATH
+          ./target/release/trim_galore --fastqc -o /tmp/op_fastqc \
+            test_files/illumina_10K.fastq.gz
+          test -f /tmp/op_fastqc/illumina_10K_trimmed_fastqc.html
+          test -f /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip
+          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q summary.txt
+          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q fastqc_data.txt
+          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q 'Images/'
+          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q 'Icons/'
+
       - name: Validate paired-end output-path collision pre-flight
         run: |
           # Two pairs with the same R1/R2 filename but different source dirs +
