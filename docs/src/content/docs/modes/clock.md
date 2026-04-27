@@ -35,3 +35,13 @@ trim_galore --paired --three_prime_clip_R1 15 --three_prime_clip_R2 15 sample.cl
 For multiple samples, `--paired` requires input files in pairwise (R1, R2, R1, R2, …) order. Don't use `*R1.fq.gz *R2.fq.gz` globs which produce all-R1s-then-all-R2s. Either invoke once per sample, or interleave explicitly.
 
 Following this, reads should be aligned with Bismark and deduplicated with UmiBam in `--dual_index` mode (see here: <https://github.com/FelixKrueger/Umi-Grinder>). UmiBam recognises the UMIs within this pattern: `R1:(`**ATCTAGTT**`):R2:(`**CAATTTTG**`):` as UMI R1 = **ATCTAGTT** and UMI R2 = **CAATTTTG**.
+
+## Multi-pair input
+
+Since v2.1.0-beta.4, `--clock` itself also accepts any even number of inputs as consecutive R1/R2 pairs (rather than only "exactly 2 files"):
+
+```bash
+trim_galore --clock A_R1.fq.gz A_R2.fq.gz B_R1.fq.gz B_R2.fq.gz
+```
+
+Each pair gets a header (`=== Clock pair N of M ===`) and the same output-collision pre-flight that `--paired` runs.

@@ -3,13 +3,13 @@ title: Installation
 description: Install Trim Galore via cargo, bioconda, Docker, or prebuilt binaries.
 ---
 
-Trim Galore v2 ships as a single static binary. No Python, no Cutadapt, no `pigz`. Pick whichever channel fits the rest of your stack.
+Trim Galore v2 ships as a single static binary. No Python, no Cutadapt, no `pigz`, no Java, no external FastQC. Pick whichever channel fits the rest of your stack.
 
-:::caution[Beta testing v2.1.0-beta.3]
+:::caution[Beta testing v2.1.0-beta.5]
 The current stable release on crates.io is **v2.0.0**. v2.1.0 is in beta. `cargo install trim-galore` without `--version` installs v2.0.0. To install the beta:
 
 ```bash
-cargo install trim-galore --version 2.1.0-beta.3
+cargo install trim-galore --version 2.1.0-beta.5
 docker pull ghcr.io/felixkrueger/trimgalore:beta
 ```
 
@@ -18,7 +18,7 @@ To send feedback on the beta, open an issue with the `beta-feedback` label. This
 
 ## From crates.io
 
-Requires the [Rust toolchain](https://rustup.rs/) (1.85+):
+Requires the [Rust toolchain](https://rustup.rs/) (1.88+):
 
 ```bash
 cargo install trim-galore
@@ -59,19 +59,15 @@ docker run --rm -v "$PWD":/data -w /data \
     trim_galore input.fastq.gz
 ```
 
-The image bundles **FastQC v0.12.1** and a Java runtime, so `--fastqc` works without further setup. The `dev` tag tracks the development branch. Versioned tags (e.g. `v2.1.0`) are published on release.
+FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library, so `--fastqc` works without Java or an external `fastqc` install. The `dev` tag tracks the development branch. Versioned tags (e.g. `v2.1.0`) are published on release.
 
 ## Prebuilt binaries
 
 Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon) are on the [Releases page](https://github.com/FelixKrueger/TrimGalore/releases). On Intel Mac, install via `cargo install trim-galore` (local build) or use the Docker `amd64` image.
 
-## Optional dependencies
+## Runtime dependencies
 
-| Tool | When you need it |
-|------|------------------|
-| FastQC | Only if you pass `--fastqc`. Bundled with the Docker image; otherwise it needs to be on `$PATH`. |
-| `pigz` / `gzip` | Not required. Trim Galore does gzip compression in-process. |
-| Python / Cutadapt | Not required. |
+None. Trim Galore v2 is a single static binary. Adapter trimming, gzip, and FastQC reporting (`--fastqc`) all run in-process. Python, Cutadapt, `pigz`, Java, and the external FastQC tarball are no longer required.
 
 ## Verifying the install
 
@@ -82,8 +78,8 @@ trim_galore --version
 Should print something like:
 
 ```
-                Trim Galore version: 2.1.0-beta.3 (Oxidized Edition)
+                Trim Galore version: 2.1.0-beta.5 (Oxidized Edition)
                 Cutadapt version:    (built-in adapter trimmer)
                 Python version:      (not required)
-                FastQC version:      not detected (optional)
+                FastQC version:      0.12.1-compatible (bundled fastqc-rust)
 ```

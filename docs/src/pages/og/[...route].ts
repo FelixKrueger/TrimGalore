@@ -61,7 +61,7 @@ function card(title: string, description: string): El {
         transformOrigin: 'center',
       }),
 
-      // Wordmark — trim · slash · galore
+      // Wordmark: trim · slash · galore
       e(
         'div',
         {

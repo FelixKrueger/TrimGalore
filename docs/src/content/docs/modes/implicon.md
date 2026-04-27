@@ -18,3 +18,13 @@ trim_galore --paired sample_8bp_UMI_R1.fq.gz sample_8bp_UMI_R2.fq.gz
 ```
 
 The downstream alignment and deduplication tooling parses the UMI back out of the read ID.
+
+## Multi-pair input
+
+Since v2.1.0-beta.4, `--implicon` accepts any even number of inputs as consecutive R1/R2 pairs:
+
+```bash
+trim_galore --implicon A_R1.fq.gz A_R2.fq.gz B_R1.fq.gz B_R2.fq.gz
+```
+
+Each pair gets a header (`=== IMPLICON pair N of M ===`) and the same output-collision pre-flight (case-insensitive, full-path) that `--paired` runs. Pairwise (R1, R2, R1, R2, …) order is required; don't pass `*R1.fq.gz *R2.fq.gz` globs (those produce all-R1s-then-all-R2s).

@@ -50,7 +50,7 @@ For non-directional libraries, add `--non_directional`. See the [Bisulfite & RRB
 trim_galore --fastqc input.fastq.gz
 ```
 
-FastQC must be on `$PATH`. The Docker image bundles it.
+FastQC is built in via the bundled `fastqc-rust` library: no Java or external `fastqc` install needed. Outputs are FastQC 0.12.1-compatible HTML + ZIP files.
 
 ## Common combinations
 

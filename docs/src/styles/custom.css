@@ -1,5 +1,5 @@
 /* ============================================================
-   Trim Galore — V4 brand: lime-stripe on warm paper.
+   Trim Galore: V4 brand, lime-stripe on warm paper.
    System reference: PRODUCT.md and DESIGN.md at the docs root.
    ============================================================ */
 
@@ -41,7 +41,7 @@
   --brand-code-bg:      var(--brand-lime);
   --brand-code-text:    var(--brand-text-on-lime);
 
-  /* Severity tokens — used by aside variants and any future warn/danger UI. */
+  /* Severity tokens used by aside variants and any future warn/danger UI. */
   --brand-warn:         oklch(0.55 0.16 65);
   --brand-warn-bg:      oklch(0.96 0.04 80);
   --brand-warn-rule:    oklch(0.78 0.10 75);
@@ -68,7 +68,7 @@
   --brand-code-bg:      oklch(0.30 0.06 135);
   --brand-code-text:    oklch(0.92 0.04 130);
 
-  /* Severity tokens — darker tints for legibility on dark surface. */
+  /* Severity tokens: darker tints for legibility on dark surface. */
   --brand-warn-bg:      oklch(0.27 0.05 75);
   --brand-warn-rule:    oklch(0.45 0.10 75);
   --brand-danger-bg:    oklch(0.25 0.06 30);
@@ -328,7 +328,7 @@ main h1#_top {
 }
 
 /* -----------------------------------------------------------
-   Site title — see src/components/SiteTitle.astro for the markup.
+   Site title: see src/components/SiteTitle.astro for the markup.
    This styles the wordmark and its lime slash mark.
    ----------------------------------------------------------- */
 .tg-wordmark {
@@ -346,7 +346,7 @@ main h1#_top {
 .tg-wordmark .galore {
   font-style: italic;
   font-weight: 500;
-  /* Lifts on hover. Just "galore" — trim and slash stay put. */
+  /* Lifts on hover. Just "galore"; trim and slash stay put. */
   transform: translateY(0);
   transition: transform 220ms var(--brand-ease);
 }
@@ -366,7 +366,7 @@ main h1#_top {
 }
 
 /* -----------------------------------------------------------
-   Hero — see src/components/Hero.astro.
+   Hero: see src/components/Hero.astro.
    ----------------------------------------------------------- */
 .tg-hero {
   display: grid;
@@ -391,7 +391,7 @@ main h1#_top {
      tagline below. The SVG band rect is authored 7000 viewBox units wide
      (~5–6× the SVG's CSS width) and SVG overflow is visible, so the lime
      band naturally extends past the SVG box and bleeds to the viewport
-     edges. The chain of parent containers must NOT clip — handled below. */
+     edges. The chain of parent containers must NOT clip; handled below. */
   width: 100%;
   margin: 0 0 8px;
   aspect-ratio: 1240 / 460;
@@ -571,7 +571,7 @@ main h1#_top {
 }
 
 /* -----------------------------------------------------------
-   Editorial numbered list — "What's new in v2" and similar.
+   Editorial numbered list: "What's new in v2" and similar.
    ----------------------------------------------------------- */
 .tg-news {
   display: grid;

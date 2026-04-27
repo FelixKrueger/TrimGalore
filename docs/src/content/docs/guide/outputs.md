@@ -59,4 +59,6 @@ Gzip-compressed input produces gzip-compressed output by default. Pass `--dont_g
 
 ## FastQC
 
-`--fastqc` runs FastQC on the trimmed output files after pair validation. Reports land alongside the trimmed FASTQ. `--fastqc_args "..."` passes additional FastQC arguments through verbatim.
+`--fastqc` runs the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library on the trimmed output files after pair validation, producing FastQC 0.12.1-compatible HTML + ZIP reports alongside the trimmed FASTQ. No Java or external `fastqc` install needed.
+
+`--fastqc_args "..."` passes a subset of FastQC flags through. Currently supported: `--nogroup`, `--expgroup`, `--quiet`, `--svg`, `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`. Other flags emit a warning and are ignored.
