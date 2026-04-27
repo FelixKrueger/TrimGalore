@@ -102,7 +102,10 @@ try {
     .tg-topnav a:not(.tg-version) {
       color: var(--brand-ink-soft);
       text-decoration: none;
-      padding: 0.25rem 0;
+      /* Bigger vertical hit area for tablet/touch users. The visible
+         underline still reads as a thin border-bottom because we only
+         pad the top half. */
+      padding: 0.625rem 0.25rem;
       border-bottom: 2px solid transparent;
       transition: color 150ms var(--brand-ease), border-color 150ms var(--brand-ease);
     }

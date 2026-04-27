@@ -31,17 +31,6 @@ export default defineConfig({
         Hero: './src/components/Hero.astro',
         SiteTitle: './src/components/SiteTitle.astro',
       },
-      head: [
-        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
-        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' } },
-        {
-          tag: 'link',
-          attrs: {
-            rel: 'stylesheet',
-            href: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap',
-          },
-        },
-      ],
       sidebar: [
         {
           label: 'Start here',

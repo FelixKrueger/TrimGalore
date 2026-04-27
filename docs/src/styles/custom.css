@@ -3,6 +3,21 @@
    System reference: PRODUCT.md and DESIGN.md at the docs root.
    ============================================================ */
 
+/* Self-hosted web fonts via @fontsource. Avoids the Google Fonts CDN
+   round-trip and FOUT risk. Only the Latin subsets and the weights we
+   actually use are imported. */
+@import "@fontsource/bricolage-grotesque/latin-400.css";
+@import "@fontsource/bricolage-grotesque/latin-500.css";
+@import "@fontsource/bricolage-grotesque/latin-600.css";
+@import "@fontsource/bricolage-grotesque/latin-700.css";
+@import "@fontsource/bricolage-grotesque/latin-800.css";
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+
 /* Tokens. Light is the default scene; dark is the second scene. */
 :root {
   --brand-bg:           oklch(0.965 0.012 85);
@@ -25,6 +40,14 @@
      makes the code itself harder to read. */
   --brand-code-bg:      var(--brand-lime);
   --brand-code-text:    var(--brand-text-on-lime);
+
+  /* Severity tokens — used by aside variants and any future warn/danger UI. */
+  --brand-warn:         oklch(0.55 0.16 65);
+  --brand-warn-bg:      oklch(0.96 0.04 80);
+  --brand-warn-rule:    oklch(0.78 0.10 75);
+  --brand-danger:       oklch(0.50 0.18 25);
+  --brand-danger-bg:    oklch(0.95 0.03 30);
+  --brand-danger-rule:  oklch(0.75 0.10 30);
 }
 
 :root[data-theme='dark'] {
@@ -44,6 +67,12 @@
   /* Calmer chip: deep muted green tint, light cream text. */
   --brand-code-bg:      oklch(0.30 0.06 135);
   --brand-code-text:    oklch(0.92 0.04 130);
+
+  /* Severity tokens — darker tints for legibility on dark surface. */
+  --brand-warn-bg:      oklch(0.27 0.05 75);
+  --brand-warn-rule:    oklch(0.45 0.10 75);
+  --brand-danger-bg:    oklch(0.25 0.06 30);
+  --brand-danger-rule:  oklch(0.45 0.12 30);
 }
 
 /* Drive Starlight tokens from the brand. */
@@ -320,7 +349,6 @@ main h1#_top {
   /* Lifts on hover. Just "galore" — trim and slash stay put. */
   transform: translateY(0);
   transition: transform 220ms var(--brand-ease);
-  will-change: transform;
 }
 .tg-wordmark:hover .galore,
 .tg-wordmark:focus-visible .galore {
@@ -453,6 +481,23 @@ main h1#_top {
 
 @media (prefers-reduced-motion: reduce) {
   .sl-link-button.primary::before { transition: none; }
+}
+
+/* Visible keyboard focus rings. The custom `!important` background/border
+   overrides on .sl-link-button and .tg-version stripped Starlight's
+   default focus indicators; restore them with a brand-coloured outline. */
+.sl-link-button:focus-visible,
+.tg-version:focus-visible,
+.tg-wordmark:focus-visible,
+.tg-topnav a:focus-visible,
+.sidebar-content a:focus-visible {
+  outline: 2px solid var(--brand-lime-deep);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.sl-link-button:focus-visible {
+  /* Pill button: match its rounded shape so the ring traces its outline. */
+  border-radius: 999px;
 }
 
 /* -----------------------------------------------------------
@@ -693,26 +738,18 @@ starlight-toc nav a[aria-current="true"] {
   color: var(--brand-lime-deep);
 }
 .starlight-aside--caution {
-  background: oklch(0.96 0.04 80) !important;
-  border-color: oklch(0.78 0.10 75) !important;
-}
-:root[data-theme='dark'] .starlight-aside--caution {
-  background: oklch(0.27 0.05 75) !important;
-  border-color: oklch(0.45 0.10 75) !important;
+  background: var(--brand-warn-bg) !important;
+  border-color: var(--brand-warn-rule) !important;
 }
 .starlight-aside--caution .starlight-aside__icon {
-  color: oklch(0.55 0.16 65);
+  color: var(--brand-warn);
 }
 .starlight-aside--danger {
-  background: oklch(0.95 0.03 30) !important;
-  border-color: oklch(0.75 0.10 30) !important;
-}
-:root[data-theme='dark'] .starlight-aside--danger {
-  background: oklch(0.25 0.06 30) !important;
-  border-color: oklch(0.45 0.12 30) !important;
+  background: var(--brand-danger-bg) !important;
+  border-color: var(--brand-danger-rule) !important;
 }
 .starlight-aside--danger .starlight-aside__icon {
-  color: oklch(0.50 0.18 25);
+  color: var(--brand-danger);
 }
 
 /* Inline code inside asides keeps the lime chip but the bg around it has
