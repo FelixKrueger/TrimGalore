@@ -397,6 +397,10 @@ main h1#_top {
   aspect-ratio: 1240 / 460;
   max-height: 460px;
   overflow: visible;
+  /* Stop the click/double-click easter eggs from accidentally selecting the
+     "Trim Galore" SVG text and breaking the visual effect. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 .tg-hero .titleband svg {
   width: 100%;
