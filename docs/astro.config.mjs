@@ -88,6 +88,7 @@ export default defineConfig({
           items: [
             { label: 'Migrating from v0.6.x', slug: 'reference/migration' },
             { label: 'Changelog', slug: 'reference/changelog' },
+            { label: 'Logo', slug: 'reference/logo' },
             { label: 'Credits & license', slug: 'reference/credits' },
           ],
         },

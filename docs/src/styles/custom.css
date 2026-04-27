@@ -785,3 +785,91 @@ starlight-toc nav a[aria-current="true"] {
 
 /* Keep flag references like --adapter2 on one line */
 :not(pre) > code { white-space: nowrap; }
+
+/* -----------------------------------------------------------
+   Brand-asset grid (Brand assets page).
+   ----------------------------------------------------------- */
+.tg-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin: 1.5rem 0 2rem;
+}
+.tg-asset-grid--square {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 50rem) {
+  .tg-asset-grid { grid-template-columns: 1fr; }
+}
+.tg-asset {
+  border: 1px solid var(--brand-rule);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--brand-bg-soft);
+  transition: border-color 150ms var(--brand-ease);
+}
+.tg-asset:hover {
+  border-color: var(--brand-ink);
+}
+.tg-asset__art {
+  display: block;
+  padding: 0;
+}
+.tg-asset__art--light { background: #FFFFFF; }
+.tg-asset__art--dark  { background: #0d1117; }
+.tg-asset__art img {
+  /* Reset the markdown <img> styling (which adds padding + cream bg). */
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tg-asset__art--wordmark img { padding: 28px 24px; }
+.tg-asset__art--square {
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+.tg-asset__art--square img {
+  width: auto;
+  max-width: 200px;
+  max-height: 200px;
+}
+.tg-asset__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--brand-rule);
+  background: var(--brand-bg);
+  font-size: 13px;
+}
+.tg-asset__bar code {
+  /* Brand inline-code chip is lime; on this dense bar it's loud, so use
+     a quieter monospace label instead. */
+  background: transparent !important;
+  color: var(--brand-ink-soft) !important;
+  padding: 0 !important;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tg-asset__bar a {
+  font-family: var(--sl-font);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--brand-ink) !important;
+  text-decoration: none !important;
+  border: 1px solid var(--brand-ink);
+  border-radius: 999px;
+  padding: 4px 12px;
+  transition: background 150ms var(--brand-ease), color 150ms var(--brand-ease);
+}
+.tg-asset__bar a:hover {
+  background: var(--brand-ink);
+  color: var(--brand-bg) !important;
+}
