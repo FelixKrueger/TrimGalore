@@ -167,6 +167,8 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
       const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       root.setAttribute('data-theme', next);
       try { localStorage.setItem('starlight-theme', next); } catch {}
+      // Sync the navbar theme picker so its active option matches.
+      (window as any).StarlightThemeProvider?.updatePickers(next);
     };
 
     if (!reducedMotion.matches) hero.addEventListener('mousemove', onMove);
