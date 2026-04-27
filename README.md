@@ -2,12 +2,15 @@
 
 Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS libraries.
 
+
 [![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=optimus_prime)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/trim-galore)](https://crates.io/crates/trim-galore)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
 
+<h3 align="center"><a href="https://felixkrueger.github.io/TrimGalore/">https://felixkrueger.github.io/TrimGalore/</a></h3>
+
 > [!NOTE]
-> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 writeup](docs/SUMMARY.md).
+> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 migration notes](https://felixkrueger.github.io/TrimGalore/reference/migration/).
 
 ## Features
 
@@ -122,9 +125,12 @@ The JSON report contains the same statistics as the text report in a structured 
 
 ## Documentation
 
-- [User Guide](docs/Trim_Galore_User_Guide.md) — full reference for all options and modes
-- [RRBS Guide](docs/RRBS_Guide.pdf) — bisulfite sequencing and RRBS-specific guidance
-- [v2.0 Writeup](docs/SUMMARY.md) — benchmarks, architecture, and what changed in v2.0
+Full documentation is published at [https://felixkrueger.github.io/TrimGalore/](https://felixkrueger.github.io/TrimGalore/)
+
+- [User Guide](https://felixkrueger.github.io/TrimGalore/guide/overview/) — full reference for all options and modes
+- [RRBS Guide](https://felixkrueger.github.io/TrimGalore/rrbs/guide/) — bisulfite sequencing and RRBS-specific guidance
+- [v2.0 migration notes](https://felixkrueger.github.io/TrimGalore/reference/migration/) — what changed in the Rust rewrite
+- [Benchmarks](https://felixkrueger.github.io/TrimGalore/performance/benchmarks/)
 
 ## Credits
 
