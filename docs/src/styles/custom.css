@@ -1,0 +1,787 @@
+/* ============================================================
+   Trim Galore: V4 brand, lime-stripe on warm paper.
+   System reference: PRODUCT.md and DESIGN.md at the docs root.
+   ============================================================ */
+
+/* Self-hosted web fonts via @fontsource. Avoids the Google Fonts CDN
+   round-trip and FOUT risk. Only the Latin subsets and the weights we
+   actually use are imported. */
+@import "@fontsource/bricolage-grotesque/latin-400.css";
+@import "@fontsource/bricolage-grotesque/latin-500.css";
+@import "@fontsource/bricolage-grotesque/latin-600.css";
+@import "@fontsource/bricolage-grotesque/latin-700.css";
+@import "@fontsource/bricolage-grotesque/latin-800.css";
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+
+/* Tokens. Light is the default scene; dark is the second scene. */
+:root {
+  --brand-bg:           oklch(0.965 0.012 85);
+  --brand-bg-soft:      oklch(0.945 0.014 85);
+  --brand-bg-deep:      oklch(0.920 0.016 85);
+  --brand-ink:          oklch(0.180 0.025 60);
+  --brand-ink-soft:     oklch(0.360 0.025 60);
+  --brand-ink-faint:    oklch(0.550 0.020 60);
+  --brand-rule:         oklch(0.830 0.015 70);
+  --brand-rule-strong:  oklch(0.620 0.015 70);
+  --brand-lime:         oklch(0.880 0.210 130);
+  --brand-lime-deep:    oklch(0.560 0.180 130);
+  --brand-text-on-lime: oklch(0.180 0.025 60);
+  --brand-cream:        oklch(0.980 0.012 85);
+  --brand-slash:        14deg;
+  --brand-ease:         cubic-bezier(0.2, 0.6, 0.2, 1);
+
+  /* Inline code chip: bright lime in light is right; dark needs to be calmer
+     because saturated lime on a dark surface is a magnet for the eye and
+     makes the code itself harder to read. */
+  --brand-code-bg:      var(--brand-lime);
+  --brand-code-text:    var(--brand-text-on-lime);
+
+  /* Severity tokens used by aside variants and any future warn/danger UI. */
+  --brand-warn:         oklch(0.55 0.16 65);
+  --brand-warn-bg:      oklch(0.96 0.04 80);
+  --brand-warn-rule:    oklch(0.78 0.10 75);
+  --brand-danger:       oklch(0.50 0.18 25);
+  --brand-danger-bg:    oklch(0.95 0.03 30);
+  --brand-danger-rule:  oklch(0.75 0.10 30);
+}
+
+:root[data-theme='dark'] {
+  --brand-bg:           oklch(0.165 0.014 60);
+  --brand-bg-soft:      oklch(0.215 0.016 60);
+  --brand-bg-deep:      oklch(0.270 0.018 60);
+  --brand-ink:          oklch(0.960 0.012 85);
+  --brand-ink-soft:     oklch(0.780 0.014 80);
+  --brand-ink-faint:    oklch(0.580 0.014 80);
+  --brand-rule:         oklch(0.320 0.018 60);
+  --brand-rule-strong:  oklch(0.450 0.018 60);
+  --brand-lime:         oklch(0.860 0.210 130);
+  --brand-lime-deep:    oklch(0.700 0.220 130);
+  --brand-text-on-lime: oklch(0.180 0.025 60);
+  --brand-cream:        oklch(0.165 0.014 60);
+
+  /* Calmer chip: deep muted green tint, light cream text. */
+  --brand-code-bg:      oklch(0.30 0.06 135);
+  --brand-code-text:    oklch(0.92 0.04 130);
+
+  /* Severity tokens: darker tints for legibility on dark surface. */
+  --brand-warn-bg:      oklch(0.27 0.05 75);
+  --brand-warn-rule:    oklch(0.45 0.10 75);
+  --brand-danger-bg:    oklch(0.25 0.06 30);
+  --brand-danger-rule:  oklch(0.45 0.12 30);
+}
+
+/* Drive Starlight tokens from the brand. */
+:root,
+:root[data-theme='dark'],
+:root[data-theme='light'] {
+  --sl-color-bg:           var(--brand-bg);
+  --sl-color-bg-nav:       var(--brand-bg);
+  --sl-color-bg-sidebar:   var(--brand-bg);
+  --sl-color-bg-inline-code: transparent;
+  --sl-color-bg-accent:    var(--brand-lime);
+
+  --sl-color-text:         var(--brand-ink);
+  --sl-color-text-accent:  var(--brand-lime-deep);
+  --sl-color-text-invert:  var(--brand-bg);
+
+  --sl-color-white:        var(--brand-ink);
+  --sl-color-gray-1:       var(--brand-ink);
+  --sl-color-gray-2:       var(--brand-ink-soft);
+  --sl-color-gray-3:       var(--brand-ink-soft);
+  --sl-color-gray-4:       var(--brand-ink-faint);
+  --sl-color-gray-5:       var(--brand-rule-strong);
+  --sl-color-gray-6:       var(--brand-rule);
+  --sl-color-gray-7:       var(--brand-bg-soft);
+  --sl-color-black:        var(--brand-bg);
+
+  --sl-color-hairline-light: var(--brand-rule);
+  --sl-color-hairline:       var(--brand-rule);
+  --sl-color-hairline-shade: var(--brand-rule-strong);
+
+  --sl-color-accent-low:   var(--brand-lime);
+  --sl-color-accent:       var(--brand-lime-deep);
+  --sl-color-accent-high:  var(--brand-ink);
+
+  --sl-color-bg-codeblock: var(--brand-bg-soft);
+
+  --sl-font: "Inter", -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sl-font-system-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+body {
+  font-family: var(--sl-font);
+  background: var(--brand-bg);
+  color: var(--brand-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Allow .tg-hero .titleband and .tg-divider (home page only) to break out to
+   full viewport width without triggering a horizontal scrollbar, and stop
+   Starlight's content panel from clipping the hero's SVG band overflow. */
+html { overflow-x: clip; }
+:root:has(.tg-hero) .main-frame,
+:root:has(.tg-hero) .main-pane,
+:root:has(.tg-hero) .main-pane > main,
+:root:has(.tg-hero) .content-panel,
+:root:has(.tg-hero) .content-panel > .sl-container,
+.tg-hero {
+  overflow: visible !important;
+}
+
+/* Homepage: doc template (so Starlight's mobile drawer is reused) with the
+   desktop sidebar/TOC and footer chrome visually hidden. The hero element
+   only appears on pages with `hero` frontmatter, so :has(.tg-hero) scopes
+   these rules to the home page. The .sidebar element on desktop holds the
+   sidebar pane; on mobile it holds the menu toggle and a hidden drawer.
+   We only hide the desktop layout, never the mobile toggle. */
+:root:has(.tg-hero) .right-sidebar-container,
+:root:has(.tg-hero) .pagination-links,
+:root:has(.tg-hero) .meta,
+:root:has(.tg-hero) main > footer {
+  display: none !important;
+}
+:root:has(.tg-hero) {
+  --sl-mobile-toc-height: 0rem;
+}
+@media (min-width: 50rem) {
+  /* Desktop only: collapse the sidebar column, widen the content column
+     for the home page, and re-centre. The header grid uses
+     --sl-content-width in its math, so widening it here also shifts the
+     header's wordmark and version-pill positions in step. Starlight
+     sets --sl-content-margin-inline: auto 0 (flush-right within main-pane)
+     when both sidebar and TOC are present; we override to auto so content
+     centres within the main-pane. */
+  :root:has(.tg-hero) {
+    --sl-content-width: 72rem;
+    --sl-sidebar-width: 0rem;
+  }
+  :root:has(.tg-hero) .page > nav.sidebar { display: none !important; }
+  :root:has(.tg-hero) .main-frame {
+    padding-inline-start: 0 !important;
+  }
+  /* Override Starlight's [data-has-sidebar][data-has-toc] .main-pane rule
+     that pushes content flush-right via --sl-content-margin-inline: auto 0.
+     Both the variable AND the explicit width need overriding because
+     Starlight sets a width-by-formula that excludes the sidebar lane. */
+  :root:has(.tg-hero) .main-pane {
+    width: 100% !important;
+    --sl-content-margin-inline: auto !important;
+  }
+  :root:has(.tg-hero) .content-panel > .sl-container {
+    margin-inline: auto !important;
+  }
+}
+
+::selection {
+  background: var(--brand-lime);
+  color: var(--brand-text-on-lime);
+}
+
+/* -----------------------------------------------------------
+   Headings: Bricolage Grotesque. Italic words inside headings
+   get the lime highlight chip behind them.
+   ----------------------------------------------------------- */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+.sl-markdown-content h5,
+.sl-markdown-content h6 {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  letter-spacing: -0.02em;
+  color: var(--brand-ink);
+}
+/* Inner-page title (rendered by Starlight's PageTitle, sits outside the
+   markdown content). Bricolage display, tight tracking. */
+main h1[data-page-title],
+main h1#_top {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif !important;
+  font-variation-settings: "opsz" 96, "wdth" 100;
+  font-weight: 700 !important;
+  font-size: clamp(40px, 4.4vw, 56px) !important;
+  line-height: 1 !important;
+  letter-spacing: -0.035em !important;
+  color: var(--brand-ink) !important;
+  margin-bottom: 1.5rem;
+}
+
+.sl-markdown-content h2 {
+  font-variation-settings: "opsz" 60, "wdth" 100;
+  font-weight: 500;
+  font-size: clamp(28px, 3.2vw, 44px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  margin-top: 4rem;
+}
+.sl-markdown-content h3 {
+  font-variation-settings: "opsz" 30, "wdth" 100;
+  font-weight: 600;
+  font-size: clamp(20px, 2vw, 24px);
+  line-height: 1.2;
+}
+.sl-markdown-content h1 em,
+.sl-markdown-content h2 em,
+.sl-markdown-content h3 em {
+  font-style: italic;
+  font-weight: 500;
+  position: relative;
+  display: inline-block;
+  padding: 0 6px;
+  isolation: isolate;
+  /* Dark ink against the lime chip in both themes. Light text on lime is
+     low-contrast and the v2 highlight disappears in dark mode without this. */
+  color: var(--brand-text-on-lime);
+}
+.sl-markdown-content h1 em::before,
+.sl-markdown-content h2 em::before,
+.sl-markdown-content h3 em::before {
+  content: "";
+  position: absolute;
+  inset: 14% -4px 14% 4px;
+  background: var(--brand-lime);
+  transform: skewX(calc(-1 * var(--brand-slash)));
+  z-index: -1;
+}
+
+/* Body links inside markdown */
+.sl-markdown-content a:not(.sl-link-button):not(.sl-link-card) {
+  color: var(--brand-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--brand-lime);
+  text-decoration-thickness: 0.16em;
+  text-underline-offset: 0.18em;
+  transition: text-decoration-color 150ms var(--brand-ease);
+}
+.sl-markdown-content a:not(.sl-link-button):not(.sl-link-card):hover {
+  text-decoration-color: var(--brand-lime-deep);
+}
+
+/* Body paragraphs */
+.sl-markdown-content p {
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--brand-ink);
+  max-width: 75ch;
+}
+
+/* -----------------------------------------------------------
+   Inline code: lime chip. Block code: hairline cream box.
+   ----------------------------------------------------------- */
+.sl-markdown-content :not(pre) > code,
+.tg-news-item code,
+.tg-news-item p code {
+  font-family: var(--sl-font-system-mono);
+  font-size: 0.88em;
+  font-weight: 500;
+  color: var(--brand-code-text);
+  background: var(--brand-code-bg);
+  padding: 0.05em 0.4em;
+  border-radius: 3px;
+  white-space: nowrap;
+  border: none;
+}
+
+.sl-markdown-content .expressive-code { margin: 1.5rem 0; }
+.expressive-code .frame {
+  border: 1px solid var(--brand-rule);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.expressive-code pre {
+  background: var(--brand-bg-soft) !important;
+  border: none;
+}
+.expressive-code .copy button {
+  background: transparent !important;
+  border: 1px solid var(--brand-rule) !important;
+  color: var(--brand-ink-soft) !important;
+}
+.expressive-code .copy button:hover {
+  border-color: var(--brand-ink) !important;
+  color: var(--brand-ink) !important;
+}
+
+/* Code frame chrome. Terminal-style frames keep the window dots; titled
+   frames get a brand-tinted bar. Inactive title bar uses ink-soft so the
+   frame feels of-a-piece with the body. */
+.expressive-code .frame .header {
+  background: var(--brand-bg-deep);
+  border-bottom: 1px solid var(--brand-rule);
+}
+.expressive-code .frame.is-terminal .header {
+  background: var(--brand-bg-deep);
+}
+.expressive-code .frame .title {
+  color: var(--brand-ink-soft) !important;
+  font-family: var(--sl-font-system-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.expressive-code .frame.has-title .title::before,
+.expressive-code .frame.has-title .title::after {
+  display: none;
+}
+
+/* -----------------------------------------------------------
+   Site title: see src/components/SiteTitle.astro for the markup.
+   This styles the wordmark and its lime slash mark.
+   ----------------------------------------------------------- */
+.tg-wordmark {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: -0.025em;
+  color: var(--brand-ink);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  line-height: 1;
+}
+.tg-wordmark .galore {
+  font-style: italic;
+  font-weight: 500;
+  /* Lifts on hover. Just "galore"; trim and slash stay put. */
+  transform: translateY(0);
+  transition: transform 220ms var(--brand-ease);
+}
+.tg-wordmark:hover .galore,
+.tg-wordmark:focus-visible .galore {
+  transform: translateY(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-wordmark .galore { transition: none; }
+}
+.tg-wordmark .slash {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  background: var(--brand-lime);
+  transform: skewX(calc(-1 * var(--brand-slash)));
+}
+
+/* -----------------------------------------------------------
+   Hero: see src/components/Hero.astro.
+   ----------------------------------------------------------- */
+.tg-hero {
+  display: grid;
+  grid-template-columns: 100%;
+  align-items: start;
+  gap: 0;
+  padding-block: clamp(1.5rem, calc(0.5rem + 4vmin), 4rem);
+}
+
+.tg-hero .eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--brand-ink-soft);
+  margin: 0 0 4px;
+  padding-left: 6px;
+}
+
+.tg-hero .titleband {
+  /* Sized to the content column so the title aligns with the eyebrow and
+     tagline below. The SVG band rect is authored 7000 viewBox units wide
+     (~5–6× the SVG's CSS width) and SVG overflow is visible, so the lime
+     band naturally extends past the SVG box and bleeds to the viewport
+     edges. The chain of parent containers must NOT clip; handled below. */
+  width: 100%;
+  margin: 0 0 8px;
+  aspect-ratio: 1240 / 460;
+  max-height: 460px;
+  overflow: visible;
+  /* Stop the click/double-click easter eggs from accidentally selecting the
+     "Trim Galore" SVG text and breaking the visual effect. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tg-hero .titleband svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+.tg-hero svg .band         { fill: var(--brand-lime); }
+.tg-hero svg .text-base    { fill: var(--brand-ink); }
+.tg-hero svg .text-on-band { fill: var(--brand-bg); }
+
+.tg-hero .sr-title {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tg-hero .tagline {
+  max-width: 36ch;
+  font-size: clamp(18px, 1.2vw, 22px);
+  line-height: 1.4;
+  color: var(--brand-ink);
+  margin: 24px 0 28px;
+  font-weight: 400;
+  text-wrap: balance;
+}
+
+.tg-hero .actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* -----------------------------------------------------------
+   LinkButton overrides.
+   primary = filled ink, lime hover sweep.
+   minimal = ghost border that fills on hover.
+   ----------------------------------------------------------- */
+.sl-link-button {
+  font-family: "Inter", sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 15px !important;
+  letter-spacing: -0.005em !important;
+  border-radius: 999px !important;
+  padding: 14px 24px !important;
+  position: relative;
+  isolation: isolate;
+}
+
+.sl-link-button.primary {
+  background: var(--brand-ink) !important;
+  color: var(--brand-bg) !important;
+  border: 1px solid var(--brand-ink) !important;
+  overflow: hidden;
+}
+.sl-link-button.primary::before {
+  content: "";
+  position: absolute;
+  top: -10%; bottom: -10%;
+  left: -30%; width: 30%;
+  background: var(--brand-lime);
+  transform: skewX(calc(-1 * var(--brand-slash)));
+  transition: left 280ms var(--brand-ease);
+  z-index: -1;
+}
+.sl-link-button.primary:hover::before { left: 130%; }
+
+.sl-link-button.minimal {
+  background: transparent !important;
+  color: var(--brand-ink) !important;
+  border: 1px solid var(--brand-ink) !important;
+}
+.sl-link-button.minimal:hover {
+  background: var(--brand-ink) !important;
+  color: var(--brand-bg) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-link-button.primary::before { transition: none; }
+}
+
+/* Visible keyboard focus rings. The custom `!important` background/border
+   overrides on .sl-link-button and .tg-version stripped Starlight's
+   default focus indicators; restore them with a brand-coloured outline. */
+.sl-link-button:focus-visible,
+.tg-version:focus-visible,
+.tg-wordmark:focus-visible,
+.tg-topnav a:focus-visible,
+.sidebar-content a:focus-visible {
+  outline: 2px solid var(--brand-lime-deep);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.sl-link-button:focus-visible {
+  /* Pill button: match its rounded shape so the ring traces its outline. */
+  border-radius: 999px;
+}
+
+/* -----------------------------------------------------------
+   Proof strip (home page).
+   ----------------------------------------------------------- */
+.tg-proof {
+  border-top: 1px solid var(--brand-ink);
+  border-bottom: 1px solid var(--brand-ink);
+  padding: 22px 0;
+  margin: 48px 0 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+.tg-proof-item .num {
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-variation-settings: "opsz" 60;
+  font-weight: 600;
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--brand-ink);
+}
+.tg-proof-item .num em {
+  font-style: italic;
+  font-weight: 500;
+}
+.tg-proof-item .label {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--brand-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+}
+@media (max-width: 50rem) {
+  .tg-proof { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* -----------------------------------------------------------
+   Section divider: heading-style label above a 1px full-width lime line.
+   ----------------------------------------------------------- */
+.tg-divider {
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  margin-block: 80px 32px;
+  display: grid;
+  grid-template-rows: auto 1px;
+  gap: 14px;
+}
+.tg-divider .label {
+  margin-inline: auto;
+  max-width: var(--sl-content-width, 50rem);
+  width: 100%;
+  padding-inline: 1.5rem;
+  display: flex;
+  justify-content: flex-end;
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-variation-settings: "opsz" 30, "wdth" 100;
+  font-size: clamp(18px, 1.6vw, 22px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-transform: uppercase;
+  color: var(--brand-ink);
+  line-height: 1;
+}
+.tg-divider .band {
+  width: 100%;
+  height: 1px;
+  background: var(--brand-lime);
+}
+
+/* -----------------------------------------------------------
+   Editorial numbered list: "What's new in v2" and similar.
+   ----------------------------------------------------------- */
+.tg-news {
+  display: grid;
+  margin: 1rem 0 2rem;
+}
+.tg-news-item {
+  display: grid;
+  grid-template-columns: 96px 1fr 1.6fr;
+  gap: 32px;
+  padding: 26px 0;
+  border-top: 1px solid var(--brand-ink);
+  align-items: baseline;
+}
+.tg-news-item:last-child { border-bottom: 1px solid var(--brand-ink); }
+.tg-news-item .num {
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-variation-settings: "opsz" 96;
+  font-weight: 700;
+  font-size: 56px;
+  line-height: 0.9;
+  color: var(--brand-ink);
+  letter-spacing: -0.03em;
+  position: relative;
+  display: inline-block;
+  padding-right: 12px;
+}
+.tg-news-item .num::after {
+  content: "";
+  position: absolute;
+  bottom: 16%; left: -4px; right: 0;
+  height: 3px;
+  background: var(--brand-lime);
+  transform: skewX(calc(-1 * var(--brand-slash)));
+}
+.tg-news-item h3 {
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-variation-settings: "opsz" 30, "wdth" 100;
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--brand-ink);
+}
+.tg-news-item p {
+  font-size: 15px;
+  color: var(--brand-ink-soft);
+  margin: 0;
+  line-height: 1.55;
+  max-width: 56ch;
+}
+@media (max-width: 50rem) {
+  .tg-news-item {
+    grid-template-columns: 64px 1fr;
+    gap: 12px 20px;
+  }
+  .tg-news-item .num { font-size: 40px; grid-row: span 2; align-self: start; }
+  .tg-news-item h3, .tg-news-item p { grid-column: 2; }
+}
+
+/* -----------------------------------------------------------
+   CardGrid (Starlight).
+   ----------------------------------------------------------- */
+.card,
+.sl-link-card {
+  background: var(--brand-bg-soft) !important;
+  border: 1px solid var(--brand-rule) !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  padding: 1.25rem !important;
+  transition: border-color 150ms var(--brand-ease), background 150ms var(--brand-ease);
+}
+.card:hover,
+.sl-link-card:hover {
+  border-color: var(--brand-ink) !important;
+  background: var(--brand-bg) !important;
+}
+.card .icon {
+  background: transparent !important;
+  border: 1px solid var(--brand-ink) !important;
+  border-radius: 999px !important;
+  color: var(--brand-ink) !important;
+  width: 1.6rem !important;
+  height: 1.6rem !important;
+  padding: 0.3rem !important;
+}
+.card .title,
+.sl-link-card .title {
+  font-family: "Bricolage Grotesque", sans-serif !important;
+  font-weight: 600 !important;
+  font-variation-settings: "opsz" 30 !important;
+  letter-spacing: -0.015em !important;
+}
+.sl-link-card .icon { color: var(--brand-lime-deep) !important; }
+
+/* -----------------------------------------------------------
+   Markdown body images.
+   ----------------------------------------------------------- */
+.sl-markdown-content img {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  height: auto;
+  padding: 0.75rem;
+  background-color: var(--brand-cream);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--brand-rule);
+}
+.sl-markdown-content td img { padding: 0.4rem; }
+
+/* -----------------------------------------------------------
+   Sidebar: replace the default 1px indent rule on the active item with a
+   2px lime stripe so it lines up with the other items' indent line.
+   ----------------------------------------------------------- */
+.sidebar-content a[aria-current="page"] {
+  color: var(--brand-ink) !important;
+  background: transparent !important;
+}
+.sidebar-content li:has(> a[aria-current="page"]) {
+  border-inline-start-color: var(--brand-lime) !important;
+}
+/* Subtle hover feedback on sidebar links: tint + ink colour. */
+.sidebar-content a:not([aria-current="page"]):hover {
+  color: var(--brand-ink) !important;
+  background: var(--brand-bg-soft) !important;
+}
+starlight-toc nav a[aria-current="true"] {
+  color: var(--brand-ink) !important;
+  font-weight: 600;
+}
+
+/* -----------------------------------------------------------
+   Asides (note / tip / caution / danger). Starlight's defaults use a
+   0.25rem side stripe (banned by the design system) plus blue/purple/
+   orange/red bg tints (off-brand). Replace with a hairline full border,
+   warm-soft bg, and a per-variant icon-and-title accent.
+   ----------------------------------------------------------- */
+.starlight-aside {
+  padding: 1rem 1.25rem !important;
+  border: 1px solid var(--brand-rule) !important;
+  border-inline-start: 1px solid var(--brand-rule) !important;
+  border-radius: 6px;
+  background: var(--brand-bg-soft) !important;
+  color: var(--brand-ink) !important;
+  margin: 1.5rem 0 !important;
+}
+.starlight-aside__title {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--brand-ink) !important;
+}
+.starlight-aside__icon {
+  color: var(--brand-ink-soft);
+}
+.starlight-aside__content a {
+  color: var(--brand-ink) !important;
+}
+
+/* Severity comes through in the icon hue + a subtle title accent. */
+.starlight-aside--note .starlight-aside__icon,
+.starlight-aside--tip .starlight-aside__icon {
+  color: var(--brand-lime-deep);
+}
+.starlight-aside--caution {
+  background: var(--brand-warn-bg) !important;
+  border-color: var(--brand-warn-rule) !important;
+}
+.starlight-aside--caution .starlight-aside__icon {
+  color: var(--brand-warn);
+}
+.starlight-aside--danger {
+  background: var(--brand-danger-bg) !important;
+  border-color: var(--brand-danger-rule) !important;
+}
+.starlight-aside--danger .starlight-aside__icon {
+  color: var(--brand-danger);
+}
+
+/* Inline code inside asides keeps the lime chip but the bg around it has
+   already shifted, so just pin the contrast in the danger/caution variants. */
+.starlight-aside--caution :not(pre) > code,
+.starlight-aside--danger :not(pre) > code {
+  color: var(--brand-text-on-lime);
+  background: var(--brand-lime);
+}
+
+/* Pagination "Previous / Next" cards. Match the V4 card aesthetic:
+   warm-soft bg, hairline border, ink hover. */
+.pagination-links a {
+  background: var(--brand-bg-soft) !important;
+  border: 1px solid var(--brand-rule) !important;
+  border-radius: 6px !important;
+  padding: 1rem 1.25rem !important;
+  transition: border-color 150ms var(--brand-ease), background 150ms var(--brand-ease);
+}
+.pagination-links a:hover {
+  border-color: var(--brand-ink) !important;
+  background: var(--brand-bg) !important;
+}
+.pagination-links a .link-title {
+  font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Keep flag references like --adapter2 on one line */
+:not(pre) > code { white-space: nowrap; }

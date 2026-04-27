@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Trim Galore">
+  <title>Trim Galore</title>
+  <defs>
+    <clipPath id="round">
+      <rect width="64" height="64" rx="10"/>
+    </clipPath>
+    <!-- Mask: visible only inside the lime band, used for the cream-to-dark
+         inversion of the T where the band crosses it. Same -14° rotation
+         as the hero band; pivoted around the band's own centre so the
+         geometry doesn't drift when the height changes. -->
+    <mask id="band-area">
+      <rect width="64" height="64" fill="black"/>
+      <rect x="-12" y="38" width="88" height="9" fill="white" transform="rotate(-14 32 42.5)"/>
+    </mask>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <!-- Warm dark background -->
+    <rect width="64" height="64" fill="#23201B"/>
+
+    <!-- Cream T -->
+    <path d="M8 12 L56 12 L56 24 L38 24 L38 56 L26 56 L26 24 L8 24 Z" fill="#F7F2E5"/>
+
+    <!-- Lime band (lower, slimmer than v1) -->
+    <rect x="-12" y="38" width="88" height="9" fill="#C2EE49" transform="rotate(-14 32 42.5)"/>
+
+    <!-- Dark T inside the band, baking the inversion into the SVG -->
+    <path d="M8 12 L56 12 L56 24 L38 24 L38 56 L26 56 L26 24 L8 24 Z"
+          fill="#23201B" mask="url(#band-area)"/>
+  </g>
+</svg>

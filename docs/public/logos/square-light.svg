@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Trim Galore square logo, light scene. T-mark on cream paper with the lime
+  band cutting across the lower third; cream-cut-through where the T meets the
+  band, baking the inversion into the SVG. Same band rotation (-14°) as the
+  hero and the favicon. Larger viewBox (256) than the favicon (64) for cleaner
+  numbers and easier downstream rasterisation.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"
+     role="img" aria-label="Trim Galore">
+  <title>Trim Galore</title>
+  <defs>
+    <clipPath id="round">
+      <rect width="256" height="256"/>
+    </clipPath>
+    <mask id="band-area">
+      <rect width="256" height="256" fill="black"/>
+      <rect x="-48" y="152" width="352" height="36" fill="white"
+            transform="rotate(-14 128 170)"/>
+    </mask>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <rect width="256" height="256" fill="#FFFFFF"/>
+    <path d="M32 48 L224 48 L224 96 L152 96 L152 224 L104 224 L104 96 L32 96 Z"
+          fill="#23201B"/>
+    <rect x="-48" y="152" width="352" height="36" fill="#C2EE49"
+          transform="rotate(-14 128 170)"/>
+    <path d="M32 48 L224 48 L224 96 L152 96 L152 224 L104 224 L104 96 L32 96 Z"
+          fill="#FFFFFF" mask="url(#band-area)"/>
+  </g>
+</svg>

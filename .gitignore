@@ -9,3 +9,8 @@ Thumbs.db
 # nf-test working directory + log
 .nf-test/
 .nf-test.log
+
+# Docs
+.playwright-mcp
+docs/DESIGN.md
+docs/PRODUCT.md
