@@ -28,7 +28,7 @@
     <rect width="1280" height="720" fill="#FFFFFF"/>
     <rect x="-2840" y="304" width="7000" height="92" fill="#C2EE49"
           transform="rotate(-14 660 350)"/>
-    <use href="#title" fill="#23201B"/>
+    <use href="#title" fill="#0d1117"/>
     <g mask="url(#band-mask)">
       <use href="#title" fill="#FFFFFF"/>
     </g>

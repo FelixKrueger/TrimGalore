@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Trim Galore — logo previews</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 24px; background: #f7f2e5; color: #23201b; }
+  h2 { margin: 28px 0 8px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+  .tile { border: 1px solid #00000022; border-radius: 8px; overflow: hidden; }
+  .tile.light { background: #fff; }
+  .tile.dark  { background: #23201b; }
+  .tile img { display: block; width: 100%; height: auto; }
+  .label { padding: 6px 10px; font-size: 12px; font-family: ui-monospace, monospace; opacity: 0.7; }
+  .tile.dark .label { color: #f7f2e5; }
+  .sq-row { grid-template-columns: repeat(4, 1fr); }
+  .sq-row .tile img { padding: 24px; max-width: 220px; margin: 0 auto; }
+</style>
+
+<h2>Hero</h2>
+<div class="row">
+  <div class="tile light"><img src="hero-light.svg" alt=""><div class="label">hero-light.svg</div></div>
+  <div class="tile dark"><img src="hero-dark.svg" alt=""><div class="label">hero-dark.svg</div></div>
+</div>
+
+<h2>Wordmark</h2>
+<div class="row">
+  <div class="tile light"><img src="wordmark-light.svg" alt=""><div class="label">wordmark-light.svg</div></div>
+  <div class="tile dark"><img src="wordmark-dark.svg" alt=""><div class="label">wordmark-dark.svg</div></div>
+</div>
+
+<h2>Square</h2>
+<div class="row sq-row">
+  <div class="tile light"><img src="square-light.svg" alt=""><div class="label">square-light on white</div></div>
+  <div class="tile dark"><img src="square-light.svg" alt=""><div class="label">square-light on dark</div></div>
+  <div class="tile light"><img src="square-dark.svg" alt=""><div class="label">square-dark on white</div></div>
+  <div class="tile dark"><img src="square-dark.svg" alt=""><div class="label">square-dark on dark</div></div>
+</div>
