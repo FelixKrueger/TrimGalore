@@ -58,6 +58,13 @@ pub struct TrimResult {
     /// Per-round matches: (adapter_index, match_len). Empty if no adapter found.
     pub adapter_matches: Vec<(usize, usize)>,
     pub quality_trimmed_bp: usize, // bases removed by quality trimming
+    /// Sequence length after quality + adapter trimming, BEFORE the RRBS 2 bp
+    /// adjustment, poly-A/G trimming, N-trimming, and fixed clipping. Used to
+    /// drive `total_bp_after_trim` so the cutadapt-section "Total written
+    /// (filtered)" line matches Perl v0.6.x on RRBS samples (Perl reports
+    /// what its cutadapt subprocess wrote, before the wrapper's 2 bp RRBS
+    /// truncation). See FelixKrueger/TrimGalore#232.
+    pub bp_after_cutadapt: usize,
     pub rrbs_trimmed_3prime: bool,
     pub rrbs_trimmed_5prime: bool,
     pub poly_a_trimmed: usize, // number of bases trimmed (0 = no poly-A found)
@@ -144,6 +151,12 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
     }
 
     let had_adapter = !adapter_matches.is_empty();
+
+    // Capture sequence length AFTER quality + adapter trim, BEFORE any further
+    // adjustments (RRBS, poly-A/G, N-trim, clipping). Drives the cutadapt-
+    // section "Total written (filtered)" stat so it matches Perl v0.6.x on
+    // RRBS samples. See `TrimResult::bp_after_cutadapt` and #232.
+    let bp_after_cutadapt = record.seq.len();
 
     // 2.5. RRBS trimming (MspI 2bp end-repair artifact removal)
     let mut rrbs_trimmed_3prime = false;
@@ -261,6 +274,7 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         had_adapter,
         adapter_matches,
         quality_trimmed_bp,
+        bp_after_cutadapt,
         rrbs_trimmed_3prime,
         rrbs_trimmed_5prime,
         poly_a_trimmed,
@@ -322,8 +336,10 @@ pub fn run_single_end(
             continue;
         }
 
-        // Track bp after trimming but before length filtering (Cutadapt-compatible stat)
-        stats.total_bp_after_trim += record.seq.len();
+        // Track bp after trimming but before length filtering (Cutadapt-compatible stat).
+        // Use the post-quality / post-adapter length captured in trim_read so the
+        // RRBS 2 bp truncation isn't double-subtracted vs Perl v0.6.x. See #232.
+        stats.total_bp_after_trim += result.bp_after_cutadapt;
 
         // Apply filters
         match filters::filter_single_end(
@@ -425,9 +441,11 @@ pub fn run_paired_end(
                     continue;
                 }
 
-                // Track bp after trimming but before pair/length filtering (Cutadapt-compatible stat)
-                stats_r1.total_bp_after_trim += r1.seq.len();
-                stats_r2.total_bp_after_trim += r2.seq.len();
+                // Track bp after trimming but before pair/length filtering (Cutadapt-compatible
+                // stat). Use post-quality / post-adapter lengths from trim_read so the RRBS
+                // 2 bp truncation isn't double-subtracted vs Perl v0.6.x. See #232.
+                stats_r1.total_bp_after_trim += result_r1.bp_after_cutadapt;
+                stats_r2.total_bp_after_trim += result_r2.bp_after_cutadapt;
 
                 // Pair-aware filtering
                 match filters::filter_paired_end(
@@ -731,5 +749,45 @@ mod tests {
         let mut record = make_record("NNACGTACGT");
         trim_read(&mut record, &config, false);
         assert_eq!(record.seq, "NNACGTACGT");
+    }
+
+    // ── #232 regression: bp_after_cutadapt captures pre-RRBS length ─────
+
+    #[test]
+    fn test_bp_after_cutadapt_skips_rrbs_truncation() {
+        // RRBS truncates 2 bp from the 3' end on adapter-contaminated reads.
+        // bp_after_cutadapt must capture the length BEFORE that truncation so
+        // the cutadapt-section "Total written (filtered)" stat matches Perl
+        // v0.6.x. See FelixKrueger/TrimGalore#232.
+        let mut config = test_config_with_adapters(vec![("illumina", "AGATCGGAAGAGC")], 1);
+        config.rrbs = true;
+
+        // 30 bp random + 13 bp adapter = 43 bp input.
+        // After adapter trim: 30 bp. After RRBS 2-bp truncation: 28 bp.
+        let read_seq = "ACGTACGTACGTACGTACGTACGTACGTACAGATCGGAAGAGC";
+        assert_eq!(read_seq.len(), 43);
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter, "adapter must be detected");
+        assert!(result.rrbs_trimmed_3prime, "RRBS 3' trim must fire");
+        assert_eq!(record.seq.len(), 28, "post-RRBS length");
+        // The fix: bp_after_cutadapt is captured BEFORE RRBS truncation.
+        assert_eq!(
+            result.bp_after_cutadapt, 30,
+            "bp_after_cutadapt must reflect post-adapter, pre-RRBS length"
+        );
+    }
+
+    #[test]
+    fn test_bp_after_cutadapt_equals_seq_len_when_no_rrbs() {
+        // Without RRBS, bp_after_cutadapt and the final record length should
+        // match for reads that don't undergo poly-A/G/N-trim/clipping.
+        let config = test_config_with_adapters(vec![("illumina", "AGATCGGAAGAGC")], 1);
+        let mut record = make_record("ACGTACGTACGTACGTACGTAGATCGGAAGAGC");
+        let result = trim_read(&mut record, &config, false);
+
+        assert!(result.had_adapter);
+        assert_eq!(result.bp_after_cutadapt, record.seq.len());
     }
 }

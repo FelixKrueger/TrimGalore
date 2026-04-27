@@ -404,18 +404,19 @@ pub fn write_pair_validation_stats<W: Write>(
         format_number(stats.pairs_removed)
     )?;
 
-    if stats.pairs_removed_n > 0 {
-        writeln!(
-            w,
-            "Number of pairs removed for N content ({:.2}%):",
-            percentage(stats.pairs_removed_n, stats.pairs_analyzed)
-        )?;
-        writeln!(
-            w,
-            "                             {:>10}",
-            format_number(stats.pairs_removed_n)
-        )?;
-    }
+    // PE counterpart to the RUN-STATISTICS unconditional emission (#233).
+    // Always emit so MultiQC parsers see a consistent line shape regardless of
+    // whether N-content filtering rejected any pairs.
+    writeln!(
+        w,
+        "Number of pairs removed for N content ({:.2}%):",
+        percentage(stats.pairs_removed_n, stats.pairs_analyzed)
+    )?;
+    writeln!(
+        w,
+        "                             {:>10}",
+        format_number(stats.pairs_removed_n)
+    )?;
 
     if stats.r1_unpaired > 0 || stats.r2_unpaired > 0 {
         writeln!(w)?;
@@ -594,31 +595,30 @@ pub fn write_run_footer<W: Write>(
     writeln!(w, "=============================================")?;
     writeln!(w, "{} sequences processed in total", stats.total_reads)?;
 
-    if stats.too_short > 0 {
-        writeln!(
-            w,
-            "Sequences removed because they became shorter than the length cutoff of {} bp:\t{} ({:.1}%)",
-            config.length_cutoff,
-            stats.too_short,
-            percentage(stats.too_short, stats.total_reads)
-        )?;
-    }
-    if stats.too_long > 0 {
-        writeln!(
-            w,
-            "Sequences removed because they were longer than the upper length cutoff:\t{} ({:.1}%)",
-            stats.too_long,
-            percentage(stats.too_long, stats.total_reads)
-        )?;
-    }
-    if stats.too_many_n > 0 {
-        writeln!(
-            w,
-            "Sequences removed because of too many N bases:\t{} ({:.1}%)",
-            stats.too_many_n,
-            percentage(stats.too_many_n, stats.total_reads)
-        )?;
-    }
+    // RUN-STATISTICS filter-removed lines are emitted unconditionally to match
+    // Perl v0.6.x — guarding on `> 0` broke MultiQC's canonical fallback parser
+    // ("Sequences removed because they became shorter…") on samples that happen
+    // to pass 100% of reads through length / max-N filters. See #233 and the
+    // long discussion at MultiQC #200.
+    writeln!(
+        w,
+        "Sequences removed because they became shorter than the length cutoff of {} bp:\t{} ({:.1}%)",
+        config.length_cutoff,
+        stats.too_short,
+        percentage(stats.too_short, stats.total_reads)
+    )?;
+    writeln!(
+        w,
+        "Sequences removed because they were longer than the upper length cutoff:\t{} ({:.1}%)",
+        stats.too_long,
+        percentage(stats.too_long, stats.total_reads)
+    )?;
+    writeln!(
+        w,
+        "Sequences removed because of too many N bases:\t{} ({:.1}%)",
+        stats.too_many_n,
+        percentage(stats.too_many_n, stats.total_reads)
+    )?;
 
     if stats.rrbs_trimmed_3prime > 0 {
         writeln!(
@@ -1567,5 +1567,67 @@ mod tests {
         assert_eq!(json["read_processing"]["reads_written"], 0);
         assert_eq!(json["basepair_processing"]["total_bp_processed"], 0);
         assert_eq!(json["adapter_trimming"][0]["times_trimmed"], 0);
+    }
+
+    // ── #233 regression: RUN-STATISTICS lines emitted even when count is 0 ─
+
+    #[test]
+    fn test_run_footer_emits_zero_count_filter_lines() {
+        // Perl v0.6.x always emits the "Sequences removed because they became
+        // shorter…" line — and the canonical MultiQC parser greps for it as a
+        // fallback when the embedded Cutadapt summary reports 100% passing.
+        // Guarding the line on `> 0` (the v2.0–beta.5 behaviour) broke that
+        // parser. See FelixKrueger/TrimGalore#233.
+        let config = test_config();
+        let mut stats = TrimStats::with_adapter_count(1);
+        stats.total_reads = 100;
+        stats.reads_written = 100;
+        stats.too_short = 0;
+        stats.too_long = 0;
+        stats.too_many_n = 0;
+
+        let mut buf = Vec::new();
+        write_run_footer(&mut buf, &config, &stats).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(
+            text.contains("Sequences removed because they became shorter than the length cutoff"),
+            "too_short line must be emitted even at count 0"
+        );
+        assert!(
+            text.contains(
+                "Sequences removed because they were longer than the upper length cutoff"
+            ),
+            "too_long line must be emitted even at count 0"
+        );
+        assert!(
+            text.contains("Sequences removed because of too many N bases"),
+            "too_many_n line must be emitted even at count 0"
+        );
+        // And the values appear as "0 (0.0%)".
+        assert!(
+            text.contains("0 (0.0%)"),
+            "zero counts must render with percentage"
+        );
+    }
+
+    #[test]
+    fn test_pair_validation_emits_zero_n_count_line() {
+        // Same shape on the PE side: pairs_removed_n is now always emitted.
+        let pair_stats = PairValidationStats {
+            pairs_analyzed: 1000,
+            pairs_removed: 0,
+            pairs_removed_n: 0,
+            ..PairValidationStats::default()
+        };
+
+        let mut buf = Vec::new();
+        write_pair_validation_stats(&mut buf, &pair_stats).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(
+            text.contains("Number of pairs removed for N content"),
+            "pairs_removed_n line must be emitted even at count 0"
+        );
     }
 }

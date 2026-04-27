@@ -1,6 +1,53 @@
 # Trim Galore Changelog
 
 
+### Unreleased (queued for v2.1.0-beta.6)
+
+#### Bug fixes (since v2.1.0-beta.5) — surfaced by the nf-core pre-GA validation review
+
+- **RRBS samples: `Total written (filtered)` cutadapt-section line now matches
+  Perl v0.6.x byte-for-byte.** Beta.4's `eedbc66` MultiQC-parity fix introduced
+  `total_bp_after_trim` (incremented after the full per-read trimming pipeline)
+  but didn't account for the `--rrbs` 2 bp 3' truncation. The reported value
+  drifted from v0.6.x by `RRBS-trimmed-reads × 2 bp`. `TrimResult` now carries
+  a `bp_after_cutadapt` field captured immediately after quality + adapter
+  trimming and before RRBS / poly-A/G / N-trim / clipping, and that's what
+  drives `total_bp_after_trim` in both single-end and paired-end pipelines.
+  Trimmed FASTQ output is unchanged — this fix only affects the reported
+  count. (#232)
+- **`RUN STATISTICS` filter-removed lines are now always emitted, even when
+  the count is 0.** The `if stats.too_short > 0` / `too_long` / `too_many_n`
+  guards (and the PE counterpart `pairs_removed_n` line) caused MultiQC's
+  canonical fallback parser to break on samples that pass 100% of reads
+  through length / max-N filters — the parser greps for the exact line and
+  treats absence as a parse failure. v0.6.x always emits the line. Now we do
+  too, with zero-protected percentage display. (#233)
+
+#### Documentation (since v2.1.0-beta.5)
+
+- **Migration notes: trimming-report behaviour changes vs Perl v0.6.x.** The
+  pre-GA review surfaced four intentional report-text changes that were not
+  filed because they match the v2.x reference report attached to MultiQC #3529.
+  Documented for users / parsers expecting the v0.6.x shape:
+  - **RRBS quality-trim line shape** changed from `Sequences were truncated to
+    a varying degree because of deteriorating qualities …: N (P%)` (counts
+    *reads*, v0.6.x RRBS only) to the cutadapt-style `Quality-trimmed: N bp
+    (P%)` (counts *bp*, v2.x both modes). Non-RRBS mode is unchanged in both
+    implementations. v2.x is more consistent across modes, but a regex tuned
+    to one shape won't match the other. (#234)
+  - **Adapter family-name annotation** dropped — v2.x emits the bare
+    sequence (e.g. `'AGATCGGAAGAGC'`) where v0.6.x emitted family names
+    (Illumina TruSeq, Nextera, smallRNA). The family is still tracked
+    internally but not rendered in the report.
+  - **"Bases preceding removed adapters" histogram** omitted from the
+    `=== Adapter N ===` block.
+  - **Per-adapter "Minimum overlap" line** not repeated under each adapter
+    block (the same datum is in the parameter summary at the top).
+  - **Length-distribution `max.err` column** uses the modern Cutadapt formula
+    `floor(L × error_rate)`. v0.6.x's display capped this at 1 in many
+    positions. The `count` column is unchanged byte-for-byte.
+
+
 ### Version 2.1.0-beta.5 (Release on 27 Apr 2026)
 
 #### Bug fixes (since v2.1.0-beta.4)
