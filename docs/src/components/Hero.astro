@@ -7,13 +7,6 @@ const PAGE_TITLE_ID = '_top';
 
 const { data } = Astro.locals.starlightRoute.entry;
 const { title = data.title, tagline, actions = [] } = data.hero || {};
-
-// Split the title into two lines: "Trim" and "Galore." Style choice for the
-// SVG mockup. If a different title is used (unlikely on this single-hero site),
-// it falls back to a single line.
-const looksLikeTrimGalore = title && /^Trim\s+Galore\.?$/i.test(title.trim());
-const line1 = looksLikeTrimGalore ? 'Trim' : title;
-const line2 = looksLikeTrimGalore ? 'Galore.' : '';
 ---
 
 <section class="tg-hero">
@@ -21,19 +14,20 @@ const line2 = looksLikeTrimGalore ? 'Galore.' : '';
   <h1 id={PAGE_TITLE_ID} data-page-title class="sr-title">{title}</h1>
 
   <div class="titleband" aria-hidden="true">
-    <svg viewBox="0 0 1240 460" preserveAspectRatio="xMinYMid meet">
+    {/* Shared font on the SVG cascades into the inner <text> elements; per-line
+        weight/style/letter-spacing differ between "Trim" and "Galore.". The
+        title is defined once in <defs> and rendered twice via <use>: once as
+        the base ink fill, once inside the band mask as cream-on-lime. */}
+    <svg viewBox="0 0 1240 460" preserveAspectRatio="xMinYMid meet"
+         font-family="Bricolage Grotesque, Inter, sans-serif" font-size="240">
       <defs>
         {/*
           Lime band geometry. Width 7000 means the stripe extends ~2900 viewBox
           units past each side of the 1240-wide viewBox so the edges stay off
-          screen at any reasonable monitor width. Rect centre = (620, 271);
-          rotation pivots around that centre so the geometry doesn't drift.
-        */}
-        {/*
-          Rect lives inside the group at its base position; the -14° rotation
-          and any cursor-driven offsets are applied via CSS on the use
-          elements below, so both the visible band and the mask version
-          stay perfectly aligned during animation.
+          screen at any reasonable monitor width. The rect lives inside #band
+          at its base position; the -14° rotation and any cursor-driven offsets
+          are applied via CSS on the two .tg-band <use> elements below, so the
+          visible band and the mask version stay aligned during animation.
         */}
         <g id="band">
           <rect x="-2880" y="225" width="7000" height="92" />
@@ -42,54 +36,17 @@ const line2 = looksLikeTrimGalore ? 'Galore.' : '';
           <rect x="-3000" y="-100" width="7240" height="660" fill="black"/>
           <use href="#band" fill="white" class="tg-band" />
         </mask>
+        <g id="title-text">
+          <text x="0" y="240" font-weight="600" letter-spacing="-12">Trim</text>
+          <text x="100" y="440" font-weight="500" font-style="italic" letter-spacing="-8">Galore.</text>
+        </g>
       </defs>
 
       <use href="#band" class="band tg-band" />
-
-      {line2 ? (
-        <>
-          <text x="0" y="240"
-                font-family="Bricolage Grotesque, Inter, sans-serif"
-                font-size="240" font-weight="600"
-                letter-spacing="-12"
-                class="text-base">{line1}</text>
-          <text x="100" y="440"
-                font-family="Bricolage Grotesque, Inter, sans-serif"
-                font-size="240" font-weight="500"
-                font-style="italic"
-                letter-spacing="-8"
-                class="text-base">{line2}</text>
-
-          <g mask="url(#band-mask)">
-            <text x="0" y="240"
-                  font-family="Bricolage Grotesque, Inter, sans-serif"
-                  font-size="240" font-weight="600"
-                  letter-spacing="-12"
-                  class="text-on-band">{line1}</text>
-            <text x="100" y="440"
-                  font-family="Bricolage Grotesque, Inter, sans-serif"
-                  font-size="240" font-weight="500"
-                  font-style="italic"
-                  letter-spacing="-8"
-                  class="text-on-band">{line2}</text>
-          </g>
-        </>
-      ) : (
-        <>
-          <text x="0" y="320"
-                font-family="Bricolage Grotesque, Inter, sans-serif"
-                font-size="180" font-weight="600"
-                letter-spacing="-8"
-                class="text-base">{line1}</text>
-          <g mask="url(#band-mask)">
-            <text x="0" y="320"
-                  font-family="Bricolage Grotesque, Inter, sans-serif"
-                  font-size="180" font-weight="600"
-                  letter-spacing="-8"
-                  class="text-on-band">{line1}</text>
-          </g>
-        </>
-      )}
+      <use href="#title-text" class="text-base" />
+      <g mask="url(#band-mask)">
+        <use href="#title-text" class="text-on-band" />
+      </g>
     </svg>
   </div>
 
@@ -158,7 +115,7 @@ const line2 = looksLikeTrimGalore ? 'Galore.' : '';
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
     let rafId = 0;
-    let pendingEvent: MouseEvent | null = null;
+    let lastEvent: MouseEvent | null = null;
 
     const setVar = (name: string, value: string) => hero.style.setProperty(name, value);
     const clearVars = () => {
@@ -171,8 +128,8 @@ const line2 = looksLikeTrimGalore ? 'Galore.' : '';
       const rect = hero.getBoundingClientRect();
       const cx = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5 .. 0.5
       const cy = (e.clientY - rect.top) / rect.height - 0.5;   // -0.5 .. 0.5
-      // Rotation delta: cursor far left = +5° (band tilts up on right),
-      // far right = -5° (tilts down on right). Subtle.
+      // Rotation delta: cursor far left = +4° (band tilts up on right),
+      // far right = -4° (tilts down on right). Subtle.
       const rotateDelta = -cx * 8; // -4° .. +4°
       // Vertical drift: roughly ±32px to either side of resting position.
       const yDelta = cy * 64; // -32px .. +32px
@@ -181,12 +138,11 @@ const line2 = looksLikeTrimGalore ? 'Galore.' : '';
     };
 
     const onMove = (e: MouseEvent) => {
-      pendingEvent = e;
+      lastEvent = e;
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
-        if (pendingEvent) applyFromEvent(pendingEvent);
-        pendingEvent = null;
+        if (lastEvent) applyFromEvent(lastEvent);
       });
     };
 
@@ -206,20 +162,14 @@ const line2 = looksLikeTrimGalore ? 'Galore.' : '';
 
     const onDblClick = (e: MouseEvent) => {
       // Don't toggle theme if the dblclick was on a link/button.
-      const target = e.target as HTMLElement;
-      if (target.closest('a, button')) return;
+      if ((e.target as HTMLElement).closest('a, button')) return;
       const root = document.documentElement;
-      const current = root.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       root.setAttribute('data-theme', next);
-      try {
-        localStorage.setItem('starlight-theme', next);
-      } catch {}
+      try { localStorage.setItem('starlight-theme', next); } catch {}
     };
 
-    if (!reducedMotion.matches) {
-      hero.addEventListener('mousemove', onMove);
-    }
+    if (!reducedMotion.matches) hero.addEventListener('mousemove', onMove);
     hero.addEventListener('mousedown', onDown);
     hero.addEventListener('mouseup', onUp);
     hero.addEventListener('mouseleave', onLeave);

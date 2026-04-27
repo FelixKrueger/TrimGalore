@@ -9,6 +9,8 @@ import type { APIRoute } from 'astro';
 // description bottom-left. Rendered with satori (HTML/JSX → SVG) and
 // resvg-js (SVG → PNG) at build time. Output: /TrimGalore/og/<slug>.png.
 
+// Fonts and the entries collection are loaded at module scope so they're read
+// once per build, not once per page route.
 const interRegular = readFileSync('./src/assets/fonts/Inter-Regular.ttf');
 const interBold = readFileSync('./src/assets/fonts/Inter-Bold.ttf');
 const bricolageBold = readFileSync('./src/assets/fonts/Bricolage-Bold.ttf');
@@ -90,7 +92,8 @@ function card(title: string, description: string): El {
       // Spacer pushes title block to the bottom.
       e('div', { display: 'flex', flex: 1 }),
 
-      // Page title (large display)
+      // Page title (large display). Drops to 64px when the title is long
+      // enough that 84px would wrap awkwardly past the 980px max-width.
       e(
         'div',
         {

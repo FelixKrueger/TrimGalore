@@ -120,15 +120,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Allow .tg-hero .titleband and .tg-divider to break out to full viewport
-   width without triggering a horizontal scrollbar, and stop Starlight's
-   content panel from clipping the hero's SVG band overflow. */
+/* Allow .tg-hero .titleband and .tg-divider (home page only) to break out to
+   full viewport width without triggering a horizontal scrollbar, and stop
+   Starlight's content panel from clipping the hero's SVG band overflow. */
 html { overflow-x: clip; }
-.main-frame,
-.main-pane,
-.main-pane > main,
-.content-panel,
-.content-panel > .sl-container,
+:root:has(.tg-hero) .main-frame,
+:root:has(.tg-hero) .main-pane,
+:root:has(.tg-hero) .main-pane > main,
+:root:has(.tg-hero) .content-panel,
+:root:has(.tg-hero) .content-panel > .sl-container,
 .tg-hero {
   overflow: visible !important;
 }
@@ -249,7 +249,7 @@ main h1#_top {
 }
 
 /* Body links inside markdown */
-.sl-markdown-content a:not(.sl-link-button):not([class*="card"]) {
+.sl-markdown-content a:not(.sl-link-button):not(.sl-link-card) {
   color: var(--brand-ink);
   text-decoration: underline;
   text-decoration-color: var(--brand-lime);
@@ -257,7 +257,7 @@ main h1#_top {
   text-underline-offset: 0.18em;
   transition: text-decoration-color 150ms var(--brand-ease);
 }
-.sl-markdown-content a:not(.sl-link-button):not([class*="card"]):hover {
+.sl-markdown-content a:not(.sl-link-button):not(.sl-link-card):hover {
   text-decoration-color: var(--brand-lime-deep);
 }
 
