@@ -15,7 +15,6 @@ exclude = [
     "test_files/",
     "plans/",
     "docs/",
-    "optimus_prime/",
     ".github/",
     ".claude/",
     "CLAUDE.md",
