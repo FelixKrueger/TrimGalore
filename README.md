@@ -1,4 +1,9 @@
-# Trim Galore
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/FelixKrueger/TrimGalore/master/docs/public/logos/hero-dark.svg">
+    <img alt="Trim Galore" src="https://raw.githubusercontent.com/FelixKrueger/TrimGalore/master/docs/public/logos/hero-light.svg" width="800">
+  </picture>
+</h1>
 
 Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS libraries.
 
