@@ -878,3 +878,11 @@ starlight-toc nav a[aria-current="true"] {
   background: var(--brand-ink);
   color: var(--brand-bg) !important;
 }
+/* Multiple format buttons (SVG / PNG) sit together on the right of
+   the asset bar; flex group keeps them as a unit against the
+   space-between layout of the parent. */
+.tg-asset__downloads {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
