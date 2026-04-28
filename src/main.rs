@@ -40,6 +40,10 @@ fn main() -> Result<()> {
     let gzip = !cli.dont_gzip;
     let output_dir = cli.output_dir.as_deref();
 
+    // Auto-create --output_dir if it doesn't exist. See io::ensure_output_dir
+    // for why this has to happen here and not lazily per-file.
+    naming::ensure_output_dir(output_dir)?;
+
     // Specialty modes — bypass normal trimming pipeline entirely
     if let Some(n) = cli.hardtrim5 {
         for input in &cli.input {

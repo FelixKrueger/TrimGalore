@@ -3,6 +3,22 @@
 
 ### Unreleased (queued for v2.1.0-beta.6)
 
+#### Bug fixes (since v2.1.0-beta.5)
+
+- **`-o/--output_dir DIR` no longer hangs when `DIR` doesn't exist.** The
+  parallel paired-end path opened output files via raw `File::create`,
+  which fails immediately on a missing parent — but by then reader and
+  worker threads were already spawned, the `?` exit dropped the receiver
+  channel, and the process deadlocked at near-zero CPU (workers stuck
+  producing into a queue with no consumers). Reported via beta.5 user
+  feedback (24h wall / 4s CPU on a SLURM cluster). Fix: hoist
+  `create_dir_all` into `main()` immediately after CLI parse, covering
+  every downstream code path (parallel, single-threaded, paired,
+  single-end, every specialty mode) in one place. Restores Perl v0.6.x
+  behaviour ("If an output directory which was specified with -o
+  output_directory did not exist, it will be created for you", v0.6.0
+  changelog).
+
 #### Bug fixes (since v2.1.0-beta.5) — surfaced by the nf-core pre-GA validation review
 
 - **RRBS samples: `Total written (filtered)` cutadapt-section line now matches

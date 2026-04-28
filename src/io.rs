@@ -6,7 +6,35 @@
 //! - Unpaired: *_unpaired_1.fq(.gz) / *_unpaired_2.fq(.gz)
 //! - Reports: *_trimming_report.txt
 
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+
+/// Ensure the user-supplied `--output_dir` exists, creating it (and any
+/// missing ancestors) if not. No-op when no `--output_dir` was passed or
+/// the directory already exists.
+///
+/// Why this lives at the top of `main()` rather than at the per-file
+/// writer: the parallel paired-end path opens its outputs via raw
+/// `File::create` (see `parallel.rs`), which fails immediately on a
+/// missing parent. By that point reader and worker threads have already
+/// been spawned, so the early-return drops the receiver channel and the
+/// process deadlocks with reader+workers stuck producing into a queue
+/// nobody is draining. Hoisting the directory-create here covers every
+/// downstream code path (parallel, single-threaded, paired, single-end,
+/// every specialty mode) in one shot.
+///
+/// Matches Perl v0.6.x behaviour: "If an output directory which was
+/// specified with -o output_directory did not exist, it will be created
+/// for you" (v0.6.0 changelog).
+pub fn ensure_output_dir(dir: Option<&Path>) -> Result<()> {
+    let Some(dir) = dir else { return Ok(()) };
+    if dir.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("Failed to create output directory: {}", dir.display()))?;
+    Ok(())
+}
 
 /// Generate the trimmed output filename for single-end mode.
 ///
@@ -225,5 +253,46 @@ mod tests {
             out,
             PathBuf::from("/output/sample.fq.gz_trimming_report.json")
         );
+    }
+
+    #[test]
+    fn test_ensure_output_dir_creates_missing() {
+        // Pick a path that does not exist; ensure_output_dir should create
+        // it (along with any missing intermediate components). Regression
+        // test for the parallel-path deadlock on missing --output_dir
+        // (reported via beta.5 user feedback).
+        let base = std::env::temp_dir().join("tg_ensure_dir_creates_missing");
+        let _ = std::fs::remove_dir_all(&base);
+        let nested = base.join("a").join("b").join("c");
+        assert!(!nested.exists());
+
+        ensure_output_dir(Some(&nested)).unwrap();
+        assert!(nested.exists());
+        assert!(nested.is_dir());
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_ensure_output_dir_idempotent_on_existing() {
+        // Calling on an already-existing directory must succeed silently
+        // without altering the directory's mtime in a surprising way.
+        let dir = std::env::temp_dir().join("tg_ensure_dir_idempotent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        ensure_output_dir(Some(&dir)).unwrap();
+        assert!(dir.exists());
+        // Second call also succeeds.
+        ensure_output_dir(Some(&dir)).unwrap();
+        assert!(dir.exists());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_ensure_output_dir_none_is_noop() {
+        // No --output_dir was passed; helper must be a clean no-op.
+        ensure_output_dir(None).unwrap();
     }
 }
