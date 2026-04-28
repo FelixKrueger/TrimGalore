@@ -6,6 +6,11 @@ export default defineConfig({
   site: 'https://felixkrueger.github.io',
   base: '/TrimGalore',
   trailingSlash: 'ignore',
+  // Disable smartypants. It rewrites `--` to em-dashes (—) even inside
+  // JSX <code> elements in MDX, which silently mangles CLI flag names
+  // like --fastqc → —fastqc on the homepage. Em-dashes we actually want
+  // are typed literally throughout, so nothing is lost.
+  markdown: { smartypants: false },
   integrations: [
     starlight({
       title: 'Trim Galore',
