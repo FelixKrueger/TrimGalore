@@ -85,14 +85,25 @@ pub fn filter_paired_end(
         return PairFilterResult::TooManyN;
     }
 
-    // Length check — can rescue individual reads with --retain_unpaired
+    // Length check — can rescue individual reads with --retain_unpaired.
+    //
+    // Perl-parity note (matches `master:trim_galore:2325-2343`):
+    // when at least one mate fails the discard cutoff, each read is
+    // independently routed to its unpaired file based solely on its own
+    // length vs the per-side cutoff (`--length_1` / `--length_2`). There
+    // is no requirement that the OTHER mate must have failed; both sides
+    // can land in unpaired in the same record. Rust v2.1.0-beta.5 had an
+    // extra `!r{1,2}_short` clause here that gated unpaired-rescue on
+    // the read passing the discard cutoff, which silently dropped reads
+    // when both mates failed `--length` but were individually long
+    // enough for `--length_{1,2}`. See #245 (parity-hunt).
     let r1_short = r1.len() < length_cutoff;
     let r2_short = r2.len() < length_cutoff;
 
     if r1_short || r2_short {
         return PairFilterResult::TooShort {
-            r1_ok: !r1_short && r1.len() >= unpaired.r1,
-            r2_ok: !r2_short && r2.len() >= unpaired.r2,
+            r1_ok: r1.len() >= unpaired.r1,
+            r2_ok: r2.len() >= unpaired.r2,
         };
     }
 
@@ -212,6 +223,37 @@ mod tests {
                 assert!(!r2_ok); // R2 is too short even for unpaired
             }
             _ => panic!("Expected TooShort"),
+        }
+    }
+
+    /// Perl parity (master:trim_galore:2325-2343): when BOTH mates fail
+    /// the discard `--length` cutoff but each is individually long enough
+    /// for the per-side `--length_{1,2}` threshold, both reads route to
+    /// their unpaired files. Regression for #245 — Rust previously had a
+    /// `!r{1,2}_short` clause that gated unpaired rescue on the read
+    /// itself passing the discard cutoff, which silently dropped reads
+    /// when both mates failed `--length` together.
+    #[test]
+    fn test_paired_both_mates_fail_discard_both_routable_to_unpaired() {
+        // 50 bp reads, --length 80 (both fail), --length_1 = --length_2 = 35
+        // (default per-side); each individually >= 35 so both should rescue.
+        let seq = "A".repeat(50);
+        let r1 = make_record(&seq);
+        let r2 = make_record(&seq);
+        let result = filter_paired_end(
+            &r1,
+            &r2,
+            80,
+            None,
+            None,
+            UnpairedLengths { r1: 35, r2: 35 },
+        );
+        match result {
+            PairFilterResult::TooShort { r1_ok, r2_ok } => {
+                assert!(r1_ok, "R1 (50 bp >= 35) should rescue to unpaired");
+                assert!(r2_ok, "R2 (50 bp >= 35) should rescue to unpaired");
+            }
+            other => panic!("Expected TooShort, got {:?}", other),
         }
     }
 }

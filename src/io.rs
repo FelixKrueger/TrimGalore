@@ -9,6 +9,17 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+/// True iff `path` ends with a `.gz` extension. The same heuristic that
+/// `FastqReader` uses to decide whether to wrap the input in a gzip
+/// decoder, so output naming + reader behaviour stay consistent.
+///
+/// Used to mirror input compression in the output filename / writer:
+/// `plain.fastq` → `plain_trimmed.fq` (plain), `plain.fastq.gz` →
+/// `plain_trimmed.fq.gz`. Matches Perl v0.6.x behaviour.
+pub fn is_gzipped(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "gz")
+}
+
 /// Ensure the user-supplied `--output_dir` exists, creating it (and any
 /// missing ancestors) if not. No-op when no `--output_dir` was passed or
 /// the directory already exists.
@@ -294,5 +305,20 @@ mod tests {
     fn test_ensure_output_dir_none_is_noop() {
         // No --output_dir was passed; helper must be a clean no-op.
         ensure_output_dir(None).unwrap();
+    }
+
+    #[test]
+    fn test_is_gzipped() {
+        // Common extensions that indicate gzip.
+        assert!(is_gzipped(Path::new("sample.fastq.gz")));
+        assert!(is_gzipped(Path::new("sample.fq.gz")));
+        assert!(is_gzipped(Path::new("/some/dir/x.gz")));
+        // Plain FASTQ — no gzip.
+        assert!(!is_gzipped(Path::new("sample.fastq")));
+        assert!(!is_gzipped(Path::new("sample.fq")));
+        assert!(!is_gzipped(Path::new("/some/dir/x")));
+        // Heuristic is extension-based (matches FastqReader's gzip detection),
+        // so a misnamed file doesn't trigger.
+        assert!(!is_gzipped(Path::new("sample.gz.fastq")));
     }
 }

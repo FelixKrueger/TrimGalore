@@ -14,6 +14,42 @@
   Added lowercase aliases on all four flags. Reported and diagnosed by
   @an-altosian during a Phase-1B Perl-parity hunt. (#242)
 
+- **Output gzip compression now mirrors input compression by default.**
+  Plain `.fastq` input → plain `.fq` output; `.fastq.gz` → `.fq.gz`.
+  Restores Perl v0.6.x behaviour. Rust v2.1.0-beta.5 always emitted
+  gzipped output regardless of input, breaking pipelines that globbed
+  `*.fq` (no `.gz`) for outputs from plain-text inputs. `--dont_gzip`
+  still works as the explicit "always plain" override. The first input
+  determines the mode for the whole run; mixing plain and gzipped
+  inputs in one invocation isn't a supported configuration. Reported
+  by @an-altosian via #245 (item A).
+
+- **`--retain_unpaired` now routes both mates independently to their
+  unpaired files when both mates fail the discard `--length` cutoff,
+  if each is individually long enough for the per-side `--length_{1,2}`
+  threshold.** Rust v2.1.0-beta.5 had an extra `!r{1,2}_short` clause in
+  `filters::filter_paired_end` that gated unpaired rescue on the read
+  itself passing the discard cutoff, which silently dropped reads when
+  both mates failed `--length` together but were individually long
+  enough. Matches Perl `master:trim_galore:2325-2343`. Slight caveat:
+  Perl's behaviour diverges from its own user-guide wording ("rescue
+  the surviving mate"); we match the implementation, not the docs, to
+  preserve byte-identity for the documented byte-identity flag paths.
+  Regression test added. Reported by @an-altosian via #245 (item C).
+
+#### Behavioural notes (v2.x intentional widenings, since v2.1.0-beta.5)
+
+- **`--clock` and `--implicon` now imply `--paired`** — passing either
+  flag without `--paired` is no longer rejected. Both modes are
+  inherently paired-end specialty modes; requiring users to pass
+  `--paired` redundantly was noise. Pipelines using the explicit Perl
+  form (`--clock --paired` / `--implicon --paired`) continue to work
+  unchanged. Consistent with the multi-pair widening pattern documented
+  for these specialty modes in beta.4. Surfaced by @an-altosian via
+  #245 (item D).
+
+#### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported, continued)
+
 - **`--max_n` fraction-mode now logs the Perl-style notice on entry**
   ("`--max_n will be interpreted as a fraction of the read length
   (0.5)`"). Investigating @an-altosian's #243 confirmed the dispatch

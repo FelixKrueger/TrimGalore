@@ -136,7 +136,9 @@ pub struct Cli {
     #[clap(long = "basename")]
     pub basename: Option<String>,
 
-    /// Do not gzip-compress output files.
+    /// Do not gzip-compress output files. Forces plain output regardless of
+    /// input compression. By default, output compression mirrors the input
+    /// (plain → plain, .gz → .gz; matches Perl v0.6.x behaviour).
     #[clap(long = "dont_gzip")]
     pub dont_gzip: bool,
 
