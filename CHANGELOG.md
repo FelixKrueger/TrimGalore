@@ -14,6 +14,19 @@
   Added lowercase aliases on all four flags. Reported and diagnosed by
   @an-altosian during a Phase-1B Perl-parity hunt. (#242)
 
+- **`--max_n` fraction-mode now logs the Perl-style notice on entry**
+  ("`--max_n will be interpreted as a fraction of the read length
+  (0.5)`"). Investigating @an-altosian's #243 confirmed the dispatch
+  and filter chain behave correctly: values in `(0.0, 1.0)` already
+  build `MaxNFilter::Fraction` and `n_count/length > threshold`
+  filtering matches Perl v0.6.8+ behaviour byte-for-byte. The
+  reproducer-fixture's max-N fraction (3/153 ≈ 0.02) just doesn't
+  exceed the 0.5 threshold, so neither implementation filters
+  anything — *not* a bug. Adding the same warning Perl prints
+  (`master:trim_galore:3328`) makes the selected mode visible at
+  runtime so users don't have to derive it from output statistics.
+  (#243)
+
 #### Bug fixes (since v2.1.0-beta.5)
 
 - **`-o/--output_dir DIR` no longer hangs when `DIR` doesn't exist.** The

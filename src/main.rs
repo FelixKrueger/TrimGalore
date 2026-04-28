@@ -250,11 +250,18 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
     });
     eprintln!();
 
-    // Build max_n filter
+    // Build max_n filter. Values in (0.0, 1.0) are interpreted as a fraction
+    // of the read length, matching Perl v0.6.8+ behaviour. The fraction case
+    // is easy to enter accidentally (e.g. typing `--max_n 0.5` when meaning
+    // "half a read"), so emit the same warning Perl does so users can see
+    // which mode their invocation actually selected. See issue #243.
     let max_n = cli.max_n.map(|v| {
         if v >= 1.0 {
             MaxNFilter::Count(v as usize)
         } else {
+            eprintln!(
+                "--max_n will be interpreted as a fraction of the read length ({v})"
+            );
             MaxNFilter::Fraction(v)
         }
     });
