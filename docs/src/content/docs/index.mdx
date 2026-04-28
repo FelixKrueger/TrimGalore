@@ -1,8 +1,8 @@
 ---
 title: Trim Galore
-description: Adapter and quality trimming for NGS data. A single Rust binary, drop-in compatible with v0.6.x scripts and pipelines.
+description: Adapter and quality trimming for NGS data. Drop-in compatible with v0.6.x as single Rust binary — zero dependencies
 hero:
-  tagline: Adapter and quality trimming for NGS data. A single Rust binary, drop-in compatible with v0.6.x scripts and pipelines.
+  tagline: Adapter and quality trimming for NGS data. Drop-in compatible with v0.6.x as single Rust binary — zero dependencies
   actions:
     - text: Get started
       link: /TrimGalore/quickstart/
@@ -17,39 +17,37 @@ import { LinkCard, CardGrid } from '@astrojs/starlight/components';
 
 <div class="tg-proof not-content">
   <div class="tg-proof-item">
-    <div class="num">1.9<em>×</em></div>
-    <div class="label">faster vs v0.6 · 8 cores</div>
+    <div class="num">−60<em>%</em></div>
+    <div class="label">CPU vs v0.6 — saves time, $, CO₂</div>
   </div>
   <div class="tg-proof-item">
-    <div class="num">5<em>MB</em></div>
-    <div class="label">memory single-threaded</div>
+    <div class="num">N<em>×</em></div>
+    <div class="label">speed-up at --cores N · natively parallel</div>
   </div>
   <div class="tg-proof-item">
     <div class="num">0<em>deps</em></div>
-    <div class="label">no Python, Cutadapt, pigz</div>
+    <div class="label">no Python, Java, Cutadapt, igzip, pigz</div>
   </div>
   <div class="tg-proof-item">
     <div class="num">10<em>+</em></div>
-    <div class="label">years on the shelf</div>
+    <div class="label">years in production</div>
   </div>
 </div>
 
 ## What's new in <em>v2</em>
 
-
-
-Same CLI, same output filenames, same report format. A few capabilities the Perl version did not have.
+Same CLI, same output filenames, same report format — with a few capabilities the Perl version did not have.
 
 <div class="tg-news not-content">
   <div class="tg-news-item">
     <div class="num">01</div>
     <h3>Single binary</h3>
-    <p>No Python, no Cutadapt, no pigz. <code>cargo install trim-galore</code>, install from bioconda, or pull a Docker image. 5 MB resident memory single-threaded.</p>
+    <p>No Python, Perl, Cutadapt, Java, igzip, or pigz dependencies. Install via <code>cargo install trim-galore</code>, from bioconda, or pull a Docker image.</p>
   </div>
   <div class="tg-news-item">
     <div class="num">02</div>
     <h3>Single-pass paired-end</h3>
-    <p>Both reads are processed together in one pass. No temp files, no three-pass Cutadapt orchestration.</p>
+    <p>Both reads are processed together in one pass. No temp files, no separate adapter / quality / length validation passes.</p>
   </div>
   <div class="tg-news-item">
     <div class="num">03</div>
@@ -58,8 +56,13 @@ Same CLI, same output filenames, same report format. A few capabilities the Perl
   </div>
   <div class="tg-news-item">
     <div class="num">04</div>
-    <h3>Multi-adapter input</h3>
-    <p>Repeatable <code>-a</code> / <code>-a2</code>, FASTA file input (<code>file:adapters.fa</code>), and <code>A&#123;N&#125;</code> brace expansion. Adapter auto-detection runs per pair.</p>
+    <h3>Smarter adapter detection</h3>
+    <p>Adapter auto-detection now runs per file (or file-pair) instead of once on the first input. BGI/DNBSEQ joins the probe set alongside Illumina, Nextera, and smallRNA.</p>
+  </div>
+  <div class="tg-news-item">
+    <div class="num">05</div>
+    <h3>Built-in FastQC</h3>
+    <p>FastQC reports run in-process via the bundled <code>fastqc-rust</code> library. No Java, no external <code>fastqc</code> binary. Pass <code>--fastqc</code> and it just works.</p>
   </div>
 </div>
 
@@ -73,8 +76,8 @@ Same CLI, same output filenames, same report format. A few capabilities the Perl
 Defaults work for most Illumina libraries. Auto-detected adapter, Phred quality trimming, paired-end validation.
 
 ```bash
-# Paired-end with parallel processing
-trim_galore --cores 8 --paired sample_R1.fastq.gz sample_R2.fastq.gz
+trim_galore --cores 8 sample.fastq.gz                                  # single-end
+trim_galore --cores 8 --paired sample_R1.fastq.gz sample_R2.fastq.gz   # paired-end
 ```
 
 ## Where next

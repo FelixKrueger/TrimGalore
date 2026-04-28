@@ -43,7 +43,7 @@ Specialty modes write to mode-specific filenames and exit before the main pipeli
 | `--hardtrim3 N` | `*.{N}bp_3prime.fq(.gz)` |
 | `--clock` | `*.clock_UMI.R1.fq(.gz)` / `*.clock_UMI.R2.fq(.gz)` |
 | `--implicon[=N]` | `*_{N}bp_UMI_R1.fastq(.gz)` / `*_{N}bp_UMI_R2.fastq(.gz)` |
-| `--demux` | One file per barcode (and per side for paired-end). |
+| `--demux` | One file per barcode (single-end input only). |
 
 ## Compression
 

@@ -14,7 +14,7 @@ Output filenames follow the pattern `{stem}_{N}bp_UMI_R1.fastq(.gz)` / `{stem}_{
 trim_galore --implicon --paired sample_R1.fq.gz sample_R2.fq.gz
 
 # Step 2: adapter / quality trim
-trim_galore --paired sample_8bp_UMI_R1.fq.gz sample_8bp_UMI_R2.fq.gz
+trim_galore --paired sample_8bp_UMI_R1.fastq.gz sample_8bp_UMI_R2.fastq.gz
 ```
 
 The downstream alignment and deduplication tooling parses the UMI back out of the read ID.
