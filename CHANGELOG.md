@@ -3,6 +3,17 @@
 
 ### Unreleased (queued for v2.1.0-beta.6)
 
+#### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported)
+
+- **Lowercase clip-flag spellings (`--clip_r1`, `--clip_r2`,
+  `--three_prime_clip_r1`, `--three_prime_clip_r2`) are now accepted.**
+  Perl `trim_galore` accepted both lowercase and uppercase spellings;
+  the Rust port matched the uppercase canonical only and rejected the
+  lowercase forms with a clap parse error (exit 2). Every Perl-era
+  pipeline using the documented lowercase spelling broke under v2.x.
+  Added lowercase aliases on all four flags. Reported and diagnosed by
+  @an-altosian during a Phase-1B Perl-parity hunt. (#242)
+
 #### Bug fixes (since v2.1.0-beta.5)
 
 - **`-o/--output_dir DIR` no longer hangs when `DIR` doesn't exist.** The
