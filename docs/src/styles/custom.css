@@ -267,6 +267,11 @@ main h1#_top {
   line-height: 1.65;
   color: var(--brand-ink);
   max-width: 75ch;
+  /* Avoid one-word "widows" on the final line. `pretty` is a recent CSS
+     value (Chrome 117+, Safari 17.5+, Firefox 132+) that adjusts wrap
+     points so the last line has at least two words; older browsers
+     ignore it and fall back to the default greedy wrap. */
+  text-wrap: pretty;
 }
 
 /* -----------------------------------------------------------

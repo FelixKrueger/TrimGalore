@@ -3,7 +3,7 @@ title: Directional RRBS libraries
 description: How directional bisulfite sequencing works, and the two read-length cases that need handling.
 ---
 
-Directional sequencing, the most wide-spread way of (RR)BS, only ever sequences reads originating from the original top (OT) or original bottom (OB) strands. For simplicity, I have refrained from drawing out all four bisulfite DNA strands for the illustration below.
+Directional sequencing, the most wide-spread way of (RR)BS, only ever sequences reads originating from the original top (OT) or original bottom (OB) strands. For simplicity, the illustration below does not show all four bisulfite DNA strands.
 
 ## The sequential steps of RRBS
 
@@ -11,9 +11,9 @@ Directional sequencing, the most wide-spread way of (RR)BS, only ever sequences 
 
 Cytosines in blue retain the original genomic methylation state, whereas cytosines in red are introduced experimentally during the fragment end-repair reaction. This can be accomplished with either unmethylated or methylated cytosines, the trend seems to be that unmethylated cytosines are being used primarily now.
 
-After the adapters are attached, the sequences are treated with sodium bisuflite, which converts unmethylated cytosines into thymines. Thus, the first three bases of (almost) all RRBS reads are either CGG or TGG, depending on their genomic methylation state. This applies to reads from both the OT and OB strand, and as nearly all reads in a directional RRBS experiment start with one of these two options, every read provides information on at least one CpG right in the start.
+After the adapters are attached, the sequences are treated with sodium bisulfite, which converts unmethylated cytosines into thymines. Thus, the first three bases of (almost) all RRBS reads are either CGG or TGG, depending on their genomic methylation state. This applies to reads from both the OT and OB strand, and as nearly all reads in a directional RRBS experiment start with one of these two options, every read provides information on at least one CpG right in the start.
 
-For directional libraries one can then discrimate the following two cases:
+For directional libraries one can then discriminate the following two cases:
 
 ### A) The read length is shorter than the MspI fragment
 

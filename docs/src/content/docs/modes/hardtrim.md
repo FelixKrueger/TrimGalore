@@ -5,18 +5,18 @@ description: Fixed-length hard-clip from either end (`--hardtrim5` / `--hardtrim
 
 `--hardtrim5` and `--hardtrim3` are run-and-exit modes that hard-clip every read to a fixed length, then exit. They run before quality and adapter trimming and don't touch report output.
 
-## Hard-trimming to leave bases at the 5'-end
+## Hard-trimming to leave bases at the 5' end
 
-The option `--hardtrim5 INT` allows you to hard-clip sequences from their 3' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in `.{INT}bp_5prime.fq(.gz)`. This is useful when you want to shorten reads to a certain read length. Here is an example:
+`--hardtrim5 INT` clips reads down to their first `INT` bases. Output goes to `{stem}.{INT}bp_5prime.fq(.gz)`. Useful for shortening reads to a uniform length:
 
 ```
 before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
 --hardtrim5 20: CCTAAGGAAACAAGTACACT
 ```
 
-## Hard-trimming to leave bases at the 3'-end
+## Hard-trimming to leave bases at the 3' end
 
-The option `--hardtrim3 INT` allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in `.{INT}bp_3prime.fq(.gz)`. We found this quite useful in a number of scenarios where we wanted to remove biased residues from the start of sequences. Here is an example:
+`--hardtrim3 INT` keeps only the **last** `INT` bases. Output goes to `{stem}.{INT}bp_3prime.fq(.gz)`. Useful for removing a fixed bias at the 5' end (e.g. UMIs or inline barcodes):
 
 ```
 before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT

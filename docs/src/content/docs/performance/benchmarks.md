@@ -91,7 +91,7 @@ CPU time is what cloud providers bill for and what drives energy consumption. Th
 | Single-threaded | 3,001s | 599s | **5.0x** |
 | 8 cores (nf-core default) | 2,040s | 784s | **2.6x** |
 
-On AWS at ~$0.05/vCPU-hour, trimming 56M PE reads costs roughly **$0.34 with TG** vs **$0.13 with Oxidized** (at 8 cores). Across thousands of samples in a large cohort, this adds up to meaningful savings in both budget and carbon footprint.
+On AWS at ~$0.05/vCPU-hour, trimming 56M PE reads costs roughly **$0.028 with TG** vs **$0.011 with Oxidized** (at 8 cores) — a 2.6× saving per sample. Across a 1000-sample cohort that scales to **~$28 vs ~$11**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
 
 ## Methodology
 

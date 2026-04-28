@@ -3,7 +3,7 @@ title: QC measures for RRBS
 description: What to check on RRBS data, and how Trim Galore handles each issue.
 ---
 
-As for almost all high throughput sequencing applications we would recommend to perform some quality control on the data, as it can often straight away point you towards the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). As outlined in [A brief guide to RRBS](/TrimGalore/rrbs/guide/), [Directional libraries](/TrimGalore/rrbs/directional/), and [Non-directional & paired-end](/TrimGalore/rrbs/non-directional/), we believe that thorough QC and taking appropriate steps to remove problems is absolutely critical for proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In summary, the examples discussed here were:
+As for almost all high throughput sequencing applications, some quality control on the data is recommended — it often points directly to the next steps that need to be taken (e.g. with [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)). As outlined in [A brief guide to RRBS](/TrimGalore/rrbs/guide/), [Directional libraries](/TrimGalore/rrbs/directional/), and [Non-directional & paired-end](/TrimGalore/rrbs/non-directional/), thorough QC and taking appropriate steps to remove problems is absolutely critical for proper analysis of RRBS libraries since they are susceptible to a variety of errors or biases that one could probably get away with in other sequencing applications. In summary, the examples discussed here were:
 
 - poor qualities. Affect mapping, may lead to incorrect methylation calls and/or mis-mapping.
 - adapter contamination. May lead to low mapping efficiencies, or, if mapped, may result in incorrect methylation calls and/or mis-mapping.
@@ -37,7 +37,7 @@ The percentage of non-bisulfite converted cytosines at the fill-in position can 
 
 (with X and Y being the number of times these residues were observed).
 
-To make this calculation more reliable one can vary the required overlaps with the adapter sequence, e.g. requiring 3, 5, 7bp etc., before the non-conversion rate of the filled-in position is determined.
+To make this calculation more reliable one can vary the required overlaps with the adapter sequence, e.g. requiring 3, 5, 7 bp etc., before the non-conversion rate of the filled-in position is determined.
 
 ## Recommended downstream tooling
 

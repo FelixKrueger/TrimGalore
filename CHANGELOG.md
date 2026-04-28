@@ -276,7 +276,7 @@
 
 ### Version 0.6.9 (Release on 29 Jan 2023)
 
-- Fixed a decalaration bug for `maxn_fraction` which had crept in during merging of different branches (see [here](https://github.com/FelixKrueger/TrimGalore/commit/cf9a9d97b723d3829dd902f1229d9c9b7cff8ba0)).
+- Fixed a declaration bug for `maxn_fraction` which had crept in during merging of different branches (see [here](https://github.com/FelixKrueger/TrimGalore/commit/cf9a9d97b723d3829dd902f1229d9c9b7cff8ba0)).
 
 ### Version 0.6.8 (Release on 28 Jan 2023)
 
@@ -350,11 +350,11 @@ GCCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAATAAAAACTTT
 
 - Fixed the way single-core trimming was dealt with in paired-end mode (which was introduced by the above 'fix')
 
-- the option `--basename preferred_name` should now correclty work when specified in conjunction with `--output_dir`
+- the option `--basename preferred_name` should now correctly work when specified in conjunction with `--output_dir`
 
 ### Version 0.6.0 (Release on 1 Mar 2019)
 
-* Added option `--hardtrim3 INT,` which allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_3prime.fq(.gz). We found this quite useful in a number of scenarios where we wanted to removed biased residues from the start of sequences. Here is an example :
+* Added option `--hardtrim3 INT,` which allows you to hard-clip sequences from their 5' end. This option processes one or more files (plain FastQ or gzip compressed files) and produces hard-trimmed FastQ files ending in .{INT}bp_3prime.fq(.gz). We found this quite useful in a number of scenarios where we wanted to remove biased residues from the start of sequences. Here is an example :
 
 ```
 before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATGGAAAAT
@@ -457,7 +457,7 @@ Following this, reads should be aligned with Bismark and deduplicated with UmiBa
 * Replaced `zcat` with `gunzip -c` so that older versions of Mac OSX do not append a .Z to the end of the file and subsequently fail because the file is not present. Dah...
 *	Added option `--max_n COUNT` to remove all reads (or read pairs) exceeding this limit of tolerated Ns. In a paired-end setting it is sufficient if one read exceeds this limit. Reads (or read pairs) are removed altogether and are not further trimmed or written to the unpaired output
 * Enabled option `--trim-n` to remove Ns from both end of the reads. Does currently not work for RRBS-mode
-* Added new option `--max_length` which reads that are longer than bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences
+* Added new option `--max_length INT` which removes reads that are longer than INT bp after trimming. This is only advised for smallRNA sequencing to remove non-small RNA sequences
 
 ### 12-11-15: Version 0.4.1 released: Essential update for smallRNA libraries!
 *	Changed the Illumina small RNA sequence used for auto-detection to `TGGAATTCTCGG` (from formerly `ATGGAATTCTCG`). The reason for this is that smallRNA libraries have ssRNA adapters ligated to their -OH end, a signature of dicer cleavage, so there is no A-tailing involved. Thanks to Q. Gouil for bringing this to our attention

@@ -51,17 +51,17 @@ Single-base expansion (`A{10}` to `AAAAAAAAAA`) is also supported for both `-a` 
 
 ## Manual adapter sequence specification
 
-The auto-detection behaviour can be overruled by specifying an adapter sequence manually or by using `--illumina`, `--nextera` or `--small_rna`, or `--stranded_illumina` (see `--help` for more details). **Please note**: the first 13 bp of the standard Illumina paired-end adapters (`AGATCGGAAGAGC`) recognise and removes adapter from most standard libraries, including the Illumina TruSeq and Sanger iTag adapters. This sequence is present on both sides of paired-end sequences, and is present in all adapters before the unique Index sequence occurs. So for any 'normal' kind of sequencing you do not need to specify anything but `--illumina`, or better yet just use the auto-detection.
+You can override auto-detection by passing a sequence directly via `-a`, or by using one of the named presets: `--illumina`, `--nextera`, `--small_rna`, `--stranded_illumina`, or `--bgiseq` (run `--help` for one-line descriptions). The first 13 bp of the standard Illumina adapter (`AGATCGGAAGAGC`) cover most TruSeq, Sanger iTag, and similar kits, and sit on both sides of paired-end inserts before the index sequence — for normal sequencing, `--illumina` or auto-detection is enough.
 
-To control the stringency of the adapter removal process one gets to specify the minimum number of required overlap with the adapter sequence; else it will default to 1. This default setting is extremely stringent, i.e. an overlap with the adapter sequence of even a single bp is spotted and removed. This may appear unnecessarily harsh; however, as a reminder adapter contamination may in a Bisulfite-Seq setting lead to mis-alignments and hence incorrect methylation calls, or result in the removal of the sequence as a whole because of too many mismatches in the alignment process.
+## Stringency: why the 1 bp default is correct
 
-Tolerating adapter contamination is most likely detrimental to the results, but we realize that this process may in some cases also remove some genuine genomic sequence. It is unlikely that the removed bits of sequence would have been involved in methylation calling anyway (since only the 4th and 5th adapter base would possibly be involved in methylation calls, for directional libraries). However, it is quite likely that true adapter contamination, irrespective of its length, would be detrimental for the alignment or methylation call process, or both.
+`--stringency` sets the minimum adapter overlap required to trim. The default is **1 bp**, which looks extreme but is deliberate: in bisulfite-seq, even a few residual adapter bases can cause mis-alignments and incorrect methylation calls, or push the read past the aligner's mismatch budget so the entire read drops out. The cost is occasionally trimming a true genomic base, but in directional bisulfite libraries only the 4th–5th adapter bases overlap with the methylation-callable region, so the trade tilts firmly toward stringent trimming.
 
 | Before adapter trimming | After adapter trimming |
 |:---:|:---:|
 | ![Adapter contamination](../../../assets/screenshots/adapters.png) | ![After trimming](../../../assets/screenshots/adapters_fixed.png) |
 
-This example (same dataset as above) shows the dramatic effect of adapter contamination on the base composition of the analysed library, e.g. the C content rises from ~1% at the start of reads to around 22% (!) towards the end of reads. Adapter trimming gets rid of most signs of adapter contamination efficiently. Note that the sharp decrease of A at the last position is a result of removing the adapter sequence very stringently, i.e. even a single trailing A at the end is removed.
+C content rises from ~1% at the start of reads to ~22% by the 3' end without trimming. Trim Galore removes the contamination cleanly. The sharp drop in A at the very last position is the visible footprint of `--stringency 1` doing its job — single trailing A's are removed by design.
 
 ## Trimming error rate
 
@@ -78,7 +78,7 @@ The default error tolerance for adapter alignment is `-e 0.1` (10%). Lowering th
 | `-a SEQ` / `-a2 SEQ` | Adapter for read 1 / read 2 (repeatable in v2). |
 | `--illumina` / `--nextera` / `--small_rna` / `--stranded_illumina` | Force a specific known adapter. |
 | `--bgiseq` | Use the BGI/DNBSEQ adapter (also probed by auto-detect). |
-| `-s INT` / `--stringency INT` | Minimum adapter overlap (default 1 bp). |
+| `--stringency INT` | Minimum adapter overlap (default 1 bp). |
 | `-e FLOAT` | Maximum error rate for adapter alignment (default 0.1). |
 | `-n INT` | Trim up to N adapter occurrences per read (multi-adapter mode). |
 | `--consider_already_trimmed INT` | Skip adapter trimming if no adapter exceeds the count threshold. |

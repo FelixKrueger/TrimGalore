@@ -3,7 +3,7 @@ title: Installation
 description: Install Trim Galore via cargo, bioconda, Docker, or prebuilt binaries.
 ---
 
-Trim Galore v2 ships as a single static binary. No Python, no Cutadapt, no `pigz`, no Java, no external FastQC. Pick whichever channel fits the rest of your stack.
+Trim Galore v2 ships as a single static binary. No Python, no Perl, no Cutadapt, no Java, no `igzip`, no `pigz`, no external FastQC. Pick whichever channel fits the rest of your stack.
 
 :::caution[Beta testing v2.1.0-beta.5]
 The current stable release on crates.io is **v2.0.0**. v2.1.0 is in beta. `cargo install trim-galore` without `--version` installs v2.0.0. To install the beta:
@@ -55,11 +55,18 @@ Multi-arch images (`amd64` and `arm64`) are published to the GitHub Container Re
 
 ```bash
 docker run --rm -v "$PWD":/data -w /data \
-    ghcr.io/felixkrueger/trimgalore \
+    ghcr.io/felixkrueger/trimgalore:beta \
     trim_galore input.fastq.gz
 ```
 
-FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library, so `--fastqc` works without Java or an external `fastqc` install. The `dev` tag tracks the development branch. Versioned tags (e.g. `v2.1.0`) are published on release.
+FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library, so `--fastqc` works without Java or an external `fastqc` install.
+
+| Tag | Updates |
+| --- | --- |
+| `:beta` | latest prerelease (currently v2.1.0-beta.5) |
+| `:2.1.0-beta.5` | pinned to a specific prerelease |
+| `:dev` | every push to the `optimus_prime` development branch |
+| `:latest` | latest stable release (publishes from v2.1.0 GA onward) |
 
 ## Prebuilt binaries
 
@@ -67,7 +74,7 @@ Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon) are on t
 
 ## Runtime dependencies
 
-None. Trim Galore v2 is a single static binary. Adapter trimming, gzip, and FastQC reporting (`--fastqc`) all run in-process. Python, Cutadapt, `pigz`, Java, and the external FastQC tarball are no longer required.
+None. Trim Galore v2 is a single static binary. Adapter trimming, gzip, and FastQC reporting (`--fastqc`) all run in-process. Python, Perl, Cutadapt, Java, `igzip`, `pigz`, and the external FastQC tarball are no longer required.
 
 ## Verifying the install
 
@@ -75,11 +82,11 @@ None. Trim Galore v2 is a single static binary. Adapter trimming, gzip, and Fast
 trim_galore --version
 ```
 
-Should print something like:
+Should print:
 
 ```
-                Trim Galore version: 2.1.0-beta.5 (Oxidized Edition)
-                Cutadapt version:    (built-in adapter trimmer)
-                Python version:      (not required)
-                FastQC version:      0.12.1-compatible (bundled fastqc-rust)
+trim_galore 2.1.0-beta.5 (Oxidized Edition)
+<git-hash> — <os>/<arch> — built <ISO-8601-UTC>
 ```
+
+The first line is also what `-V` prints. The second line is the build provenance (commit, target triple, deterministic build timestamp).

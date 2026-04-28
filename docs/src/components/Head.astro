@@ -9,7 +9,7 @@ const ogUrl = new URL(ogPath, Astro.site).href;
 const title = entry.data.title || 'Trim Galore';
 const description =
   entry.data.description ||
-  'Adapter and quality trimming for NGS data. A single Rust binary, drop-in compatible with v0.6.x scripts and pipelines.';
+  'Adapter and quality trimming for NGS data. Drop-in compatible with v0.6.x as single Rust binary — zero dependencies';
 ---
 
 {head.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}

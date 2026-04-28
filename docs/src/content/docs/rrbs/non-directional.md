@@ -3,7 +3,7 @@ title: Non-directional & paired-end RRBS
 description: All four bisulfite strands, and the four read-length cases that follow.
 ---
 
-Non-directional bisulfite sequencing is less common, but has been performed in a number of studies (Cokus et al. (2008), Popp et al. (2010), Smallwood et al. (2011), Hansen et al. (2011), Kobayashi al. (2012)). In this type of library, sequence reads may originate from all four possible bisulfite DNA strands (original top (OT), complementary to OT (CTOT), original bottom (OB) or complementary to OB (CTOB)) with roughly the same likelihood.
+Non-directional bisulfite sequencing is less common, but has been performed in a number of studies (Cokus et al. (2008), Popp et al. (2010), Smallwood et al. (2011), Hansen et al. (2011), Kobayashi et al. (2012)). In this type of library, sequence reads may originate from all four possible bisulfite DNA strands (original top (OT), complementary to OT (CTOT), original bottom (OB) or complementary to OB (CTOB)) with roughly the same likelihood.
 
 Paired-end reads do by definition contain one read from one of the original strands as well as one complementary strand. Please note that the CTOT or CTOB strands in a read pair are reverse-complements of the OT or OB strands, respectively, and thus they carry methylation information for the exact same strand as their partner read but not for the other original DNA strand. Similar to directional single-end libraries, the first read of directional paired-end libraries always comes from either the OT or OB strand. The first read of non-directional paired-end libraries may originate from any of the four possible bisulfite strands.
 
@@ -15,7 +15,7 @@ Again, cytosines in blue retain the original genomic methylation state, whereas 
 
 After bisulfite conversion, the first three bases of non-directional RRBS reads that originated from the OT or OB strands will also be either CGG or TGG, depending on their genomic methylation state. In addition, however, non-directional libraries may contain reads which originated from the CTOT or CTOB strands. These reads will have CAA or CGA at the start, depending on whether unmethylated or methylated cytosines were used for the end-repair reaction, respectively. (Theoretically, the sequence could also be CAG or CGG, but this would assume that a C in CHH context was methylated on the other strand, and this is arguably very rarely the case for CpG-rich sequences. For simplicity it is therefore left out here). In either case, the second base would incur a methylation call of a base that does no longer reflect the genomic methylation state, which is illustrated below.
 
-For non-directional libraries, one can discrimate the following four cases:
+For non-directional libraries, one can discriminate the following four cases:
 
 ### A) The read length is shorter than the MspI fragment, OT or OB alignments
 
@@ -27,7 +27,7 @@ In this case, the entire read can be used for alignments and methylation calls. 
 
 ![Non-directional case B: short read from CTOT or CTOB](../../../assets/rrbs/07-nondirectional-case-b.png)
 
-In this case, the read will start with CAA or CGA (the filled-in and the other cytosine in CHG context on the opposing strand are expected to be fully bilsufite converted), whereby the position marked in RED infers the methylation state from a cytosine that was experimentally introduced. The positions in BLUE carries genomic methylation information. As a consequence, methylation information of the second base would bias the results depending on the methylation state of the cytosine used for end-repair and needs to be excluded from methylation analysis.
+In this case, the read will start with CAA or CGA (the filled-in and the other cytosine in CHG context on the opposing strand are expected to be fully bisulfite converted), whereby the position marked in RED infers the methylation state from a cytosine that was experimentally introduced. The positions in BLUE carries genomic methylation information. As a consequence, methylation information of the second base would bias the results depending on the methylation state of the cytosine used for end-repair and needs to be excluded from methylation analysis.
 
 ### C) The read length is longer than the fragment length, OT or OB alignments
 

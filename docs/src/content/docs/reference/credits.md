@@ -15,7 +15,7 @@ Current development is at [github.com/FelixKrueger/TrimGalore](https://github.co
 
 If you use Trim Galore in published work, cite the project repository:
 
-> Krueger, F. *Trim Galore!* A wrapper around Cutadapt and FastQC to consistently apply adapter and quality trimming to FASTQ files. <https://github.com/FelixKrueger/TrimGalore>
+> Krueger, F. *Trim Galore!* Consistent adapter and quality trimming for FASTQ files. <https://github.com/FelixKrueger/TrimGalore>
 
 Trim Galore has a Zenodo DOI for archival citation. Pick the version-specific DOI from the [release page](https://github.com/FelixKrueger/TrimGalore/releases) for the version you used.
 

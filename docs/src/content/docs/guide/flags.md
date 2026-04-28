@@ -18,9 +18,7 @@ A few combinations are worth knowing about:
 
 ## RRBS-specific guidance
 
-**Tecan Ovation RRBS Methyl-Seq kit (with or without TrueMethyl oxBS 1-16):** the Tecan kit attaches a varying number of nucleotides (0-3) after each MspI site, so standard `--rrbs` 2 bp 3'-trimming over-trims. Run Trim Galore *without* `--rrbs` and handle the fill-in via Tecan's subsequent diversity-trimming step (see their manual).
-
-**MseI-digested RRBS libraries:** if your DNA was digested with MseI (recognition motif `TTAA`) instead of MspI, you do **not** need `--rrbs` or `--non_directional`. Virtually all reads should start with `TAA`, and the end-repair of TAA-restricted sites does not involve cytosines, so no special treatment is required. Just run Trim Galore in the default (non-RRBS) mode.
+For library kits where `--rrbs` should **not** be used (Tecan Ovation RRBS Methyl-Seq, MseI-digested libraries), see [When NOT to use `--rrbs`](/TrimGalore/modes/rrbs/#when-not-to-use---rrbs).
 
 ## Adapter specification recap
 
