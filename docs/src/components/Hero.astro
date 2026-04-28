@@ -81,9 +81,17 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
   }
 
   .tg-hero {
-    /* Cursor stays as the default; double-click hint is a tooltip on the
-       hero so the easter egg is discoverable but not in the way. */
     cursor: default;
+  }
+  /* Hover: subtle thickening to hint at interactivity. No cursor-tracked
+     motion at rest — that's reserved for the press gesture. */
+  .tg-hero:hover {
+    --tg-band-scale-y: 1.25;
+  }
+  /* Press: narrow ("cut") scale; cursor-tracked translate/rotate are set
+     from JS via --tg-band-y / --tg-band-rotate-delta. */
+  .tg-hero[data-pressing="true"] {
+    --tg-band-scale-y: 0.18;
   }
   .tg-hero[data-pressing="true"] .tg-band {
     /* Faster snap on press; slower release. */
@@ -100,9 +108,10 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
 
 <script>
   // Hero band motion choreography:
-  //  - mousemove → cursor-tracked rotation + vertical drift
-  //  - mousedown → band narrows (the "cut" gesture)
-  //  - mouseup   → band restores to full width
+  //  - hover     → CSS-only: band thickens slightly to hint at interactivity
+  //  - mousedown → band narrows ("cut") AND tracks cursor (rotation + drift)
+  //  - mousemove → cursor tracking, but only while pressed
+  //  - mouseup   → band restores to rest (or hover-thick if still hovered)
   //  - mouseleave → all values reset to defaults, eased
   //  - dblclick  → toggle Starlight light/dark theme
   //
@@ -116,12 +125,12 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
 
     let rafId = 0;
     let lastEvent: MouseEvent | null = null;
+    let pressed = false;
 
     const setVar = (name: string, value: string) => hero.style.setProperty(name, value);
     const clearVars = () => {
       hero.style.removeProperty('--tg-band-rotate-delta');
       hero.style.removeProperty('--tg-band-y');
-      hero.style.removeProperty('--tg-band-scale-y');
     };
 
     const applyFromEvent = (e: MouseEvent) => {
@@ -138,6 +147,7 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
     };
 
     const onMove = (e: MouseEvent) => {
+      if (!pressed) return;
       lastEvent = e;
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
@@ -146,16 +156,19 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
       });
     };
 
-    const onDown = () => {
+    const onDown = (e: MouseEvent) => {
+      pressed = true;
       hero.dataset.pressing = 'true';
-      setVar('--tg-band-scale-y', '0.18');
+      if (!reducedMotion.matches) applyFromEvent(e);
     };
     const onUp = () => {
+      pressed = false;
       hero.dataset.pressing = 'false';
-      hero.style.removeProperty('--tg-band-scale-y');
+      clearVars();
     };
 
     const onLeave = () => {
+      pressed = false;
       hero.dataset.pressing = 'false';
       clearVars();
     };
