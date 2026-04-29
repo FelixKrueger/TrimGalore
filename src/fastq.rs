@@ -16,6 +16,16 @@ use std::path::Path;
 /// Buffer size for gzip I/O — 64KB for throughput (flate2 default of 8KB is too small).
 const BUF_SIZE: usize = 64 * 1024;
 
+/// Output gzip compression level. Set to 1 (fastest) — at Buckberry-
+/// scale (84M reads, 38% adapter rate, cores=8) the compression CPU
+/// dominated wall time on saturated workers; lowering from level 6 to
+/// 1 measured ~−23% wall and ~−43% user-CPU at byte-identity of the
+/// decompressed output (gzip framing differs but `gzip -dc` yields
+/// the same bytes). Trade: output `.fq.gz` files are ~75% larger.
+/// See #248 (item #1 in @an-altosian's perf audit). Centralised here
+/// so a future `--high-compression` opt-in flag is a one-line change.
+pub const OUTPUT_GZIP_LEVEL: u32 = 1;
+
 /// A single FASTQ record with owned data.
 #[derive(Debug, Clone)]
 pub struct FastqRecord {
@@ -40,10 +50,23 @@ impl FastqRecord {
 
     /// Write this record to a FASTQ writer.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writeln!(writer, "{}", self.id)?;
-        writeln!(writer, "{}", self.seq)?;
-        writeln!(writer, "+")?;
-        writeln!(writer, "{}", self.qual)?;
+        // Single buffered write per record. Pre-format the entire 4-line
+        // FASTQ block into a Vec<u8>, then issue one `write_all` instead
+        // of four `writeln!` calls. Byte-identical output to the previous
+        // form (same bytes, same order, same trailing `\n`s); the win is
+        // amortising the per-call overhead — at Buckberry scale (84M
+        // reads, 38% adapter rate) this is ~10% wall-clock at cores=8.
+        // See #248 (item #2 in @an-altosian's perf audit).
+        let mut buf =
+            Vec::with_capacity(self.id.len() + self.seq.len() + self.qual.len() + 5);
+        buf.extend_from_slice(self.id.as_bytes());
+        buf.push(b'\n');
+        buf.extend_from_slice(self.seq.as_bytes());
+        buf.push(b'\n');
+        buf.extend_from_slice(b"+\n");
+        buf.extend_from_slice(self.qual.as_bytes());
+        buf.push(b'\n');
+        writer.write_all(&buf)?;
         Ok(())
     }
 
@@ -450,14 +473,14 @@ impl FastqWriter {
                                 cores
                             )
                         })?
-                        .compression_level(Compression::new(6))
+                        .compression_level(Compression::new(OUTPUT_GZIP_LEVEL))
                         .from_writer(file),
                 )
             } else {
                 // Single-threaded gzip with zlib-rs SIMD backend
                 Box::new(BufWriter::with_capacity(
                     BUF_SIZE,
-                    GzEncoder::new(file, Compression::new(6)),
+                    GzEncoder::new(file, Compression::new(OUTPUT_GZIP_LEVEL)),
                 ))
             }
         } else {

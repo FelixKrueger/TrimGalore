@@ -3,6 +3,37 @@
 
 ### Unreleased (queued for v2.1.0-beta.6)
 
+#### Performance (since v2.1.0-beta.5) — Buckberry-scale audit (#248)
+
+Profiled, prototyped, and benchmarked by @an-altosian against an
+84M-read single-end Bisulfite-Seq fixture (Buckberry et al. 2023,
+SRR24827373, 2.1 GiB gzipped, 38% adapter rate) using `hyperfine`
+with 10 trials per condition. Two of the three confirmed wins from
+that audit landed here; item #4 (Myers' bit-parallel adapter
+alignment, ~13% additional reduction) is queued for a separate PR
+from @an-altosian.
+
+- **Output gzip compression level lowered 6 → 1.** Compression CPU
+  was the dominant wall-time consumer on saturated workers
+  (cores=8) — at level 6, gzip output dwarfed actual trimming work.
+  Lowering to level 1 (fastest) measured −23.3% wall-clock
+  (69.693 ± 0.200 s → 53.471 ± 2.135 s) and −43% user-CPU
+  (593.9 s → 338.7 s) at Buckberry scale. Trade: output `.fq.gz`
+  files are roughly 75% larger (273 KB → 479 KB on the local
+  BS-seq_10K_R1 smoke). Decompressed content is byte-identical to
+  the previous output — the CI validation matrix's `gzip -dc |
+  md5sum` comparisons against Perl v0.6.11 still pass on every
+  flag path. New `pub const OUTPUT_GZIP_LEVEL` in `src/fastq.rs`
+  centralises the level so a future `--high-compression` opt-in
+  flag is a one-line change for storage-conscious users. (#248 #1)
+- **Single buffered write per FASTQ record.** Pre-format the
+  4-line record into a `Vec<u8>`, then issue one `write_all`
+  instead of four separate `writeln!` calls. Byte-identical output
+  (md5 match verified end-to-end on BS-seq_10K_R1). At Buckberry
+  scale this measured 9.8% wall-clock reduction
+  (69.693 ± 0.200 s → 62.862 ± 0.352 s) by amortising the per-call
+  Write-trait overhead. (#248 #2)
+
 #### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported)
 
 - **Lowercase clip-flag spellings (`--clip_r1`, `--clip_r2`,
