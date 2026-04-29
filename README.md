@@ -82,10 +82,10 @@ The `--force` flag overwrites any existing `trim_galore` binary (e.g. a v2.0.0 i
 Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 
 ```bash
-docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore trim_galore input.fastq.gz
+docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:beta trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. The `dev` tag tracks the latest development branch; versioned tags (e.g. `v2.1.0`) are published on release.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.6`), `:v2.1.0-beta.6` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://felixkrueger.github.io/TrimGalore/install/) for the full table.
 
 ### Prebuilt binaries
 
