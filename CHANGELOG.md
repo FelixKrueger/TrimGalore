@@ -36,6 +36,18 @@ from @an-altosian.
 
 #### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported)
 
+- **`--basename foo --paired` now produces `foo_val_1.fq.gz` /
+  `foo_val_2.fq.gz`, not `foo_R1_val_1.fq.gz` / `foo_R2_val_2.fq.gz`.**
+  The `_R{1,2}` segment was interpolated between the basename and the
+  `_val_{1,2}` suffix in `io::paired_end_output_names` and
+  `io::unpaired_output_names`, breaking the documented Perl v0.6.5+
+  filename contract — every nf-core / Snakemake pipeline globbing
+  the documented `${basename}_val_*` path silently missed outputs
+  under v2.1.0-beta.5. Trimmed read content was unaffected, only the
+  filenames differed. Two regression tests added covering the
+  basename branches of both functions. Reported by @an-altosian
+  during the Phase-1C parity hunt. (#244)
+
 - **Lowercase clip-flag spellings (`--clip_r1`, `--clip_r2`,
   `--three_prime_clip_r1`, `--three_prime_clip_r2`) are now accepted.**
   Perl `trim_galore` accepted both lowercase and uppercase spellings;
