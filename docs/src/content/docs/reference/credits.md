@@ -11,6 +11,15 @@ In 2026, Trim Galore was rewritten in Rust as a single static binary, the **Oxid
 
 Current development is at [github.com/FelixKrueger/TrimGalore](https://github.com/FelixKrueger/TrimGalore).
 
+## Contributors
+
+Trim Galore is maintained by [Felix Krueger](https://github.com/FelixKrueger). The Oxidized Edition has benefitted from contributions and design input from a number of people; the [GitHub contributors page](https://github.com/FelixKrueger/TrimGalore/graphs/contributors) tracks the full list. Notable recent contributions:
+
+- **[Phil Ewels](https://github.com/ewels)** — bundled FastQC integration via [`fastqc-rust`](https://crates.io/crates/fastqc-rust), docs site infrastructure (Astro/Starlight), GitHub Actions hardening, hero animation polish.
+- **[Dongze He](https://github.com/an-altosian) (`@an-altosian`)** — Phase-1B Perl-parity hunt and Buckberry-scale performance audit. Reported and prototyped the lowercase clip-flag fix (#242), \--max\_n fraction-mode UX, the gzip-extension and \--retain\_unpaired Perl-parity fixes (#245), the \--clock/\--implicon convenience widening (#245-D), the test-coverage gap inventory (#246), CI hardening recommendations (#247), and the Buckberry-scale performance audit (#248) including the gzip-level and single-buffered-write wins landed in v2.1.0-beta.6.
+
+If you've contributed and would like a line here, please open a PR — the list is intentionally curated rather than auto-generated.
+
 ## Citing Trim Galore
 
 If you use Trim Galore in published work, cite the project repository:
