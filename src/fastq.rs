@@ -57,8 +57,7 @@ impl FastqRecord {
         // amortising the per-call overhead — at Buckberry scale (84M
         // reads, 38% adapter rate) this is ~10% wall-clock at cores=8.
         // See #248 (item #2 in @an-altosian's perf audit).
-        let mut buf =
-            Vec::with_capacity(self.id.len() + self.seq.len() + self.qual.len() + 5);
+        let mut buf = Vec::with_capacity(self.id.len() + self.seq.len() + self.qual.len() + 5);
         buf.extend_from_slice(self.id.as_bytes());
         buf.push(b'\n');
         buf.extend_from_slice(self.seq.as_bytes());
