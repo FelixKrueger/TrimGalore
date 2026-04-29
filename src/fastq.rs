@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_round_trip() -> Result<()> {
-        let dir = std::env::temp_dir().join("trim_galore_test");
+        let dir = std::env::temp_dir().join("tg_fastq_round_trip");
         std::fs::create_dir_all(&dir)?;
         let out_path = dir.join("test_round_trip.fq");
 
