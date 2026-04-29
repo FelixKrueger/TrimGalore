@@ -668,7 +668,12 @@ mod tests {
                 1,
             ),
             // BGI partial overlap at 3' end (length 8)
-            (b"NNNNNNNNNNNNAAGTCGGA", b"AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA", 0.0, 1),
+            (
+                b"NNNNNNNNNNNNAAGTCGGA",
+                b"AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA",
+                0.0,
+                1,
+            ),
         ];
         for (read, adapter, error_rate, min_overlap) in cases {
             let scalar_result = find_3prime_adapter(read, adapter, *error_rate, *min_overlap);

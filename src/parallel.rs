@@ -750,4 +750,111 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
         Ok(())
     }
+
+    /// #246 follow-up: the worker pool emits each batch's output as
+    /// its own independently-compressed gzip member, then concatenates
+    /// them. Per RFC 1952 the result is a valid `.gz` file that
+    /// decodes (via `MultiGzDecoder`) to the concatenation of every
+    /// member's payload. `fastq::tests::test_multi_member_gzip_round_trip`
+    /// already locks the **reader** side of this contract; this test
+    /// locks the **producer** side — feeding parallel-trimmed gzip
+    /// output back through `FastqReader::open` (which uses
+    /// `MultiGzDecoder`) recovers every record. Sized to span more
+    /// than one batch (>4096 records) so multiple gzip members are
+    /// guaranteed in the output.
+    #[test]
+    fn test_parallel_gzip_output_decodes_multi_member() -> Result<()> {
+        let dir = fresh_tmpdir("tg_parallel_gzip_multi_member");
+        let input_path = dir.join("input.fq");
+
+        let mut content = String::new();
+        for i in 0..5000 {
+            content.push_str(&format!(
+                "@read_{i}\nACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIII\n"
+            ));
+        }
+        fs::write(&input_path, content)?;
+
+        let config = parity_test_config();
+        let output_path = dir.join("out.fq.gz");
+        let stats = run_single_end_parallel(&input_path, &output_path, &config, 4, true)?;
+
+        assert_eq!(stats.total_reads, 5000);
+        assert_eq!(stats.reads_written, 5000);
+
+        let mut reader = FastqReader::open(&output_path)?;
+        let mut count = 0;
+        while reader.next_record()?.is_some() {
+            count += 1;
+        }
+        assert_eq!(
+            count, 5000,
+            "all 5000 records must round-trip through the multi-member gzip output"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// #246 follow-up: single-record input is a boundary case for the
+    /// worker pool — only one of the N workers does any work, the
+    /// others see an empty channel and exit cleanly. Locks down that
+    /// the merge path handles a single non-full batch correctly (no
+    /// off-by-one on stats, no truncated output, no deadlock waiting
+    /// on an extra batch from the reader).
+    #[test]
+    fn test_parallel_single_record_input() -> Result<()> {
+        let dir = fresh_tmpdir("tg_parallel_single_record");
+        let input_path = dir.join("input.fq");
+        fs::write(
+            &input_path,
+            "@only_read\nACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIII\n",
+        )?;
+
+        let config = parity_test_config();
+        let output_path = dir.join("out.fq");
+        let stats = run_single_end_parallel(&input_path, &output_path, &config, 4, false)?;
+
+        assert_eq!(stats.total_reads, 1);
+        assert_eq!(stats.reads_written, 1);
+        assert_eq!(stats.total_reads_with_adapter, 0);
+
+        let mut reader = FastqReader::open(&output_path)?;
+        let rec = reader.next_record()?.expect("record must be present");
+        assert_eq!(rec.id, "@only_read");
+        assert_eq!(rec.seq, "ACGTACGTACGTACGTACGT");
+        assert!(reader.next_record()?.is_none());
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// #246 follow-up: empty input must not deadlock the worker pool.
+    /// The reader thread sees EOF on the first read, signals workers
+    /// to exit, and the main thread returns clean zero-stats. A
+    /// regression here would manifest as the test hanging — hence the
+    /// pointed coverage.
+    #[test]
+    fn test_parallel_empty_input_no_deadlock() -> Result<()> {
+        let dir = fresh_tmpdir("tg_parallel_empty");
+        let input_path = dir.join("input.fq");
+        fs::write(&input_path, "")?;
+
+        let config = parity_test_config();
+        let output_path = dir.join("out.fq");
+        let stats = run_single_end_parallel(&input_path, &output_path, &config, 4, false)?;
+
+        assert_eq!(stats.total_reads, 0);
+        assert_eq!(stats.reads_written, 0);
+        assert_eq!(stats.total_reads_with_adapter, 0);
+
+        let mut reader = FastqReader::open(&output_path)?;
+        assert!(
+            reader.next_record()?.is_none(),
+            "empty input must produce empty output (zero records)"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
 }

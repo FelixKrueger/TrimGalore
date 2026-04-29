@@ -45,13 +45,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Run tests (debug)
-        run: cargo test
+      # #247 item 8: cargo-nextest for the debug-profile run. Per-test
+      # process isolation catches latent shared-state bugs (e.g. tests
+      # writing to a static `std::env::temp_dir()` slug) that cargo
+      # test's thread-pool model masks. Per-test isolation audit
+      # complete: 19 `temp_dir().join(...)` callsites all use unique
+      # slugs (no shared paths), and no `static mut` / `OnceCell` /
+      # `env::set_var` globals exist — the codebase is nextest-clean.
+      #
+      # Installed via `cargo install` (not taiki-e/install-action's
+      # prebuilt binary path) because the action's CDN endpoint
+      # (get.nexte.st) consistently 403'd on the ubuntu-latest runner
+      # pool during PR #260; macos-latest was unaffected. Building
+      # from source is ~2-3 min on a cache-warm runner, no third-party
+      # CDN dependency, and amortizes to ~5s on cache-hit runs once
+      # the version is in `~/.cargo/.crates.toml`.
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
+      - name: Run tests (debug, nextest)
+        run: cargo nextest run
 
       # #247 item 3: release-profile tests catch LTO-only and
       # codegen-units=1 interactions that the default debug build
-      # doesn't see. Cheap to add (target dir is already populated by
-      # the next step's cargo build --release).
+      # doesn't see. Kept on cargo test (rather than nextest) so we
+      # also exercise the canonical test-runner path on every CI run.
       - name: Run tests (release)
         run: cargo test --release
 
