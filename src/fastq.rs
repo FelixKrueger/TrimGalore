@@ -620,4 +620,59 @@ mod tests {
 
         Ok(())
     }
+
+    /// §5.1 regression: the parallel writer (`--cores N`) emits each
+    /// worker's chunk as its own independently-compressed gzip member,
+    /// then concatenates them (RFC 1952 — multi-member gzip is a valid
+    /// `.gz` file that decompresses to the concatenation of each
+    /// member's payload). The reader has to use `MultiGzDecoder`, NOT
+    /// the single-member `GzDecoder`, or it silently truncates output
+    /// to whatever fits in the first gzip member when that file is fed
+    /// back through Trim Galore as a follow-on input. Originally fixed
+    /// in commit 9dcf519 (pre-beta.1) but never had a unit-level
+    /// regression test. Locks down the contract: a manually-crafted
+    /// 2-member gzip file round-trips through `FastqReader` with all
+    /// records from both members.
+    #[test]
+    fn test_multi_member_gzip_round_trip() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_multi_member_gzip");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("two_member.fq.gz");
+
+        // Member 1: 2 records.
+        let mut member1: Vec<u8> = Vec::new();
+        {
+            let mut enc = GzEncoder::new(&mut member1, Compression::default());
+            enc.write_all(b"@m1_r1\nACGT\n+\nIIII\n")?;
+            enc.write_all(b"@m1_r2\nGGCC\n+\n!!!!\n")?;
+            enc.finish()?;
+        }
+        // Member 2: 2 more records, separately-compressed.
+        let mut member2: Vec<u8> = Vec::new();
+        {
+            let mut enc = GzEncoder::new(&mut member2, Compression::default());
+            enc.write_all(b"@m2_r1\nTTAA\n+\nJJJJ\n")?;
+            enc.write_all(b"@m2_r2\nNNNN\n+\n????\n")?;
+            enc.finish()?;
+        }
+        // Concatenate the two gzip members and verify our crafted file
+        // is genuinely multi-member (would-be a parsing-error point for
+        // single-member decoders).
+        std::fs::write(&path, [member1, member2].concat())?;
+
+        let mut reader = FastqReader::open(&path)?;
+        let mut ids: Vec<String> = Vec::new();
+        while let Some(rec) = reader.next_record()? {
+            ids.push(rec.id);
+        }
+
+        assert_eq!(
+            ids,
+            vec!["@m1_r1", "@m1_r2", "@m2_r1", "@m2_r2"],
+            "MultiGzDecoder must yield records from both gzip members"
+        );
+
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
 }

@@ -266,9 +266,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         if v >= 1.0 {
             MaxNFilter::Count(v as usize)
         } else {
-            eprintln!(
-                "--max_n will be interpreted as a fraction of the read length ({v})"
-            );
+            eprintln!("--max_n will be interpreted as a fraction of the read length ({v})");
             MaxNFilter::Fraction(v)
         }
     });

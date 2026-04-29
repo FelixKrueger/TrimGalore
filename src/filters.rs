@@ -240,14 +240,8 @@ mod tests {
         let seq = "A".repeat(50);
         let r1 = make_record(&seq);
         let r2 = make_record(&seq);
-        let result = filter_paired_end(
-            &r1,
-            &r2,
-            80,
-            None,
-            None,
-            UnpairedLengths { r1: 35, r2: 35 },
-        );
+        let result =
+            filter_paired_end(&r1, &r2, 80, None, None, UnpairedLengths { r1: 35, r2: 35 });
         match result {
             PairFilterResult::TooShort { r1_ok, r2_ok } => {
                 assert!(r1_ok, "R1 (50 bp >= 35) should rescue to unpaired");

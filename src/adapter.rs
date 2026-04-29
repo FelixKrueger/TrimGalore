@@ -96,6 +96,20 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
     path: P,
     consider_already_trimmed: Option<usize>,
 ) -> Result<DetectionResult> {
+    autodetect_adapter_with_max_scan(path, consider_already_trimmed, MAX_SCAN_READS)
+}
+
+/// Inner implementation of [`autodetect_adapter`] with the per-call scan
+/// cap exposed as a parameter. Crate-private so unit tests can exercise
+/// the boundary behaviour with a small `max_scan` instead of needing a
+/// fixture larger than 1M reads; production callers always go through
+/// the [`autodetect_adapter`] wrapper which pins the cap at
+/// `MAX_SCAN_READS`.
+pub(crate) fn autodetect_adapter_with_max_scan<P: AsRef<Path>>(
+    path: P,
+    consider_already_trimmed: Option<usize>,
+    max_scan: usize,
+) -> Result<DetectionResult> {
     let mut reader = FastqReader::open(path)?;
 
     // BGI/DNBSEQ added to the probe set: its 32bp adapter shares no
@@ -117,7 +131,7 @@ pub fn autodetect_adapter<P: AsRef<Path>>(
 
     while let Some(record) = reader.next_record()? {
         reads_scanned += 1;
-        if reads_scanned >= MAX_SCAN_READS {
+        if reads_scanned >= max_scan {
             break;
         }
 
@@ -820,6 +834,74 @@ mod tests {
             .map(|(_, c)| *c)
             .unwrap_or(0);
         assert_eq!(nextera_count, 50);
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// §5.3 regression: the auto-detection scan caps at `MAX_SCAN_READS`
+    /// (1,000,000 in production). Verified here via the crate-private
+    /// `autodetect_adapter_with_max_scan` helper with a small `max_scan`
+    /// — generating a >1M-read fixture every test run is prohibitively
+    /// slow, so the boundary contract is exercised at scale 7 instead
+    /// of scale 1e6 (same control-flow shape: increment-then-break).
+    /// Asserts both that scanning stops at the cap and that
+    /// `reads_scanned` reflects the cap value, not the file's record
+    /// count.
+    #[test]
+    fn test_autodetect_respects_max_scan_boundary() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_autodetect_max_scan");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("plenty.fq");
+        // 100 records, all with the Illumina adapter embedded → if scanning
+        // ran to EOF, the Illumina count would be 100. With max_scan=7 the
+        // count must be strictly less.
+        write_fastq_with_adapter(&path, ILLUMINA.seq, 100)?;
+
+        let result = autodetect_adapter_with_max_scan(&path, None, 7)?;
+        assert_eq!(
+            result.reads_scanned, 7,
+            "reads_scanned must equal max_scan when input has more records than the cap"
+        );
+        let illumina_count = result
+            .counts
+            .iter()
+            .find(|(n, _)| n == "Illumina")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        // The cap is checked AFTER `reads_scanned += 1` so the 7th increment
+        // breaks before the loop body that would have counted the 7th match.
+        // Concretely: 6 records contribute to the count, 7 reads_scanned.
+        assert!(
+            illumina_count < 100,
+            "Illumina count must be capped (got {illumina_count}, expected < 100)"
+        );
+        assert!(
+            illumina_count <= 7,
+            "Illumina count must be at most max_scan (got {illumina_count})"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// Sanity test: with `max_scan` larger than the input record count,
+    /// scanning runs to EOF and `reads_scanned` equals the file size.
+    /// Pairs with `test_autodetect_respects_max_scan_boundary` so a
+    /// regression that breaks the cap (e.g. always-stop-at-7) wouldn't
+    /// pass both tests at once.
+    #[test]
+    fn test_autodetect_below_max_scan_processes_full_file() -> Result<()> {
+        let dir = std::env::temp_dir().join("tg_test_autodetect_full_scan");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("small.fq");
+        write_fastq_with_adapter(&path, ILLUMINA.seq, 50)?;
+
+        let result = autodetect_adapter_with_max_scan(&path, None, 1_000_000)?;
+        assert_eq!(
+            result.reads_scanned, 50,
+            "below-cap inputs must scan to EOF"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
         Ok(())

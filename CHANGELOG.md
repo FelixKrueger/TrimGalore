@@ -79,6 +79,61 @@
   output_directory did not exist, it will be created for you", v0.6.0
   changelog).
 
+#### Tests (since v2.1.0-beta.5) — coverage gaps closed (#246)
+
+Five new unit tests landed across `report.rs`, `demux.rs`, `fastq.rs`,
+and `adapter.rs`. Closes 5 of the 6 `§5.x` items from the test-coverage
+audit. Total test count: 171 → 177. Items still open from #246:
+parallel/serial stat-tracking parity (§5.2), comprehensive
+`parallel.rs` coverage, optional upstreaming of @an-altosian's
+proptest harness — tracked as separate followups.
+
+- **§5.4 PE param-summary `removed-end:` regression guard**
+  (`report.rs::tests`). Beta.3 fixed a stray `-end` suffix in the
+  paired-end parameter-summary line (`...sequence pair gets
+  removed-end: 20 bp` → `...removed: 20 bp`); MultiQC parsers grep
+  for the literal `removed:` form. Test renders the PE header and
+  asserts both `!contains("removed-end")` and the canonical phrase —
+  any reintroduction of the typo class fails the assertion.
+
+- **§5.5 Demux CRLF samplesheet handling** (`demux.rs::tests`).
+  Windows-authored barcode sheets use `\r\n` line endings; without
+  the `trim_end_matches('\r')` strip in `read_barcode_file`, the
+  trailing `\r` would pollute the parsed barcode and fail the
+  ACGTN-only validator with a confusing "barcode must contain only
+  A, C, T, G, N" error. Test writes a CRLF samplesheet and asserts
+  no stray `\r` survives on any parsed entry.
+
+- **§5.6 Demux short-read NoCode routing** (`demux.rs::tests`).
+  When a trimmed read is shorter than the barcode length,
+  `demultiplex` (`src/demux.rs:178-187`) routes it to the NoCode
+  bucket instead of slicing past the read end. End-to-end test:
+  fixture with one 5 bp read, one non-matching 16 bp read, and one
+  matching 16 bp read; asserts both NoCode-bound reads land in
+  `*_NoCode.fq` (with cleared seq+qual for the too-short one) and
+  the matching read lands in the per-sample bucket. Together with
+  §5.5 closes the `demux.rs` zero-tests module gap.
+
+- **§5.1 Multi-member gzip reader round-trip** (`fastq.rs::tests`).
+  The parallel writer (`--cores N`) emits each worker's chunk as
+  its own gzip member; the concatenated stream is a valid RFC 1952
+  multi-member gzip file. Test crafts a 2-member buffer with
+  `GzEncoder::finish` twice, concatenates, and asserts
+  `FastqReader` (using `MultiGzDecoder`) yields records from BOTH
+  members in order. Originally fixed in `9dcf519` (pre-beta.1) but
+  never had a unit-level regression test.
+
+- **§5.3 Adapter auto-detect `MAX_SCAN_READS` boundary**
+  (`adapter.rs::tests`). The 1M-read scan cap was unverified at the
+  unit level; generating a >1M-read fixture per test run is too
+  slow. Refactored: extracted `autodetect_adapter_with_max_scan`
+  (crate-private) so tests can exercise the same `increment-then-
+  break` control flow at scale 7. Two paired tests: cap-bounded
+  (input has 100 records, max_scan=7, asserts `reads_scanned == 7`
+  and matches < 100) and cap-unbounded (input has 50 records,
+  max_scan=1M, asserts full-file scan). Public `autodetect_adapter`
+  API unchanged.
+
 #### Bug fixes (since v2.1.0-beta.5) — surfaced by the nf-core pre-GA validation review
 
 - **RRBS samples: `Total written (filtered)` cutadapt-section line now matches
