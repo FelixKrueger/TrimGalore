@@ -177,7 +177,49 @@ proptest harness — tracked as separate followups.
   max_scan=1M, asserts full-file scan). Public `autodetect_adapter`
   API unchanged.
 
+#### Tests (since v2.1.0-beta.5) — parallel/serial stats parity (#246 §5.2)
+
+- **`parallel::run_single_end_parallel` and `trimmer::run_single_end`
+  must yield field-identical `TrimStats` on the same input.** First
+  unit test in `src/parallel.rs` (closes the zero-tests module gap
+  noted in #246). Beta.0/1 had per-field stat drift between the two
+  paths (commits 82d1e34, 3996fc5 fixed `total_bp_after_trim` /
+  `rrbs_r2_clipped_5prime`); this test locks the invariant down at
+  the unit level. `TrimStats` gained a `PartialEq` derive so a
+  single `assert_eq!` covers every field — any future field added
+  to the struct is automatically covered without test edits.
+  Closes #246 §5.2.
+
 #### Infrastructure (contributor-facing, since v2.1.0-beta.5) — CI hardening (#247)
+
+The five remaining deferred items from the original CI audit landed
+in this round (items 2, 3, 4, 7 — item 8 cargo-nextest deferred
+pending a focused per-test-isolation audit since some existing tests
+share `std::env::temp_dir().join(...)` paths):
+
+- **#247 item 2 — macOS matrix on `rust-tests`.** Job now runs on
+  both `ubuntu-latest` and `macos-latest` (Apple Silicon hosted
+  runner). Catches Apple-Silicon-specific regressions before
+  release-tag time. `fail-fast: false` so an OS-specific failure on
+  one entry doesn't kill the other.
+- **#247 item 3 — release-profile test step.** New `Run tests
+  (release)` step alongside the existing debug-profile run. Catches
+  LTO + `codegen-units=1` interactions that the default debug build
+  doesn't see. Cheap because the next step (`cargo build --release`)
+  was already populating the same target dir.
+- **#247 item 4 — line/branch coverage reporting via
+  `cargo-llvm-cov`.** New `coverage` job emits an LCOV file as a
+  CI artifact (downloadable from the Actions run UI) plus a text
+  summary in the job log. No third-party uploader integration —
+  Codecov / Coveralls is a separate decision.
+- **#247 item 7 — `justfile` for local CI parity.** New top-level
+  `justfile` with targets `fmt`, `clippy`, `test`, `test-release`,
+  `ci`, `reproduce`, `validate-paired-end`, `logos`, `docs`. Run
+  `just` (or `just ci`) to execute the same portable checks CI
+  runs on every push. Pairs cleanly with the contributor docs
+  flow.
+
+
 
 Three CI improvements landed from @an-altosian's audit (#247). Touches
 only `.github/workflows/ci.yml`; no runtime change.

@@ -5,7 +5,7 @@
 use std::io::Write;
 
 /// Statistics collected during trimming.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct TrimStats {
     /// Total sequences processed
     pub total_reads: usize,

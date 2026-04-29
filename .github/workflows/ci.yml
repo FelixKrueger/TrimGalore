@@ -16,9 +16,17 @@ on:
 
 jobs:
   rust-tests:
-    name: Rust Tests
+    name: Rust Tests (${{ matrix.os }})
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    # OS matrix (#247 item 2): catch Apple Silicon regressions before
+    # release tagging. macos-latest is GitHub's hosted Apple Silicon
+    # runner. fail-fast: false so an OS-specific failure on one entry
+    # doesn't kill the other; we want both reports.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -37,8 +45,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Run tests
+      - name: Run tests (debug)
         run: cargo test
+
+      # #247 item 3: release-profile tests catch LTO-only and
+      # codegen-units=1 interactions that the default debug build
+      # doesn't see. Cheap to add (target dir is already populated by
+      # the next step's cargo build --release).
+      - name: Run tests (release)
+        run: cargo test --release
 
       - name: Build release
         run: cargo build --release
@@ -133,6 +148,52 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # #247 item 4: line/branch coverage reporting via `cargo-llvm-cov`.
+  # Generates an LCOV file as an artifact (downloadable from the Actions
+  # run UI). No external uploader (Codecov/Coveralls) — keeping coverage
+  # data local for now; integration with a third-party service is a
+  # separate decision.
+  coverage:
+    name: Coverage (cargo-llvm-cov)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: llvm-tools-preview
+      - name: Cache cargo (coverage job)
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          # ~/.cargo/bin is cached so cargo-llvm-cov persists across runs;
+          # avoids the ~5-minute cold-build cost on every PR.
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-coverage-
+      - name: Install cargo-llvm-cov
+        run: |
+          if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
+            cargo install --locked cargo-llvm-cov
+          fi
+      - name: Generate coverage (LCOV + summary)
+        run: |
+          # Workspace coverage in LCOV format for the artifact, then a
+          # text summary in the job log so reviewers can eyeball totals
+          # without downloading the artifact.
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          cargo llvm-cov report --summary-only
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-lcov-${{ github.run_id }}
+          path: lcov.info
+          retention-days: 14
+          if-no-files-found: error
 
   validation:
     name: Validate vs Perl TrimGalore

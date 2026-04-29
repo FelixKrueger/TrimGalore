@@ -636,3 +636,118 @@ fn process_reads<W: Write>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fastq::{FastqReader, FastqWriter};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn fresh_tmpdir(slug: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(slug);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Minimal TrimConfig for the parity test: single adapter, no
+    /// quality trimming or length filtering so the stats verifying
+    /// equality see only the adapter-trim accounting we care about.
+    fn parity_test_config() -> TrimConfig {
+        TrimConfig {
+            adapters: vec![("Illumina".to_string(), b"AGATCGGAAGAGC".to_vec())],
+            adapters_r2: Vec::new(),
+            times: 1,
+            quality_cutoff: 0,
+            phred_offset: 33,
+            error_rate: 0.1,
+            min_overlap: 1,
+            length_cutoff: 0,
+            max_length: None,
+            max_n: None,
+            trim_n: false,
+            clip_r1: None,
+            clip_r2: None,
+            three_prime_clip_r1: None,
+            three_prime_clip_r2: None,
+            rename: false,
+            nextseq: false,
+            rrbs: false,
+            non_directional: false,
+            is_paired: false,
+            poly_a: false,
+            poly_g: false,
+            discard_untrimmed: false,
+        }
+    }
+
+    /// #246 §5.2 regression: `trimmer::run_single_end` (serial path)
+    /// and `parallel::run_single_end_parallel` (worker pool) must
+    /// produce field-identical `TrimStats` on the same input. Beta.0/1
+    /// had per-field stat drift between paths (commits 82d1e34,
+    /// 3996fc5 fixed `total_bp_after_trim` / `rrbs_r2_clipped_5prime`);
+    /// this test locks the invariant down. Closes the
+    /// `parallel.rs` zero-tests module gap as a side effect.
+    #[test]
+    fn test_parallel_serial_trim_stats_parity() -> Result<()> {
+        let dir = fresh_tmpdir("tg_parallel_serial_parity");
+        let input_path = dir.join("input.fq");
+
+        // 30 reads: alternating adapter-bearing and clean. Sized to
+        // span more than one record but well under the 4096 batch
+        // size — this exercises the merge path with a single non-full
+        // batch, which is where stat drift bugs tend to live.
+        let mut content = String::new();
+        for i in 0..30 {
+            let seq = if i % 2 == 0 {
+                // 30 bp of random-looking bases + 13 bp Illumina adapter.
+                "ACGTACGTACGTACGTACGTACGTACGTACAGATCGGAAGAGC"
+            } else {
+                // 34 bp clean (no adapter substring).
+                "ACGTACGTACGTACGTACGTACGTACGTACGTAC"
+            };
+            let qual = "I".repeat(seq.len());
+            content.push_str(&format!("@read_{i}\n{seq}\n+\n{qual}\n"));
+        }
+        fs::write(&input_path, content)?;
+
+        let config = parity_test_config();
+
+        // Serial path — open reader/writer directly, drive the
+        // single-threaded `run_single_end` entry point.
+        let serial_output = dir.join("serial_out.fq");
+        let stats_serial = {
+            let mut reader = FastqReader::open(&input_path)?;
+            let mut writer = FastqWriter::create(&serial_output, false, 1)?;
+            let stats = crate::trimmer::run_single_end(&mut reader, &mut writer, &config)?;
+            writer.flush()?;
+            stats
+        };
+
+        // Parallel path — same input, 4 workers, plain output.
+        let parallel_output = dir.join("parallel_out.fq");
+        let stats_parallel =
+            run_single_end_parallel(&input_path, &parallel_output, &config, 4, false)?;
+
+        // Field-identical stats across paths. PartialEq derive on
+        // TrimStats means a single equality check covers every field.
+        assert_eq!(
+            stats_serial, stats_parallel,
+            "TrimStats must match between serial (cores=1) and parallel (cores=4) paths.\n\
+             serial:   {stats_serial:#?}\n\
+             parallel: {stats_parallel:#?}"
+        );
+
+        // Sanity-check that the test fixture actually exercised
+        // adapter trimming — otherwise we'd be passing trivially.
+        assert_eq!(stats_serial.total_reads, 30);
+        assert!(
+            stats_serial.total_reads_with_adapter > 0,
+            "test fixture must have at least one adapter-bearing read"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+}
