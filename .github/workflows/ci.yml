@@ -155,8 +155,19 @@ jobs:
 
       - name: Install Perl Trim Galore (v0.6.11) + Cutadapt
         run: |
-          conda create -n perl_tg -y -c conda-forge -c bioconda cutadapt=5.2 "xopen<2"
-          curl -fsSL https://raw.githubusercontent.com/FelixKrueger/TrimGalore/0.6.11/trim_galore -o /usr/local/bin/trim_galore_perl
+          # Cutadapt 5.2 build-number pinned to *_0 (#247 item 6): the
+          # validation matrix uses Cutadapt's output as the Perl-side
+          # oracle, so an unannounced bioconda revision bump (5.2-1, etc.)
+          # could silently shift the md5 baseline. Pin to the first build
+          # of 5.2 — bumps become visible failures, not invisible drift.
+          conda create -n perl_tg -y -c conda-forge -c bioconda 'cutadapt=5.2=*_0' "xopen<2"
+          # Fetch the legacy Perl source from the local repo's `master`
+          # branch (#247 item 5). master tracks the v0.6.x release line;
+          # this gives byte-identical content to the previous
+          # raw.githubusercontent curl with zero external network
+          # dependency, eliminating a flaky source.
+          git fetch --depth=1 origin master
+          git show origin/master:trim_galore > /usr/local/bin/trim_galore_perl
           chmod +x /usr/local/bin/trim_galore_perl
 
       - name: Verify Perl Trim Galore
@@ -500,3 +511,28 @@ jobs:
 
       - name: All validations passed
         run: echo "All Oxidized Edition outputs are byte-identical to Perl TrimGalore 0.6.11"
+
+      # #247 item 1: when any md5 oracle step above fails, the /tmp
+      # outputs that triggered the mismatch are otherwise lost — the
+      # runner cleans them up before the failed step's logs scroll past.
+      # Uploading them on failure turns "guess what the binary actually
+      # produced" into a one-click download. Useful in particular for
+      # reviewing perf PRs that intentionally change output bytes
+      # (e.g. a default gzip-level change) — diffing the new artefacts
+      # against the Perl baseline is the fastest path to the new oracle.
+      - name: Upload validation outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validation-outputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/tg/
+            /tmp/op/
+            /tmp/op_multi/
+            /tmp/op_multi2/
+            /tmp/op_multi_seq/
+            /tmp/op_retain/
+            /tmp/op_case/
+            /tmp/*.log
+          if-no-files-found: warn
+          retention-days: 7

@@ -134,6 +134,32 @@ proptest harness — tracked as separate followups.
   max_scan=1M, asserts full-file scan). Public `autodetect_adapter`
   API unchanged.
 
+#### Infrastructure (contributor-facing, since v2.1.0-beta.5) — CI hardening (#247)
+
+Three CI improvements landed from @an-altosian's audit (#247). Touches
+only `.github/workflows/ci.yml`; no runtime change.
+
+- **Validation outputs uploaded on failure.** When any md5 oracle
+  step fails, the `/tmp/tg`, `/tmp/op*`, and `/tmp/*.log` paths that
+  triggered the mismatch were previously lost when the runner cleaned
+  up. New `if: failure()` step uploads them as a 7-day artifact under
+  `validation-outputs-<run_id>-<attempt>`. Especially useful for
+  reviewing perf PRs that intentionally change output bytes (e.g. a
+  default gzip-level change) — the new artefacts can be diffed
+  against the Perl baseline directly.
+- **Perl Trim Galore source fetched from local `master` instead of
+  `raw.githubusercontent`.** The Perl v0.6.x release line lives at
+  `master:trim_galore` in this repo; replacing the curl with
+  `git fetch --depth=1 origin master && git show
+  origin/master:trim_galore` gives byte-identical content with zero
+  external network dependency, eliminating a class of CI flake.
+- **Cutadapt bioconda revision pinned (`cutadapt=5.2=*_0`).** The
+  validation matrix uses Cutadapt's output as the Perl-side oracle,
+  so an unannounced bioconda revision bump (5.2-1, etc.) could
+  silently shift the md5 baseline. Pin to the first build of 5.2 so
+  any rev bump becomes a visible CI failure rather than invisible
+  drift.
+
 #### Bug fixes (since v2.1.0-beta.5) — surfaced by the nf-core pre-GA validation review
 
 - **RRBS samples: `Total written (filtered)` cutadapt-section line now matches
