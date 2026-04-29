@@ -35,10 +35,10 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 ## Installation
 
 > [!IMPORTANT]
-> **Beta testing v2.1.0-beta.6.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
+> **Beta testing v2.1.0-beta.7.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
 >
 > ```bash
-> cargo install trim-galore --version 2.1.0-beta.6
+> cargo install trim-galore --version 2.1.0-beta.7
 > docker pull ghcr.io/felixkrueger/trimgalore:beta
 > ```
 >
@@ -85,7 +85,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:beta trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.6`), `:v2.1.0-beta.6` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://felixkrueger.github.io/TrimGalore/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.7`), `:v2.1.0-beta.7` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://felixkrueger.github.io/TrimGalore/install/) for the full table.
 
 ### Prebuilt binaries
 

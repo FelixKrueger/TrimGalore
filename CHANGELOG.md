@@ -1,6 +1,44 @@
 # Trim Galore Changelog
 
 
+### Version 2.1.0-beta.7 (Release on 29 Apr 2026)
+
+#### Performance (since v2.1.0-beta.6) — third Buckberry-scale win (#248 #4)
+
+- **Myers' bit-parallel adapter alignment prefilter.** Wraps an O(n)
+  bit-vector approximate-matching pass (Hyyrö 2001 formulation) in
+  front of the existing scalar DP in `find_3prime_adapter`. The
+  prefilter is conservative by design — it short-circuits ONLY when
+  it can rigorously prove that no adapter match exists, considering
+  both the full-match (last DP row) and partial-match (last DP
+  column) cases. False positives fall through to the unchanged
+  scalar DP, keeping the byte-identity invariant intact by
+  construction. Limited to adapters ≤ 64 bp (single u64 bit-vector;
+  the project's adapters are all ≤ 32 bp). End-to-end byte-identity
+  verified locally and by the CI validation matrix; Dongze's
+  Buckberry-scale measurement (84M reads, 38% adapter rate, cores=8)
+  was −13.6% wall on his prototype, so this lands the third and
+  final perf win from the #248 audit. Co-authored with @an-altosian
+  (Dongze He). (#258)
+
+#### Documentation (since v2.1.0-beta.6)
+
+- **Migration guide note on `-a 'A{N}'` poly-A divergence.** Closes
+  #245 item B as intentional / not-pursued: brace expansion is
+  byte-identical between Perl and Rust, but the alignment DP's
+  tie-break behaviour on highly-repetitive adapter patterns differs
+  between Cutadapt and our reimplementation. Both produce valid
+  global-best alignments. The dedicated `--poly_a` flag is the
+  right v2 path for poly-A trimming; the `-a 'A{N}'` form remains
+  supported as a v0.6.x compat shim. (#257)
+- **GHCR tag prefix correction.** Docker images carry the `v` prefix
+  (`:v2.1.0-beta.6`), not bare semver — verified against
+  `/v2/.../tags/list`. Docs install table fixed; the prior
+  `:2.1.0-beta.6` example was 404. README Docker example switched
+  from implicit `:latest` (which doesn't exist during prerelease) to
+  `:beta`, with the full tag set documented inline. (#256)
+
+
 ### Version 2.1.0-beta.6 (Release on 29 Apr 2026)
 
 #### Performance (since v2.1.0-beta.5) — Buckberry-scale audit (#248)
