@@ -48,16 +48,20 @@ jobs:
       # #247 item 8: cargo-nextest for the debug-profile run. Per-test
       # process isolation catches latent shared-state bugs (e.g. tests
       # writing to a static `std::env::temp_dir()` slug) that cargo
-      # test's thread-pool model masks. Pinned via taiki-e/install-action,
-      # which fetches the prebuilt binary release (much faster than
-      # `cargo install`). Per-test isolation audit complete: 19
-      # `temp_dir().join(...)` callsites all use unique slugs (no
-      # shared paths), and no `static mut` / `OnceCell` / `env::set_var`
-      # globals exist — the codebase is nextest-clean.
+      # test's thread-pool model masks. Per-test isolation audit
+      # complete: 19 `temp_dir().join(...)` callsites all use unique
+      # slugs (no shared paths), and no `static mut` / `OnceCell` /
+      # `env::set_var` globals exist — the codebase is nextest-clean.
+      #
+      # Installed via `cargo install` (not taiki-e/install-action's
+      # prebuilt binary path) because the action's CDN endpoint
+      # (get.nexte.st) consistently 403'd on the ubuntu-latest runner
+      # pool during PR #260; macos-latest was unaffected. Building
+      # from source is ~2-3 min on a cache-warm runner, no third-party
+      # CDN dependency, and amortizes to ~5s on cache-hit runs once
+      # the version is in `~/.cargo/.crates.toml`.
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@daa3c1f1f9a9d46f686d9fc2f65773d0c293688b # v2.62.13
-        with:
-          tool: nextest
+        run: cargo install cargo-nextest --locked
 
       - name: Run tests (debug, nextest)
         run: cargo nextest run
