@@ -40,10 +40,23 @@ impl FastqRecord {
 
     /// Write this record to a FASTQ writer.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writeln!(writer, "{}", self.id)?;
-        writeln!(writer, "{}", self.seq)?;
-        writeln!(writer, "+")?;
-        writeln!(writer, "{}", self.qual)?;
+        // Single buffered write per record. Pre-format the entire 4-line
+        // FASTQ block into a Vec<u8>, then issue one `write_all` instead
+        // of four `writeln!` calls. Byte-identical output to the previous
+        // form (same bytes, same order, same trailing `\n`s); the win is
+        // amortising the per-call overhead — at Buckberry scale (84M
+        // reads, 38% adapter rate) this is ~10% wall-clock at cores=8.
+        // See #248 (item #2 in @an-altosian's perf audit).
+        let mut buf =
+            Vec::with_capacity(self.id.len() + self.seq.len() + self.qual.len() + 5);
+        buf.extend_from_slice(self.id.as_bytes());
+        buf.push(b'\n');
+        buf.extend_from_slice(self.seq.as_bytes());
+        buf.push(b'\n');
+        buf.extend_from_slice(b"+\n");
+        buf.extend_from_slice(self.qual.as_bytes());
+        buf.push(b'\n');
+        writer.write_all(&buf)?;
         Ok(())
     }
 
