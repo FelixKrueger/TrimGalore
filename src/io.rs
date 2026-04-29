@@ -89,8 +89,19 @@ pub fn paired_end_output_names(
 ) -> (PathBuf, PathBuf) {
     let ext = if gzip { ".fq.gz" } else { ".fq" };
 
+    // When --basename is supplied, both stems are exactly that basename:
+    // `foo` → `foo_val_1.fq.gz` / `foo_val_2.fq.gz`. The `_val_{1,2}`
+    // suffix carries the pair-side distinction; there's no `_R1`/`_R2`
+    // segment between the basename and the suffix. Matches Perl v0.6.5+
+    // behaviour (CHANGELOG: "In a `--paired --basename BASE` scenario,
+    // the output files will now be called `BASE_val_1.fq.gz
+    // BASE_val_2.fq.gz` as described in the documentation"). Beta.5
+    // had a `_R1`/`_R2` interpolation here that broke the documented
+    // contract — silently miss-pathed outputs for any nf-core /
+    // Snakemake pipeline globbing the documented `${basename}_val_*`.
+    // See #244.
     let (stem1, stem2) = match basename {
-        Some(b) => (format!("{}_R1", b), format!("{}_R2", b)),
+        Some(b) => (b.to_string(), b.to_string()),
         None => (
             strip_fastq_extensions(input_r1),
             strip_fastq_extensions(input_r2),
@@ -117,8 +128,11 @@ pub fn unpaired_output_names(
 ) -> (PathBuf, PathBuf) {
     let ext = if gzip { ".fq.gz" } else { ".fq" };
 
+    // Same `--basename` semantic as paired_end_output_names — the
+    // `_unpaired_{1,2}` suffix carries the pair-side, no `_R{1,2}`
+    // segment is interpolated. Matches Perl v0.6.5+ behaviour. See #244.
     let (stem1, stem2) = match basename {
-        Some(b) => (format!("{}_R1", b), format!("{}_R2", b)),
+        Some(b) => (b.to_string(), b.to_string()),
         None => (
             strip_fastq_extensions(input_r1),
             strip_fastq_extensions(input_r2),
@@ -241,6 +255,46 @@ mod tests {
         let (o1, o2) = paired_end_output_names(r1, r2, None, None, true);
         assert_eq!(o1, PathBuf::from("/data/sample_R1_val_1.fq.gz"));
         assert_eq!(o2, PathBuf::from("/data/sample_R2_val_2.fq.gz"));
+    }
+
+    /// #244 regression: `--basename foo --paired` must produce
+    /// `foo_val_1.fq.gz` / `foo_val_2.fq.gz`, NOT `foo_R1_val_1.fq.gz`
+    /// / `foo_R2_val_2.fq.gz`. Beta.5 silently interpolated `_R1`/`_R2`
+    /// between the basename and the `_val_{1,2}` suffix, which broke
+    /// every nf-core / Snakemake pipeline globbing the documented
+    /// Perl path. Matches Perl v0.6.5+ semantics.
+    #[test]
+    fn test_paired_end_output_names_with_basename() {
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        // No --output_dir: falls back to input parent dir.
+        let (o1, o2) = paired_end_output_names(r1, r2, None, Some("foo"), true);
+        assert_eq!(o1, PathBuf::from("/data/foo_val_1.fq.gz"));
+        assert_eq!(o2, PathBuf::from("/data/foo_val_2.fq.gz"));
+
+        // With --output_dir
+        let out = Path::new("/tmp/out");
+        let (o1, o2) = paired_end_output_names(r1, r2, Some(out), Some("foo"), true);
+        assert_eq!(o1, PathBuf::from("/tmp/out/foo_val_1.fq.gz"));
+        assert_eq!(o2, PathBuf::from("/tmp/out/foo_val_2.fq.gz"));
+
+        // gzip=false suffix
+        let (o1, o2) = paired_end_output_names(r1, r2, None, Some("foo"), false);
+        assert_eq!(o1, PathBuf::from("/data/foo_val_1.fq"));
+        assert_eq!(o2, PathBuf::from("/data/foo_val_2.fq"));
+    }
+
+    /// #244 regression for the `--retain_unpaired` companion path —
+    /// same `_R1`/`_R2` interpolation bug, same fix. With basename "foo"
+    /// the unpaired files must be `foo_unpaired_1.fq.gz` /
+    /// `foo_unpaired_2.fq.gz`.
+    #[test]
+    fn test_unpaired_output_names_with_basename() {
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        let (o1, o2) = unpaired_output_names(r1, r2, None, Some("foo"), true);
+        assert_eq!(o1, PathBuf::from("/data/foo_unpaired_1.fq.gz"));
+        assert_eq!(o2, PathBuf::from("/data/foo_unpaired_2.fq.gz"));
     }
 
     #[test]
