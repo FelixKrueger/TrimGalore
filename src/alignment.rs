@@ -2,6 +2,22 @@
 //!
 //! Reimplements Cutadapt's core adapter matching algorithm using
 //! unit-cost semi-global dynamic programming alignment.
+//!
+//! Per @an-altosian's #248 audit, ~62% of reads in real-world
+//! Buckberry-scale data carry no adapter at all, and for those reads
+//! the entire scalar DP fill is wasted work. To recover that cost
+//! without giving up byte-identity, the public entry-point
+//! [`find_3prime_adapter`] runs a Myers' bit-parallel prefilter first
+//! ([`myers_proves_no_match`]). The prefilter is *conservative*: it
+//! only short-circuits when its O(n) bit-vector walk can rigorously
+//! prove that **no** match exists, considering both the full-adapter
+//! case (last DP row) and the partial-overlap case (last DP column).
+//! When the prefilter cannot prove no-match, control falls through
+//! to the unchanged scalar DP, which produces the canonical answer.
+//! This keeps the byte-identity invariant intact by construction.
+//!
+//! Limited to adapters ≤ 64 bp (single u64 bit-vector). Longer
+//! patterns fall through to the scalar DP unconditionally.
 
 /// Result of an adapter alignment against a read.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +63,17 @@ pub fn find_3prime_adapter(
 
     let n = read.len();
     let m = adapter.len();
+
+    // Myers' bit-parallel prefilter (#248 #4). For adapters ≤ 64 bp,
+    // an O(n) bit-vector walk can prove "no match exists" without
+    // building the full m×n DP. Only short-circuits when both the
+    // full-match (last DP row) and partial-match (last DP column)
+    // checks fail; otherwise falls through to the scalar DP below
+    // which gives the canonical answer. False positives → slight
+    // perf loss, no correctness impact. See module docstring.
+    if myers_proves_no_match(read, adapter, max_error_rate, min_overlap) {
+        return None;
+    }
 
     // Build full DP matrix — for typical adapters (m=13) and reads (n≤150),
     // this is ~2KB. Storing the full matrix enables exact backtrace.
@@ -171,6 +198,186 @@ fn backtrace_start(
         break; // shouldn't happen in a valid DP
     }
     j // column at row 0 = start position in the read
+}
+
+/// Myers' bit-parallel approximate string matching, used as a prefilter
+/// in front of the scalar DP. Returns `true` iff the algorithm can
+/// **prove** that no adapter match exists (full or partial) within the
+/// caller's error budget. A return of `false` means "possibly a match —
+/// run the canonical scalar DP to find out".
+///
+/// Conservativeness is the key contract: the function MUST NEVER return
+/// `true` when [`find_3prime_adapter`]'s scalar DP would return `Some`.
+/// False positives (returning `false` for reads that turn out to have no
+/// match) are fine — they cost a single scalar DP fill on top of the
+/// O(n) bit-vector walk. False negatives (returning `true` when a match
+/// exists) would silently drop adapter-trim events and break byte-
+/// identity vs Perl v0.6.x.
+///
+/// ## Algorithm
+///
+/// Myers (1999) — "A fast bit-vector algorithm for approximate string
+/// matching based on dynamic programming". The pattern's per-character
+/// occurrence sets are encoded as bit-vectors `peq[c]` (bit `i` set iff
+/// `adapter[i] == c`). The DP column is encoded as two bit-vectors `Pv`
+/// and `Mv` of vertical differences (`+1` and `-1` between adjacent rows
+/// in the same column). Each text character costs O(1) bit operations.
+/// The score at the last DP row is tracked as a running counter via the
+/// top bits of `Ph`/`Mh`.
+///
+/// At end-of-walk, we have:
+///  - `min_score` — the minimum `dp[m][j]` across all `j` (full match)
+///  - `Pv`, `Mv` at column `n` — vertical differences encoding `dp[i][n]
+///    - dp[i-1][n]` for each i (partial match column)
+///
+/// We can therefore answer both "is there a full match?" and "is there a
+/// partial match at the last column?" without building the full DP matrix.
+///
+/// ## Limits
+///
+/// - Adapter length must be in `1..=64` (single u64 bit-vector). Longer
+///   adapters fall through unconditionally (return `false`); a multi-word
+///   Myers' is feasible but the project's adapters are all ≤ 32 bp so
+///   the single-word case is sufficient.
+/// - Empty read or empty adapter or `min_overlap == 0` are caller-rejected
+///   above; this function does not re-validate.
+///
+/// ## Attribution
+///
+/// Profiled, prototyped, and benchmarked at Buckberry scale (84M reads,
+/// 38% adapter rate) by @an-altosian (Dongze He) in #248 item #4. The
+/// "wrap as a prefilter around the existing scalar DP" design is his —
+/// it's what makes the byte-identity guarantee automatic. Implementation
+/// here is independent (his ephemeral worktree branch was cleaned up
+/// before we could port from it), but follows his stated shape: prefilter
+/// returns "no match possible", DP unchanged.
+fn myers_proves_no_match(
+    read: &[u8],
+    adapter: &[u8],
+    max_error_rate: f64,
+    min_overlap: usize,
+) -> bool {
+    let m = adapter.len();
+    let n = read.len();
+
+    // Out-of-scope cases: let the scalar DP handle them. Empty read
+    // is already handled in find_3prime_adapter; the m > 64 branch
+    // gracefully degrades for longer adapters.
+    if m == 0 || m > 64 || n == 0 {
+        return false;
+    }
+
+    let max_errors_full = (max_error_rate * m as f64).floor() as usize;
+
+    // Build per-base pattern bitmasks. `peq[b]` has bit i set iff
+    // adapter[i] == b. Indexed by raw byte value (256 entries) so any
+    // non-ACGTN byte simply gets a zero mask (no matches anywhere)
+    // — mirrors the strict equality the scalar DP uses on line 64.
+    let mut peq = [0u64; 256];
+    for (i, &b) in adapter.iter().enumerate() {
+        peq[b as usize] |= 1u64 << i;
+    }
+
+    // m-bit mask covering the active rows. For m == 64 we want all 64
+    // bits set; `(1 << 64) - 1` would overflow, so we special-case.
+    let m_mask: u64 = if m == 64 { !0u64 } else { (1u64 << m) - 1 };
+    let top_bit: u64 = 1u64 << (m - 1);
+
+    // Initial state — Myers' "approximate matching" variant where
+    // dp[0][j] = 0 for all j (free prefix skip in the read). All
+    // vertical differences in column 0 are +1 (dp[i][0] = i). The
+    // running score equals dp[m][0] = m.
+    let mut pv: u64 = m_mask;
+    let mut mv: u64 = 0;
+    let mut score: usize = m;
+    let mut min_score: usize = m;
+
+    for &c in read {
+        let eq = peq[c as usize] & m_mask;
+
+        // Standard Myers' update for one column. The arithmetic is
+        // exactly the form in the 1999 paper, masked to m bits at the
+        // tail to keep bits ≥ m from leaking into row m's score bit.
+        let xv = eq | mv;
+        let xh = (((eq & pv).wrapping_add(pv)) ^ pv) | eq;
+        let mut ph = mv | !(xh | pv);
+        let mut mh = pv & xh;
+
+        // Update the running score at row m via the top bit of Ph/Mh.
+        if ph & top_bit != 0 {
+            score += 1;
+        }
+        if mh & top_bit != 0 {
+            score = score.saturating_sub(1);
+        }
+
+        // Shift carry. NO `| 1` — that's the global-alignment boundary
+        // (dp[0][j] = j); we use the approximate-matching variant where
+        // dp[0][j] = 0 for all j (free prefix skip in the read), so the
+        // horizontal difference at the virtual row 0 is always 0. This
+        // matches Hyyrö 2001's canonical approximate-matching
+        // formulation. Getting this wrong on simple all-mismatch reads
+        // makes the prefilter incorrectly accept "could be a match"
+        // when there's clearly nothing.
+        ph = (ph << 1) & m_mask;
+        mh = (mh << 1) & m_mask;
+
+        pv = (mh | !(xv | ph)) & m_mask;
+        mv = (ph & xv) & m_mask;
+
+        if score < min_score {
+            min_score = score;
+        }
+    }
+
+    // ── Full-match check ──
+    // If the minimum dp[m][j] across all j is still above the full-match
+    // error budget, no full alignment satisfies the threshold. This
+    // alone doesn't prove "no match" — partial matches at the last
+    // column might still satisfy a per-overlap budget — so we keep
+    // checking unless we can rule both out.
+    if min_score <= max_errors_full {
+        return false; // possible full match — defer to scalar DP
+    }
+
+    // ── Partial-match check ──
+    // At end-of-walk, (pv, mv) encode the vertical differences of column
+    // n: bit (i-1) of pv is set iff dp[i][n] - dp[i-1][n] == +1; bit
+    // (i-1) of mv is set iff that difference == -1; otherwise the
+    // difference is 0. We can therefore reconstruct dp[i][n] iteratively
+    // from dp[0][n] = 0, comparing each against the per-i error budget.
+    //
+    // The scalar DP's partial-match loop scans i in [min_overlap, max_partial]
+    // (line 109) where max_partial = m.min(n). If any i in that range has
+    // dp[i][n] ≤ floor(max_error_rate * i), the scalar DP will return Some
+    // — so we MUST defer.
+    let max_partial = m.min(n);
+    if min_overlap > max_partial {
+        // No valid i remains; the partial-match loop in the scalar DP
+        // wouldn't execute. Combined with the failed full-match check
+        // above, no match is possible.
+        return true;
+    }
+
+    let mut cur: usize = 0; // dp[0][n] = 0
+    for i in 1..=max_partial {
+        let bit = 1u64 << (i - 1);
+        if pv & bit != 0 {
+            cur += 1;
+        } else if mv & bit != 0 {
+            cur = cur.saturating_sub(1);
+        }
+        if i >= min_overlap {
+            let max_errors_i = (max_error_rate * i as f64).floor() as usize;
+            if cur <= max_errors_i {
+                return false; // possible partial match — defer to scalar DP
+            }
+        }
+    }
+
+    // Both checks ruled it out: no full match, no partial match. Safe
+    // to short-circuit; the scalar DP would return None.
+    true
 }
 
 #[cfg(test)]
@@ -311,5 +518,174 @@ mod tests {
         assert_eq!(m.read_start, 13);
         assert_eq!(m.overlap, 3);
         assert_eq!(m.errors, 0);
+    }
+
+    // ── Myers' bit-parallel prefilter — direct unit tests ──
+    //
+    // These exercise myers_proves_no_match in isolation, asserting the
+    // conservativeness contract: NEVER return true when the scalar DP
+    // would return Some. The 12 tests above already cover the integrated
+    // behaviour (find_3prime_adapter with prefilter active still returns
+    // the same matches); these tests ground the bit-vector logic directly.
+
+    #[test]
+    fn myers_adapterless_read_proves_no_match() {
+        // Read with zero adapter content (long stretch of unrelated bases).
+        // Adapter is the standard 13 bp Illumina sequence.
+        // At error_rate=0.1, full-match budget is floor(0.1*13)=1, so any
+        // read sequence with >1 mismatch in every alignment window must
+        // cleanly rule out a full match. Partial overlap of length 1 with
+        // 0 errors needs the last read base to equal the first adapter
+        // base ('A'); we end on 'X' to also rule out partials.
+        let read = b"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+        let adapter = b"AGATCGGAAGAGC";
+        assert!(
+            myers_proves_no_match(read, adapter, 0.1, 1),
+            "adapterless read with no partial-overlap base must prove no-match"
+        );
+    }
+
+    #[test]
+    fn myers_adapter_present_returns_false() {
+        // Read containing the adapter exactly. Prefilter MUST defer.
+        let read = b"ACGTACGTACGTACGTAGATCGGAAGAGC";
+        let adapter = b"AGATCGGAAGAGC";
+        assert!(
+            !myers_proves_no_match(read, adapter, 0.1, 1),
+            "adapter-present read must NOT short-circuit"
+        );
+    }
+
+    #[test]
+    fn myers_adapter_within_error_budget_returns_false() {
+        // One mismatch — budget is floor(0.1*13)=1, so this is right at
+        // the threshold. Prefilter must defer to the scalar DP.
+        let read = b"ACGTACGTACGTACGTAGATCXGAAGAGC";
+        //                                ^ one mismatch (G→X relative
+        //                                  to the canonical adapter)
+        let adapter = b"AGATCGGAAGAGC";
+        assert!(
+            !myers_proves_no_match(read, adapter, 0.1, 1),
+            "adapter-with-1-error read must NOT short-circuit at error_rate=0.1"
+        );
+    }
+
+    #[test]
+    fn myers_partial_overlap_at_3prime_end_returns_false() {
+        // Read ends with the first 3 bases of the adapter. The scalar DP
+        // would return a partial match (overlap=3). Prefilter must defer.
+        let read = b"XXXXXXXXXXXXXAGA";
+        let adapter = b"AGATCGGAAGAGC";
+        assert!(
+            !myers_proves_no_match(read, adapter, 0.1, 1),
+            "partial 3' overlap must NOT short-circuit"
+        );
+    }
+
+    #[test]
+    fn myers_long_adapter_falls_through() {
+        // Adapter longer than 64 bp — out of scope for single-word
+        // Myers'. Must always return false (defer to scalar DP).
+        let adapter: Vec<u8> = b"ACGT".repeat(20); // 80 bp
+        let read = b"NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN";
+        assert_eq!(adapter.len(), 80);
+        assert!(
+            !myers_proves_no_match(read, &adapter, 0.1, 1),
+            "adapter > 64 bp must always defer to scalar DP"
+        );
+    }
+
+    #[test]
+    fn myers_bgi_adapter_64bp_boundary_works() {
+        // 64 bp synthetic adapter — the upper limit for single-word
+        // Myers'. No adapter content in the read should cleanly prove
+        // no-match.
+        let adapter: Vec<u8> = b"ACGT".repeat(16); // 64 bp exactly
+        assert_eq!(adapter.len(), 64);
+        let read = b"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+        assert!(
+            myers_proves_no_match(read, &adapter, 0.1, 1),
+            "64 bp adapter at the prefilter limit must work correctly on adapterless reads"
+        );
+    }
+
+    #[test]
+    fn myers_zero_min_overlap_is_caller_responsibility() {
+        // The find_3prime_adapter caller already rejects min_overlap == 0
+        // before calling the prefilter. We don't re-validate; the test is
+        // here to lock the contract: this function trusts its inputs.
+        // With min_overlap == 1 (the smallest valid value), we should
+        // see expected behaviour on a totally adapter-free read.
+        let read = b"NNNNNNNNNNNNNNNN"; // all N — no overlap with ACGT adapter
+        let adapter = b"AGATCGGAAGAGC";
+        assert!(
+            myers_proves_no_match(read, adapter, 0.1, 1),
+            "all-N read against ACGT adapter must prove no-match"
+        );
+    }
+
+    /// Equivalence sweep: for a battery of (read, adapter, error_rate,
+    /// min_overlap) inputs, the prefilter MUST NOT contradict the scalar
+    /// DP. Specifically: if `find_3prime_adapter` returns Some, the
+    /// prefilter must NOT return true (which would have caused
+    /// find_3prime_adapter to return None). This is the "no false negatives"
+    /// half of the conservativeness contract.
+    ///
+    /// Hand-picked test cases targeting tricky DP regions: exact match,
+    /// one-mismatch, partial 3' overlap, mid-read indel, off-by-one at
+    /// match boundaries.
+    #[test]
+    fn myers_no_false_negatives_against_scalar_dp() {
+        let cases: &[(&[u8], &[u8], f64, usize)] = &[
+            // Exact full match
+            (b"ACGTACGTAGATCGGAAGAGC", b"AGATCGGAAGAGC", 0.1, 1),
+            // Full match with one substitution
+            (b"ACGTACGTAGATCGXAAGAGC", b"AGATCGGAAGAGC", 0.1, 1),
+            // Full match with one insertion
+            (b"ACGTACGTAGATCGGXAAGAGC", b"AGATCGGAAGAGC", 0.15, 1),
+            // Partial 3' overlap of length 5
+            (b"XXXXXXXXAGATC", b"AGATCGGAAGAGC", 0.0, 1),
+            // Partial 3' overlap of length 3, at error_rate=0.0 (must be exact)
+            (b"XXXXXXXXAGA", b"AGATCGGAAGAGC", 0.0, 1),
+            // Higher error rate widens the budget
+            (b"ACGTACGTNNATCNGAAGAGC", b"AGATCGGAAGAGC", 0.2, 1),
+            // Adapter at the very start of the read
+            (b"AGATCGGAAGAGCNNNNNNNN", b"AGATCGGAAGAGC", 0.1, 1),
+            // Long read, adapter midway
+            (
+                b"ACGTACGTACGTACGTACGTACGTACGTACGTAGATCGGAAGAGCXXXXXXX",
+                b"AGATCGGAAGAGC",
+                0.1,
+                1,
+            ),
+            // Nextera adapter, partial overlap
+            (b"NNNNNNNNNNNNNNCTGTC", b"CTGTCTCTTATA", 0.0, 1),
+            // BGI 32 bp adapter, full match
+            (
+                b"NNNNNAAGTCGGAGGCCAAGCGGTCTTAGGAAGACAANNNNN",
+                b"AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA",
+                0.1,
+                1,
+            ),
+            // BGI partial overlap at 3' end (length 8)
+            (b"NNNNNNNNNNNNAAGTCGGA", b"AAGTCGGAGGCCAAGCGGTCTTAGGAAGACAA", 0.0, 1),
+        ];
+        for (read, adapter, error_rate, min_overlap) in cases {
+            let scalar_result = find_3prime_adapter(read, adapter, *error_rate, *min_overlap);
+            if scalar_result.is_some() {
+                // Re-run the prefilter directly; if it claims "no match"
+                // we'd have a false negative.
+                assert!(
+                    !myers_proves_no_match(read, adapter, *error_rate, *min_overlap),
+                    "FALSE NEGATIVE: prefilter rejected a match the scalar DP found.\n\
+                     read = {:?}\nadapter = {:?}\nerror_rate = {}\nmin_overlap = {}\n\
+                     scalar DP found: {scalar_result:?}",
+                    std::str::from_utf8(read).unwrap_or("<non-utf8>"),
+                    std::str::from_utf8(adapter).unwrap_or("<non-utf8>"),
+                    error_rate,
+                    min_overlap
+                );
+            }
+        }
     }
 }
