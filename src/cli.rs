@@ -97,20 +97,20 @@ pub struct Cli {
     pub trim_n: bool,
 
     /// Remove N bases from the 5' end of Read 1. Useful for removing 5' quality-bias regions.
-    #[clap(long = "clip_R1")]
+    #[clap(long = "clip_R1", alias = "clip_r1")]
     pub clip_r1: Option<usize>,
 
     /// Remove N bases from the 5' end of Read 2 (paired-end only).
     /// For paired-end bisulfite-seq, the end-repair step can introduce methylation bias; see Bismark User Guide.
-    #[clap(long = "clip_R2")]
+    #[clap(long = "clip_R2", alias = "clip_r2")]
     pub clip_r2: Option<usize>,
 
     /// Remove N bases from the 3' end of Read 1, after adapter/quality trimming.
-    #[clap(long = "three_prime_clip_R1")]
+    #[clap(long = "three_prime_clip_R1", alias = "three_prime_clip_r1")]
     pub three_prime_clip_r1: Option<usize>,
 
     /// Remove N bases from the 3' end of Read 2 (paired-end only), after adapter/quality trimming.
-    #[clap(long = "three_prime_clip_R2")]
+    #[clap(long = "three_prime_clip_R2", alias = "three_prime_clip_r2")]
     pub three_prime_clip_r2: Option<usize>,
 
     /// NextSeq/NovaSeq 2-colour quality trimming. Trailing high-quality G bases
@@ -136,7 +136,9 @@ pub struct Cli {
     #[clap(long = "basename")]
     pub basename: Option<String>,
 
-    /// Do not gzip-compress output files.
+    /// Do not gzip-compress output files. Forces plain output regardless of
+    /// input compression. By default, output compression mirrors the input
+    /// (plain → plain, .gz → .gz; matches Perl v0.6.x behaviour).
     #[clap(long = "dont_gzip")]
     pub dont_gzip: bool,
 
@@ -812,5 +814,53 @@ mod tests {
         let cli = Cli::parse_from(args);
         assert_eq!(cli.adapter, vec!["AGCT"]);
         assert_eq!(cli.adapter2, vec!["GCAT", "AAAA"]);
+    }
+
+    /// Perl `trim_galore` accepts the lowercase clip-flag spellings
+    /// (`--clip_r1` / `--clip_r2` / `--three_prime_clip_r1` /
+    /// `--three_prime_clip_r2`) alongside the uppercase forms. The Rust port
+    /// historically only matched the uppercase canonical, breaking every
+    /// Perl-era pipeline using the lowercase spelling. Regression for #242.
+    #[test]
+    fn test_clip_flags_accept_lowercase_aliases() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--clip_r1",
+            "5",
+            "--clip_r2",
+            "6",
+            "--three_prime_clip_r1",
+            "7",
+            "--three_prime_clip_r2",
+            "8",
+            R1,
+            R2,
+        ]);
+        assert_eq!(cli.clip_r1, Some(5));
+        assert_eq!(cli.clip_r2, Some(6));
+        assert_eq!(cli.three_prime_clip_r1, Some(7));
+        assert_eq!(cli.three_prime_clip_r2, Some(8));
+
+        // The canonical uppercase forms must of course still work. Mix a few
+        // to confirm both aliases resolve to the same field.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--clip_R1",
+            "1",
+            "--clip_r2",
+            "2",
+            "--three_prime_clip_R1",
+            "3",
+            "--three_prime_clip_r2",
+            "4",
+            R1,
+            R2,
+        ]);
+        assert_eq!(cli.clip_r1, Some(1));
+        assert_eq!(cli.clip_r2, Some(2));
+        assert_eq!(cli.three_prime_clip_r1, Some(3));
+        assert_eq!(cli.three_prime_clip_r2, Some(4));
     }
 }

@@ -37,7 +37,14 @@ fn main() -> Result<()> {
 
     FastqReader::sanity_check(&cli.input[0])?;
 
-    let gzip = !cli.dont_gzip;
+    // Output gzip mode. Mirror Perl: by default the output's compression
+    // matches the input's (plain `.fastq` → plain `.fq`, gzipped `.fastq.gz`
+    // → gzipped `.fq.gz`). `--dont_gzip` overrides to always-plain. The
+    // first input determines the mode for the whole run; mixing plain and
+    // gzipped inputs in one invocation isn't a supported configuration.
+    // See #245 for the parity rationale (Rust v2.1.0-beta.5 always gzipped
+    // regardless of input, breaking pipelines that globbed `*.fq` no-gz).
+    let gzip = !cli.dont_gzip && naming::is_gzipped(&cli.input[0]);
     let output_dir = cli.output_dir.as_deref();
 
     // Auto-create --output_dir if it doesn't exist. See io::ensure_output_dir
@@ -250,11 +257,16 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
     });
     eprintln!();
 
-    // Build max_n filter
+    // Build max_n filter. Values in (0.0, 1.0) are interpreted as a fraction
+    // of the read length, matching Perl v0.6.8+ behaviour. The fraction case
+    // is easy to enter accidentally (e.g. typing `--max_n 0.5` when meaning
+    // "half a read"), so emit the same warning Perl does so users can see
+    // which mode their invocation actually selected. See issue #243.
     let max_n = cli.max_n.map(|v| {
         if v >= 1.0 {
             MaxNFilter::Count(v as usize)
         } else {
+            eprintln!("--max_n will be interpreted as a fraction of the read length ({v})");
             MaxNFilter::Fraction(v)
         }
     });

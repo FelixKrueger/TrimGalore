@@ -261,3 +261,135 @@ fn output_filename(base_name: &str, sample_name: &str, gzip: bool) -> String {
         format!("{}_{}.fq", base_name, sample_name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    /// Set up a unique tempdir for a test, removing any leftover from a
+    /// prior aborted run. Mirrors the project's existing test convention
+    /// (`std::env::temp_dir().join("tg_test_*")`).
+    fn fresh_tmpdir(slug: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(slug);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// §5.5 regression: Windows-authored barcode samplesheets use CRLF
+    /// (`\r\n`) line endings. Perl strips the trailing `\r` before
+    /// parsing; Rust's `read_barcode_file` does the same via
+    /// `trim_end_matches('\r').trim_end()`. This test locks down that
+    /// behaviour — without the trim, the barcode field would include a
+    /// trailing `\r`, fail the ACGTN-only validator, and bail with a
+    /// confusing "barcode must contain only A, C, T, G, N" error.
+    #[test]
+    fn test_read_barcode_file_handles_crlf_line_endings() {
+        let dir = fresh_tmpdir("tg_demux_crlf_samplesheet");
+        let path = dir.join("barcodes.tsv");
+        // Three barcodes with explicit CRLF, plus a trailing empty line
+        // to exercise the empty-line branch.
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"sample1\tACGTACGT\r\nsample2\tGTCAGTCA\r\nsample3\tTGCATGCA\r\n\r\n")
+            .unwrap();
+        f.flush().unwrap();
+
+        let entries = read_barcode_file(&path).expect("CRLF samplesheet must parse");
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].sample_name, "sample1");
+        assert_eq!(entries[0].barcode, "ACGTACGT");
+        assert_eq!(entries[1].sample_name, "sample2");
+        assert_eq!(entries[1].barcode, "GTCAGTCA");
+        assert_eq!(entries[2].sample_name, "sample3");
+        assert_eq!(entries[2].barcode, "TGCATGCA");
+        // Critical: no stray '\r' must survive on the parsed barcode.
+        for e in &entries {
+            assert!(
+                !e.barcode.contains('\r'),
+                "barcode '{}' contains stray \\r — CRLF strip failed",
+                e.barcode.escape_default()
+            );
+        }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// §5.6 regression: when a read is shorter than the barcode length,
+    /// `demultiplex` (src/demux.rs:178-187) routes it to the NoCode
+    /// bucket rather than slicing past the read end (which would either
+    /// panic on a non-UTF8 boundary or compare against an empty string).
+    /// End-to-end via `demultiplex` because the routing decision is
+    /// inline with file I/O — easier to verify by inspecting NoCode
+    /// output than to refactor for in-isolation testability.
+    #[test]
+    fn test_demultiplex_short_reads_route_to_nocode() {
+        let dir = fresh_tmpdir("tg_demux_short_nocode");
+        let trimmed = dir.join("input_trimmed.fq");
+
+        // Three reads: one too-short (5 bp < 8 bp barcode), one normal
+        // length but non-matching barcode, one normal length matching
+        // sample1's barcode at the 3' end.
+        let mut f = File::create(&trimmed).unwrap();
+        // Record 1: 5 bp — must route to NoCode (too short).
+        // Record 2: 16 bp ending in ZZZZZZZZ — invalid bases, but the
+        //           extracted 8 bp tail is "GGGGTTTT" → no match → NoCode.
+        // Record 3: 16 bp ending in ACGTACGT — matches sample1's barcode.
+        f.write_all(
+            b"@short\nACGTA\n+\nIIIII\n\
+              @nomatch\nNNNNNNNNGGGGTTTT\n+\nIIIIIIIIIIIIIIII\n\
+              @hit\nNNNNNNNNACGTACGT\n+\nIIIIIIIIIIIIIIII\n",
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        let barcodes = vec![BarcodeEntry {
+            sample_name: "sample1".to_string(),
+            barcode: "ACGTACGT".to_string(),
+        }];
+
+        demultiplex(&trimmed, &barcodes, false, Some(&dir), 1).unwrap();
+
+        // Output base is the trimmed-file basename minus .gz/.fq suffixes:
+        // "input_trimmed.fq" → "input_trimmed" + "_<sample>.fq".
+        let nocode = dir.join("input_trimmed_NoCode.fq");
+        let sample1 = dir.join("input_trimmed_sample1.fq");
+
+        let nocode_text = fs::read_to_string(&nocode).unwrap();
+        let sample1_text = fs::read_to_string(&sample1).unwrap();
+
+        // Both the too-short read and the non-matching one land in NoCode.
+        assert!(
+            nocode_text.contains("@short_BC:"),
+            "short read must route to NoCode. NoCode contents:\n{nocode_text}"
+        );
+        assert!(
+            nocode_text.contains("@nomatch_BC:"),
+            "non-matching read must route to NoCode. NoCode contents:\n{nocode_text}"
+        );
+        // The short read's seq + qual are cleared (no slice past EOR).
+        let short_block = nocode_text
+            .lines()
+            .skip_while(|l| !l.starts_with("@short_BC:"))
+            .take(4)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            short_block.len(),
+            4,
+            "short record must still emit a 4-line FASTQ block"
+        );
+        assert_eq!(short_block[1], "", "short read seq must be cleared");
+        assert_eq!(short_block[3], "", "short read qual must be cleared");
+
+        // The matching read lands in the sample bucket.
+        assert!(
+            sample1_text.contains("@hit_BC:ACGTACGT"),
+            "matching read must route to sample1 bucket. sample1 contents:\n{sample1_text}"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}

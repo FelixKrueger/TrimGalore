@@ -1611,6 +1611,36 @@ mod tests {
         );
     }
 
+    /// Beta.3 had a paired-end-only regression where the parameter-summary
+    /// line emitted `...sequence pair gets removed-end: 20 bp` (a stray
+    /// `-end` from the PE branch suffix leaking into the rendered template)
+    /// instead of `...sequence pair gets removed: 20 bp`. MultiQC parsers
+    /// grep for the literal "removed:" form, so the typo broke aggregation.
+    /// Lock down a class-of-typo regression: any reintroduction would fail
+    /// the assertion.
+    #[test]
+    fn test_paired_param_summary_no_removed_end_typo() {
+        let mut config = test_config();
+        config.paired = true;
+        config.length_cutoff = 20;
+        config.input_filename = "sample_R1.fq.gz".to_string();
+
+        let mut buf = Vec::new();
+        write_report_header(&mut buf, &config).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(
+            !text.contains("removed-end"),
+            "PE param summary must not contain the legacy 'removed-end:' typo. \
+             Rendered:\n{text}"
+        );
+        assert!(
+            text.contains("sequence pair gets removed: 20 bp"),
+            "PE param summary must contain canonical 'removed: 20 bp' form. \
+             Rendered:\n{text}"
+        );
+    }
+
     #[test]
     fn test_pair_validation_emits_zero_n_count_line() {
         // Same shape on the PE side: pairs_removed_n is now always emitted.

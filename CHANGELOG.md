@@ -3,6 +3,66 @@
 
 ### Unreleased (queued for v2.1.0-beta.6)
 
+#### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported)
+
+- **Lowercase clip-flag spellings (`--clip_r1`, `--clip_r2`,
+  `--three_prime_clip_r1`, `--three_prime_clip_r2`) are now accepted.**
+  Perl `trim_galore` accepted both lowercase and uppercase spellings;
+  the Rust port matched the uppercase canonical only and rejected the
+  lowercase forms with a clap parse error (exit 2). Every Perl-era
+  pipeline using the documented lowercase spelling broke under v2.x.
+  Added lowercase aliases on all four flags. Reported and diagnosed by
+  @an-altosian during a Phase-1B Perl-parity hunt. (#242)
+
+- **Output gzip compression now mirrors input compression by default.**
+  Plain `.fastq` input → plain `.fq` output; `.fastq.gz` → `.fq.gz`.
+  Restores Perl v0.6.x behaviour. Rust v2.1.0-beta.5 always emitted
+  gzipped output regardless of input, breaking pipelines that globbed
+  `*.fq` (no `.gz`) for outputs from plain-text inputs. `--dont_gzip`
+  still works as the explicit "always plain" override. The first input
+  determines the mode for the whole run; mixing plain and gzipped
+  inputs in one invocation isn't a supported configuration. Reported
+  by @an-altosian via #245 (item A).
+
+- **`--retain_unpaired` now routes both mates independently to their
+  unpaired files when both mates fail the discard `--length` cutoff,
+  if each is individually long enough for the per-side `--length_{1,2}`
+  threshold.** Rust v2.1.0-beta.5 had an extra `!r{1,2}_short` clause in
+  `filters::filter_paired_end` that gated unpaired rescue on the read
+  itself passing the discard cutoff, which silently dropped reads when
+  both mates failed `--length` together but were individually long
+  enough. Matches Perl `master:trim_galore:2325-2343`. Slight caveat:
+  Perl's behaviour diverges from its own user-guide wording ("rescue
+  the surviving mate"); we match the implementation, not the docs, to
+  preserve byte-identity for the documented byte-identity flag paths.
+  Regression test added. Reported by @an-altosian via #245 (item C).
+
+#### Behavioural notes (v2.x intentional widenings, since v2.1.0-beta.5)
+
+- **`--clock` and `--implicon` now imply `--paired`** — passing either
+  flag without `--paired` is no longer rejected. Both modes are
+  inherently paired-end specialty modes; requiring users to pass
+  `--paired` redundantly was noise. Pipelines using the explicit Perl
+  form (`--clock --paired` / `--implicon --paired`) continue to work
+  unchanged. Consistent with the multi-pair widening pattern documented
+  for these specialty modes in beta.4. Surfaced by @an-altosian via
+  #245 (item D).
+
+#### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported, continued)
+
+- **`--max_n` fraction-mode now logs the Perl-style notice on entry**
+  ("`--max_n will be interpreted as a fraction of the read length
+  (0.5)`"). Investigating @an-altosian's #243 confirmed the dispatch
+  and filter chain behave correctly: values in `(0.0, 1.0)` already
+  build `MaxNFilter::Fraction` and `n_count/length > threshold`
+  filtering matches Perl v0.6.8+ behaviour byte-for-byte. The
+  reproducer-fixture's max-N fraction (3/153 ≈ 0.02) just doesn't
+  exceed the 0.5 threshold, so neither implementation filters
+  anything — *not* a bug. Adding the same warning Perl prints
+  (`master:trim_galore:3328`) makes the selected mode visible at
+  runtime so users don't have to derive it from output statistics.
+  (#243)
+
 #### Bug fixes (since v2.1.0-beta.5)
 
 - **`-o/--output_dir DIR` no longer hangs when `DIR` doesn't exist.** The
@@ -18,6 +78,87 @@
   behaviour ("If an output directory which was specified with -o
   output_directory did not exist, it will be created for you", v0.6.0
   changelog).
+
+#### Tests (since v2.1.0-beta.5) — coverage gaps closed (#246)
+
+Five new unit tests landed across `report.rs`, `demux.rs`, `fastq.rs`,
+and `adapter.rs`. Closes 5 of the 6 `§5.x` items from the test-coverage
+audit. Total test count: 171 → 177. Items still open from #246:
+parallel/serial stat-tracking parity (§5.2), comprehensive
+`parallel.rs` coverage, optional upstreaming of @an-altosian's
+proptest harness — tracked as separate followups.
+
+- **§5.4 PE param-summary `removed-end:` regression guard**
+  (`report.rs::tests`). Beta.3 fixed a stray `-end` suffix in the
+  paired-end parameter-summary line (`...sequence pair gets
+  removed-end: 20 bp` → `...removed: 20 bp`); MultiQC parsers grep
+  for the literal `removed:` form. Test renders the PE header and
+  asserts both `!contains("removed-end")` and the canonical phrase —
+  any reintroduction of the typo class fails the assertion.
+
+- **§5.5 Demux CRLF samplesheet handling** (`demux.rs::tests`).
+  Windows-authored barcode sheets use `\r\n` line endings; without
+  the `trim_end_matches('\r')` strip in `read_barcode_file`, the
+  trailing `\r` would pollute the parsed barcode and fail the
+  ACGTN-only validator with a confusing "barcode must contain only
+  A, C, T, G, N" error. Test writes a CRLF samplesheet and asserts
+  no stray `\r` survives on any parsed entry.
+
+- **§5.6 Demux short-read NoCode routing** (`demux.rs::tests`).
+  When a trimmed read is shorter than the barcode length,
+  `demultiplex` (`src/demux.rs:178-187`) routes it to the NoCode
+  bucket instead of slicing past the read end. End-to-end test:
+  fixture with one 5 bp read, one non-matching 16 bp read, and one
+  matching 16 bp read; asserts both NoCode-bound reads land in
+  `*_NoCode.fq` (with cleared seq+qual for the too-short one) and
+  the matching read lands in the per-sample bucket. Together with
+  §5.5 closes the `demux.rs` zero-tests module gap.
+
+- **§5.1 Multi-member gzip reader round-trip** (`fastq.rs::tests`).
+  The parallel writer (`--cores N`) emits each worker's chunk as
+  its own gzip member; the concatenated stream is a valid RFC 1952
+  multi-member gzip file. Test crafts a 2-member buffer with
+  `GzEncoder::finish` twice, concatenates, and asserts
+  `FastqReader` (using `MultiGzDecoder`) yields records from BOTH
+  members in order. Originally fixed in `9dcf519` (pre-beta.1) but
+  never had a unit-level regression test.
+
+- **§5.3 Adapter auto-detect `MAX_SCAN_READS` boundary**
+  (`adapter.rs::tests`). The 1M-read scan cap was unverified at the
+  unit level; generating a >1M-read fixture per test run is too
+  slow. Refactored: extracted `autodetect_adapter_with_max_scan`
+  (crate-private) so tests can exercise the same `increment-then-
+  break` control flow at scale 7. Two paired tests: cap-bounded
+  (input has 100 records, max_scan=7, asserts `reads_scanned == 7`
+  and matches < 100) and cap-unbounded (input has 50 records,
+  max_scan=1M, asserts full-file scan). Public `autodetect_adapter`
+  API unchanged.
+
+#### Infrastructure (contributor-facing, since v2.1.0-beta.5) — CI hardening (#247)
+
+Three CI improvements landed from @an-altosian's audit (#247). Touches
+only `.github/workflows/ci.yml`; no runtime change.
+
+- **Validation outputs uploaded on failure.** When any md5 oracle
+  step fails, the `/tmp/tg`, `/tmp/op*`, and `/tmp/*.log` paths that
+  triggered the mismatch were previously lost when the runner cleaned
+  up. New `if: failure()` step uploads them as a 7-day artifact under
+  `validation-outputs-<run_id>-<attempt>`. Especially useful for
+  reviewing perf PRs that intentionally change output bytes (e.g. a
+  default gzip-level change) — the new artefacts can be diffed
+  against the Perl baseline directly.
+- **Perl Trim Galore source fetched from local `master` instead of
+  `raw.githubusercontent`.** The Perl v0.6.x release line lives at
+  `master:trim_galore` in this repo; replacing the curl with
+  `git fetch --depth=1 origin master && git show
+  origin/master:trim_galore` gives byte-identical content with zero
+  external network dependency, eliminating a class of CI flake.
+- **Cutadapt bioconda revision pinned (`cutadapt=5.2=*_0`).** The
+  validation matrix uses Cutadapt's output as the Perl-side oracle,
+  so an unannounced bioconda revision bump (5.2-1, etc.) could
+  silently shift the md5 baseline. Pin to the first build of 5.2 so
+  any rev bump becomes a visible CI failure rather than invisible
+  drift.
 
 #### Bug fixes (since v2.1.0-beta.5) — surfaced by the nf-core pre-GA validation review
 
