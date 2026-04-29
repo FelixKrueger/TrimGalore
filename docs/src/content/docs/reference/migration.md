@@ -48,6 +48,10 @@ A small pre-parse hook recognises Perl-era flag spellings and rewrites them to t
 - Colorspace input. Rejected with a clear error message, matching v0.6.x behaviour. Colorspace data has not been generated in years.
 - The per-flag `Cutadapt version` and `Python version` lines in the parameter summary. Cutadapt and Python are not subprocesses in v2, so those lines are dropped. The MultiQC parser already handles their absence.
 
+## Note on `-a 'A{N}'` for poly-A trimming
+
+For poly-A trimming, prefer the dedicated `--poly_a` flag — it has proper paired-end semantics (3' end on R1, 5' end on R2) and is the supported v2 path. The `-a 'A{N}'` form (a v0.6.x workaround that pre-dates `--poly_a`) still works and the brace expansion still produces `AAAA…` byte-for-byte, but the alignment DP may produce slightly different matches than Perl v0.6.x on highly-repetitive adapter patterns: every position in a poly-A read has potential matches, so the choice of "where the adapter starts" reduces to a tie-break that Cutadapt and the Rust port resolve differently. Both are valid global-best alignments under their respective tie-break rules — neither is wrong by spec — but the byte-identity guarantee in the table above does not extend to single-base repeating adapters.
+
 ## Migration checklist
 
 To move an existing pipeline from v0.6.x to v2:
