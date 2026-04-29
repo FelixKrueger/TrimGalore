@@ -20,7 +20,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 
-use crate::fastq::{FastqReader, FastqRecord};
+use crate::fastq::{FastqReader, FastqRecord, OUTPUT_GZIP_LEVEL};
 use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
 use crate::report::{PairValidationStats, TrimStats};
 use crate::trimmer::{self, TrimConfig, update_adapter_stats};
@@ -246,15 +246,21 @@ fn process_paired_batch(
         // Scoped block: GzEncoders borrow the buffers; finish() before block
         // ends releases the borrows so we can return the buffers.
         {
-            let mut gz_r1 = GzEncoder::new(&mut buf_r1, Compression::new(crate::fastq::OUTPUT_GZIP_LEVEL));
-            let mut gz_r2 = GzEncoder::new(&mut buf_r2, Compression::new(crate::fastq::OUTPUT_GZIP_LEVEL));
+            let mut gz_r1 = GzEncoder::new(&mut buf_r1, Compression::new(OUTPUT_GZIP_LEVEL));
+            let mut gz_r2 = GzEncoder::new(&mut buf_r2, Compression::new(OUTPUT_GZIP_LEVEL));
             let mut gz_up_r1 = if retain_unpaired {
-                Some(GzEncoder::new(&mut buf_up_r1, Compression::new(crate::fastq::OUTPUT_GZIP_LEVEL)))
+                Some(GzEncoder::new(
+                    &mut buf_up_r1,
+                    Compression::new(OUTPUT_GZIP_LEVEL),
+                ))
             } else {
                 None
             };
             let mut gz_up_r2 = if retain_unpaired {
-                Some(GzEncoder::new(&mut buf_up_r2, Compression::new(crate::fastq::OUTPUT_GZIP_LEVEL)))
+                Some(GzEncoder::new(
+                    &mut buf_up_r2,
+                    Compression::new(OUTPUT_GZIP_LEVEL),
+                ))
             } else {
                 None
             };
@@ -560,7 +566,7 @@ fn process_single_batch(
 
     if gzip {
         {
-            let mut gz = GzEncoder::new(&mut buf, Compression::new(crate::fastq::OUTPUT_GZIP_LEVEL));
+            let mut gz = GzEncoder::new(&mut buf, Compression::new(OUTPUT_GZIP_LEVEL));
             process_reads(reads, config, &mut stats, &mut gz)?;
             gz.finish()?;
         }
