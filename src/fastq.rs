@@ -16,6 +16,16 @@ use std::path::Path;
 /// Buffer size for gzip I/O — 64KB for throughput (flate2 default of 8KB is too small).
 const BUF_SIZE: usize = 64 * 1024;
 
+/// Output gzip compression level. Set to 1 (fastest) — at Buckberry-
+/// scale (84M reads, 38% adapter rate, cores=8) the compression CPU
+/// dominated wall time on saturated workers; lowering from level 6 to
+/// 1 measured ~−23% wall and ~−43% user-CPU at byte-identity of the
+/// decompressed output (gzip framing differs but `gzip -dc` yields
+/// the same bytes). Trade: output `.fq.gz` files are ~75% larger.
+/// See #248 (item #1 in @an-altosian's perf audit). Centralised here
+/// so a future `--high-compression` opt-in flag is a one-line change.
+pub const OUTPUT_GZIP_LEVEL: u32 = 1;
+
 /// A single FASTQ record with owned data.
 #[derive(Debug, Clone)]
 pub struct FastqRecord {
@@ -463,14 +473,14 @@ impl FastqWriter {
                                 cores
                             )
                         })?
-                        .compression_level(Compression::new(6))
+                        .compression_level(Compression::new(OUTPUT_GZIP_LEVEL))
                         .from_writer(file),
                 )
             } else {
                 // Single-threaded gzip with zlib-rs SIMD backend
                 Box::new(BufWriter::with_capacity(
                     BUF_SIZE,
-                    GzEncoder::new(file, Compression::new(6)),
+                    GzEncoder::new(file, Compression::new(OUTPUT_GZIP_LEVEL)),
                 ))
             }
         } else {
