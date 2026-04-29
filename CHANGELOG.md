@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Unreleased (queued for v2.1.0-beta.6)
+### Version 2.1.0-beta.6 (Release on 29 Apr 2026)
 
 #### Performance (since v2.1.0-beta.5) — Buckberry-scale audit (#248)
 
