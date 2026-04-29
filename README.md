@@ -126,7 +126,7 @@ trim_galore --help
 | Paired-end | `*_val_1.fq.gz` / `*_val_2.fq.gz` | per-read text + JSON reports |
 | Unpaired (with `--retain_unpaired`) | `*_unpaired_1.fq.gz` / `*_unpaired_2.fq.gz` | |
 
-Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless.
+Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. Gzip output is written at compression level 1 (fastest) — decompressed content is byte-identical to higher-level output, but the resulting `.fq.gz` files are roughly 75% larger in exchange for substantially faster trimming on multi-core runs.
 
 The JSON report contains the same statistics as the text report in a structured format (schema v1), designed for native parsing by MultiQC.
 
