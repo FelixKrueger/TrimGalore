@@ -41,8 +41,8 @@ This is the "v2.0-era" Rust binary — published to crates.io before the post-au
 | 1 | 14:59 (899s) | 899s |
 | 4 | 4:37 (277s) | 1,176s |
 | 8 | 2:19 (139s) | 1,175s |
-| 10 | **{TBD: extras, ETA ~11:00 UTC}** | **{TBD}** |
-| 12 | **{TBD: extras}** | **{TBD}** |
+| 10 | 1:51 (111s) | 1,178s |
+| 12 | **{TBD: extras, in progress}** | **{TBD}** |
 | 14 | **{TBD: extras}** | **{TBD}** |
 | 16 | 1:18 (78s) | 1,233s |
 | 24 | 1:25 (85s) | 1,349s |
