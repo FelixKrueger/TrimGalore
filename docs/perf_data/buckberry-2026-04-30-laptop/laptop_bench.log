@@ -1,0 +1,39 @@
+================================================================
+Trim Galore — Apple Silicon laptop benchmark
+Started at 2026-04-30T14:11:39Z
+Hardware: Apple M1 Pro, 10 cores
+Memory: 32.0 GiB
+Binary: /Users/fkrueger/.cargo-tg-beta7-local/bin/trim_galore
+trim_galore 2.1.0-beta.7 (Oxidized Edition)
+unknown — macos/aarch64 — built 2026-04-30T14:08:53Z
+Hyperfine: --warmup 1 --runs 3, cores 1 2 4 6
+================================================================
+
+----- rust-beta7 cores=1 -----
+Benchmark 1: rust-beta7-c1
+  Time (mean ± σ):     455.739 s ± 17.273 s    [User: 419.202 s, System: 10.848 s]
+  Range (min … max):   439.022 s … 473.518 s    3 runs
+ 
+
+----- rust-beta7 cores=2 -----
+Benchmark 1: rust-beta7-c2
+  Time (mean ± σ):     220.743 s ±  6.996 s    [User: 475.004 s, System: 7.361 s]
+  Range (min … max):   215.920 s … 228.767 s    3 runs
+ 
+
+----- rust-beta7 cores=4 -----
+Benchmark 1: rust-beta7-c4
+  Time (mean ± σ):     112.494 s ±  2.409 s    [User: 479.381 s, System: 7.323 s]
+  Range (min … max):   110.263 s … 115.049 s    3 runs
+ 
+
+----- rust-beta7 cores=6 -----
+Benchmark 1: rust-beta7-c6
+  Time (mean ± σ):     79.542 s ±  0.639 s    [User: 493.299 s, System: 7.913 s]
+  Range (min … max):   79.005 s … 80.248 s    3 runs
+ 
+
+================================================================
+Done at 2026-04-30T15:09:35Z
+Results: /tmp/claude/laptop_perf_data
+================================================================

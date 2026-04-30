@@ -102,27 +102,20 @@ Three ways to read this:
 - **Headline speed at saturation:** Oxidized `--cores 8` (12 threads) finishes in **57 seconds — 4.54× faster than TG `-j 8`** at **5.93× less CPU**. The cleanest apples-to-apples cores-vs-cores comparison; this is the number nf-core users see.
 - **Maximum throughput at comparable thread budget:** Oxidized `--cores 24` (~28 threads) vs TG `-j 8` (~27 threads). Finishes in 61 seconds, **4.21× faster** at 4.20× less CPU. Diminishing returns past `--cores 8` because gzip-output I/O is the bottleneck.
 
-## Laptop benchmark: Apple M1 Pro (10 cores)
+## Laptop benchmark: Apple M1 Pro (10 cores, 32 GiB)
 
-(Older benchmark from a different 56M-read fixture (SRR24827378), preserved for laptop-class hardware reference. The Rust binary used here is v2.0-era — pre-Buckberry-audit. A v2.1.0-beta.7 re-run on Apple Silicon would land slightly larger speedups, comparable to the server-side picture above.)
+Same Buckberry SRR24827373 fixture (84M PE reads, 4.4 GiB gzipped), Trim Galore v2.1.0-beta.7 (Apple Silicon native build via `cargo install`). Methodology: `hyperfine --warmup 1 --runs 3` per condition — intentionally lighter than the server-side `--runs 10` since the goal is a directional cross-platform datapoint, not paper-grade rigor. Cores ladder stops at 6 (of 10 physical) to leave headroom for the OS and other applications. Raw data: [`docs/perf_data/buckberry-2026-04-30-laptop/`](https://github.com/FelixKrueger/TrimGalore/tree/optimus_prime/docs/perf_data/buckberry-2026-04-30-laptop).
 
-### Trim Galore (Perl 5.34 + Cutadapt 4.9 + pigz)
+| `--cores` | Wall time | CPU time | Speedup vs c1 |
+|----------:|----------:|---------:|---------------:|
+| 1 | 7:36 (456s) | 430s | 1.00× |
+| 2 | 3:41 (221s) | 482s | 2.07× |
+| 4 | 1:52 (112s) | 487s | 4.07× |
+| 6 | 1:20 (80s) | 501s | 5.73× |
 
-| `-j` | Wall time | CPU time |
-|-----:|----------:|---------:|
-| 1 | 27:04 (1,624s) | 2,536s |
-| 2 | 13:50 (830s) | 2,741s |
-| 4 | 7:15 (435s) | 2,868s |
+**At `--cores 6`, the laptop finishes 84M PE reads in 80 seconds.** That's within ~40% of the server-side cores=8 saturation point (57s on Granite Rapids) — Apple M1 Pro is ~38% slower per-core than Xeon 6975P-C, and the gap is consistent across the ladder (laptop c1: 456s vs server c1: 329s; laptop c4: 112s vs server c4: 81s).
 
-### Trim Galore Oxidized Edition (v2.0-era Rust)
-
-| `--cores` | Wall time | CPU time | Speedup vs TG `-j 1` |
-|----------:|----------:|---------:|----------------------:|
-| 1 | 11:46 (706s) | 695s | 2.3× |
-| 2 | 7:16 (436s) | 908s | 3.7× |
-| 4 | 3:46 (226s) | 936s | 7.2× |
-| 6 | 2:35 (155s) | 957s | 10.5× |
-| 8 | 2:03 (123s) | 994s | 13.2× |
+The Perl 0.6.11 reference for this hardware is omitted from this run for time reasons — Perl c1 on Buckberry takes ~45 minutes per iteration, so even 3 iterations × 4 cores values is roughly a 6-hour run on a laptop. The cross-engine ratios from the server table (e.g. **5.93× less CPU at cores=8**) hold here directionally — Perl's three-process pipeline architecture has the same I/O bottlenecks regardless of CPU family.
 
 ## Cost and CO₂
 
