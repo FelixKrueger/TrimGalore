@@ -5,11 +5,11 @@ description: Install Trim Galore via cargo, bioconda, Docker, or prebuilt binari
 
 Trim Galore v2 ships as a single static binary. No Python, no Perl, no Cutadapt, no Java, no `igzip`, no `pigz`, no external FastQC. Pick whichever channel fits the rest of your stack.
 
-:::caution[Beta testing v2.1.0-beta.7]
+:::caution[Beta testing v2.1.0-beta.8]
 The current stable release on crates.io is **v2.0.0**. v2.1.0 is in beta. `cargo install trim-galore` without `--version` installs v2.0.0. To install the beta:
 
 ```bash
-cargo install trim-galore --version 2.1.0-beta.7
+cargo install trim-galore --version 2.1.0-beta.8
 docker pull ghcr.io/felixkrueger/trimgalore:beta
 ```
 
@@ -63,8 +63,8 @@ FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fast
 
 | Tag | Updates |
 | --- | --- |
-| `:beta` | latest prerelease (currently v2.1.0-beta.7) |
-| `:v2.1.0-beta.7` | pinned to a specific prerelease |
+| `:beta` | latest prerelease (currently v2.1.0-beta.8) |
+| `:v2.1.0-beta.8` | pinned to a specific prerelease |
 | `:dev` | every push to the `optimus_prime` development branch |
 | `:latest` | latest stable release (publishes from v2.1.0 GA onward) |
 
@@ -85,7 +85,7 @@ trim_galore --version
 Should print:
 
 ```
-trim_galore 2.1.0-beta.7 (Oxidized Edition)
+trim_galore 2.1.0-beta.8 (Oxidized Edition)
 <git-hash> — <os>/<arch> — built <ISO-8601-UTC>
 ```
 

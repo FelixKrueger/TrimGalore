@@ -20,7 +20,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 
-use crate::fastq::{FastqReader, FastqRecord, OUTPUT_GZIP_LEVEL};
+use crate::fastq::{FastqReader, FastqRecord, output_gzip_level};
 use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
 use crate::report::{PairValidationStats, TrimStats};
 use crate::trimmer::{self, TrimConfig, update_adapter_stats};
@@ -243,24 +243,19 @@ fn process_paired_batch(
     let mut buf_up_r2 = Vec::new();
 
     if gzip {
+        let level = output_gzip_level(config.high_compression);
         // Scoped block: GzEncoders borrow the buffers; finish() before block
         // ends releases the borrows so we can return the buffers.
         {
-            let mut gz_r1 = GzEncoder::new(&mut buf_r1, Compression::new(OUTPUT_GZIP_LEVEL));
-            let mut gz_r2 = GzEncoder::new(&mut buf_r2, Compression::new(OUTPUT_GZIP_LEVEL));
+            let mut gz_r1 = GzEncoder::new(&mut buf_r1, Compression::new(level));
+            let mut gz_r2 = GzEncoder::new(&mut buf_r2, Compression::new(level));
             let mut gz_up_r1 = if retain_unpaired {
-                Some(GzEncoder::new(
-                    &mut buf_up_r1,
-                    Compression::new(OUTPUT_GZIP_LEVEL),
-                ))
+                Some(GzEncoder::new(&mut buf_up_r1, Compression::new(level)))
             } else {
                 None
             };
             let mut gz_up_r2 = if retain_unpaired {
-                Some(GzEncoder::new(
-                    &mut buf_up_r2,
-                    Compression::new(OUTPUT_GZIP_LEVEL),
-                ))
+                Some(GzEncoder::new(&mut buf_up_r2, Compression::new(level)))
             } else {
                 None
             };
@@ -566,7 +561,10 @@ fn process_single_batch(
 
     if gzip {
         {
-            let mut gz = GzEncoder::new(&mut buf, Compression::new(OUTPUT_GZIP_LEVEL));
+            let mut gz = GzEncoder::new(
+                &mut buf,
+                Compression::new(output_gzip_level(config.high_compression)),
+            );
             process_reads(reads, config, &mut stats, &mut gz)?;
             gz.finish()?;
         }
@@ -679,6 +677,7 @@ mod tests {
             poly_a: false,
             poly_g: false,
             discard_untrimmed: false,
+            high_compression: false,
         }
     }
 
@@ -719,7 +718,8 @@ mod tests {
         let serial_output = dir.join("serial_out.fq");
         let stats_serial = {
             let mut reader = FastqReader::open(&input_path)?;
-            let mut writer = FastqWriter::create(&serial_output, false, 1)?;
+            let mut writer =
+                FastqWriter::create(&serial_output, false, 1, crate::fastq::OUTPUT_GZIP_LEVEL)?;
             let stats = crate::trimmer::run_single_end(&mut reader, &mut writer, &config)?;
             writer.flush()?;
             stats
@@ -852,6 +852,68 @@ mod tests {
         assert!(
             reader.next_record()?.is_none(),
             "empty input must produce empty output (zero records)"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// `--high_compression` smoke test: same input, two runs (default
+    /// level 1 vs `high_compression: true` level 6). The level-6 output
+    /// must be smaller on disk, and decompressed output must be
+    /// byte-identical between the two — gzip framing differs but
+    /// payload is preserved (gzip levels 1 and 6 are both lossless).
+    #[test]
+    fn test_high_compression_produces_smaller_output() -> Result<()> {
+        let dir = fresh_tmpdir("tg_high_compression");
+        let input_path = dir.join("input.fq");
+
+        // 200 reads with a repeating-sequence motif so gzip can find
+        // back-references at higher levels. Sized to span a single
+        // batch so output is one gzip member regardless of cores.
+        let mut content = String::new();
+        for i in 0..200 {
+            content.push_str(&format!(
+                "@read_{i}\nACGTACGTACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n"
+            ));
+        }
+        fs::write(&input_path, content)?;
+
+        let config_default = parity_test_config();
+        let mut config_high = parity_test_config();
+        config_high.high_compression = true;
+
+        let out_default = dir.join("out_default.fq.gz");
+        let out_high = dir.join("out_high.fq.gz");
+
+        run_single_end_parallel(&input_path, &out_default, &config_default, 2, true)?;
+        run_single_end_parallel(&input_path, &out_high, &config_high, 2, true)?;
+
+        let size_default = fs::metadata(&out_default)?.len();
+        let size_high = fs::metadata(&out_high)?.len();
+
+        assert!(
+            size_high < size_default,
+            "high_compression output ({} bytes) must be smaller than default ({} bytes)",
+            size_high,
+            size_default
+        );
+
+        // Decompressed output must match: gzip levels are lossless;
+        // only the framing differs.
+        let read_records = |p: &std::path::Path| -> Result<Vec<(String, String, String)>> {
+            let mut r = FastqReader::open(p)?;
+            let mut v = Vec::new();
+            while let Some(rec) = r.next_record()? {
+                v.push((rec.id, rec.seq, rec.qual));
+            }
+            Ok(v)
+        };
+        let recs_default = read_records(&out_default)?;
+        let recs_high = read_records(&out_high)?;
+        assert_eq!(
+            recs_default, recs_high,
+            "decompressed records must be byte-identical between gzip levels 1 and 6"
         );
 
         fs::remove_dir_all(&dir).ok();

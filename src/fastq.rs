@@ -16,15 +16,34 @@ use std::path::Path;
 /// Buffer size for gzip I/O — 64KB for throughput (flate2 default of 8KB is too small).
 const BUF_SIZE: usize = 64 * 1024;
 
-/// Output gzip compression level. Set to 1 (fastest) — at Buckberry-
-/// scale (84M reads, 38% adapter rate, cores=8) the compression CPU
-/// dominated wall time on saturated workers; lowering from level 6 to
-/// 1 measured ~−23% wall and ~−43% user-CPU at byte-identity of the
-/// decompressed output (gzip framing differs but `gzip -dc` yields
-/// the same bytes). Trade: output `.fq.gz` files are ~75% larger.
-/// See #248 (item #1 in @an-altosian's perf audit). Centralised here
-/// so a future `--high-compression` opt-in flag is a one-line change.
+/// Default output gzip compression level. Set to 1 (fastest) — at
+/// Buckberry-scale (84M reads, 38% adapter rate, cores=8) the
+/// compression CPU dominated wall time on saturated workers; lowering
+/// from level 6 to 1 measured ~−23% wall and ~−43% user-CPU at
+/// byte-identity of the decompressed output (gzip framing differs
+/// but `gzip -dc` yields the same bytes). Trade: output `.fq.gz`
+/// files are ~75% larger. See #248 (item #1 in @an-altosian's perf
+/// audit). Users who care about storage more than runtime can opt
+/// into `--high_compression` to get level 6 instead.
 pub const OUTPUT_GZIP_LEVEL: u32 = 1;
+
+/// Gzip compression level used when `--high_compression` is set.
+/// Matches Rust's `flate2::Compression::default()` (level 6) and
+/// gzip(1)'s default — the "balanced" point on the size/speed curve.
+/// Output bytes are ~75% smaller than level 1; per-block compression
+/// CPU is roughly 2× higher.
+pub const HIGH_COMPRESSION_GZIP_LEVEL: u32 = 6;
+
+/// Returns the gzip output level to use given the `--high_compression`
+/// flag state. Centralises the size-vs-speed trade so every output
+/// callsite reads the same way: `Compression::new(output_gzip_level(...))`.
+pub fn output_gzip_level(high_compression: bool) -> u32 {
+    if high_compression {
+        HIGH_COMPRESSION_GZIP_LEVEL
+    } else {
+        OUTPUT_GZIP_LEVEL
+    }
+}
 
 /// A single FASTQ record with owned data.
 #[derive(Debug, Clone)]
@@ -445,7 +464,15 @@ pub struct FastqWriter {
 impl FastqWriter {
     /// Create a new FASTQ writer. Gzip-compresses if `gzip` is true.
     /// When `cores` > 1 and gzip is enabled, uses parallel gzip compression.
-    pub fn create<P: AsRef<Path>>(path: P, gzip: bool, cores: usize) -> Result<Self> {
+    /// `gzip_level` is the deflate level (1 = fastest/largest, 6 = balanced,
+    /// 9 = smallest/slowest). Use `output_gzip_level(high_compression)`
+    /// to derive the right value from a `--high_compression` flag.
+    pub fn create<P: AsRef<Path>>(
+        path: P,
+        gzip: bool,
+        cores: usize,
+        gzip_level: u32,
+    ) -> Result<Self> {
         let path = path.as_ref();
 
         // Ensure parent directory exists
@@ -472,14 +499,14 @@ impl FastqWriter {
                                 cores
                             )
                         })?
-                        .compression_level(Compression::new(OUTPUT_GZIP_LEVEL))
+                        .compression_level(Compression::new(gzip_level))
                         .from_writer(file),
                 )
             } else {
                 // Single-threaded gzip with zlib-rs SIMD backend
                 Box::new(BufWriter::with_capacity(
                     BUF_SIZE,
-                    GzEncoder::new(file, Compression::new(OUTPUT_GZIP_LEVEL)),
+                    GzEncoder::new(file, Compression::new(gzip_level)),
                 ))
             }
         } else {
@@ -616,7 +643,7 @@ mod tests {
         ];
 
         {
-            let mut writer = FastqWriter::create(&out_path, false, 1)?;
+            let mut writer = FastqWriter::create(&out_path, false, 1, OUTPUT_GZIP_LEVEL)?;
             for rec in &records {
                 writer.write_record(rec)?;
             }

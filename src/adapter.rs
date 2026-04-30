@@ -734,8 +734,8 @@ mod tests {
         adapter_seq: &str,
         num_reads: usize,
     ) -> Result<()> {
-        use crate::fastq::{FastqRecord, FastqWriter};
-        let mut writer = FastqWriter::create(path, false, 1)?;
+        use crate::fastq::{FastqRecord, FastqWriter, OUTPUT_GZIP_LEVEL};
+        let mut writer = FastqWriter::create(path, false, 1, OUTPUT_GZIP_LEVEL)?;
         // Prepend a 20bp random-ish prefix so reads are plausibly long;
         // the probe is looking for adapter_seq as a substring anywhere.
         let prefix = "ACGTACGTACGTACGTACGT";

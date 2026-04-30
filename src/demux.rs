@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-use crate::fastq::{FastqReader, FastqWriter};
+use crate::fastq::{FastqReader, FastqWriter, output_gzip_level};
 
 /// A parsed barcode entry: barcode sequence → sample name.
 #[derive(Debug)]
@@ -119,6 +119,7 @@ pub fn demultiplex(
     gzip: bool,
     output_dir: Option<&Path>,
     cores: usize,
+    high_compression: bool,
 ) -> Result<()> {
     let barcode_length = barcodes[0].barcode.len();
     eprintln!("Setting barcode length to {}", barcode_length);
@@ -145,6 +146,8 @@ pub fn demultiplex(
             .to_path_buf()
     });
 
+    let gzip_level = output_gzip_level(high_compression);
+
     // Open per-sample output writers + NoCode
     let mut writers: HashMap<String, FastqWriter> = HashMap::new();
     for entry in barcodes {
@@ -152,13 +155,13 @@ pub fn demultiplex(
         let path = dir.join(&filename);
         writers.insert(
             entry.barcode.clone(),
-            FastqWriter::create(&path, gzip, cores)?,
+            FastqWriter::create(&path, gzip, cores, gzip_level)?,
         );
     }
     // NoCode writer for unmatched barcodes
     let nocode_filename = output_filename(&base_name, "NoCode", gzip);
     let nocode_path = dir.join(&nocode_filename);
-    let mut nocode_writer = FastqWriter::create(&nocode_path, gzip, cores)?;
+    let mut nocode_writer = FastqWriter::create(&nocode_path, gzip, cores, gzip_level)?;
 
     // Per-barcode counts
     let mut counts: HashMap<String, usize> =
@@ -351,7 +354,7 @@ mod tests {
             barcode: "ACGTACGT".to_string(),
         }];
 
-        demultiplex(&trimmed, &barcodes, false, Some(&dir), 1).unwrap();
+        demultiplex(&trimmed, &barcodes, false, Some(&dir), 1, false).unwrap();
 
         // Output base is the trimmed-file basename minus .gz/.fq suffixes:
         // "input_trimmed.fq" → "input_trimmed" + "_<sample>.fq".

@@ -1,6 +1,27 @@
 # Trim Galore Changelog
 
 
+### Version 2.1.0-beta.8 (Release on 30 Apr 2026)
+
+#### New feature
+
+- **`--high_compression` opt-in flag.** Sets gzip output level to 6
+  (smaller files, slower trimming) instead of the default level 1
+  (faster trimming, ~75% larger output bytes). Useful when storage
+  cost or transfer bandwidth matters more than runtime — archival
+  workflows, shared object stores. Decompressed output is
+  byte-identical regardless of level (gzip levels 1 and 6 are both
+  lossless; only the framing differs). The flag flows through
+  `TrimConfig`, the worker pool's per-batch `GzEncoder` callsites,
+  the sequential output writer, every specialty mode
+  (`--hardtrim5`/`--hardtrim3`/`--clock`/`--implicon`), and
+  `--demux`. Counter-lever to the v2.1.0-beta.6 default of level 1.
+  Trade quantified by the v2.1.0-beta.7 Buckberry benchmark: at
+  saturation (cores=8) on the 84M-read fixture, lowering level 6 →
+  level 1 saved ~−23% wall and ~−43% CPU; `--high_compression`
+  reverses that trade for users who want the smaller files back.
+
+
 ### Version 2.1.0-beta.7 (Release on 29 Apr 2026)
 
 #### Performance (since v2.1.0-beta.6) — third Buckberry-scale win (#248 #4)

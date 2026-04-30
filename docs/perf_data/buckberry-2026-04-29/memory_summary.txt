@@ -1,0 +1,12 @@
+Memory measurements — Trim Galore v2.1.0-beta.7
+Date: 2026-04-30T14:10:49Z
+Host: dockyard-oxy-0
+Method: /usr/bin/time -v, peak RSS, single run per condition
+Fixture: SRR24827373 (Buckberry 2023, 84M PE reads)
+
+| --cores | Peak RSS (MB) | Wall (s) |
+|--------:|--------------:|---------:|
+| 1 | 5.1 | 5:27.36 |
+| 2 | 60.1 | 2:39.38 |
+| 4 | 73.0 | 1:20.75 |
+| 8 | 91.6 | 0:56.93 |

@@ -7,7 +7,7 @@ use std::path::Path;
 use trim_galore::adapter;
 use trim_galore::cli::{Cli, rewrite_perl_short_flags};
 use trim_galore::demux;
-use trim_galore::fastq::{FastqReader, FastqWriter};
+use trim_galore::fastq::{FastqReader, FastqWriter, output_gzip_level};
 use trim_galore::fastqc;
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
 use trim_galore::io as naming;
@@ -54,13 +54,29 @@ fn main() -> Result<()> {
     // Specialty modes — bypass normal trimming pipeline entirely
     if let Some(n) = cli.hardtrim5 {
         for input in &cli.input {
-            specialty::hardtrim5(input, n, gzip, output_dir, cli.rename, cli.cores)?;
+            specialty::hardtrim5(
+                input,
+                n,
+                gzip,
+                output_dir,
+                cli.rename,
+                cli.cores,
+                cli.high_compression,
+            )?;
         }
         return Ok(());
     }
     if let Some(n) = cli.hardtrim3 {
         for input in &cli.input {
-            specialty::hardtrim3(input, n, gzip, output_dir, cli.rename, cli.cores)?;
+            specialty::hardtrim3(
+                input,
+                n,
+                gzip,
+                output_dir,
+                cli.rename,
+                cli.cores,
+                cli.high_compression,
+            )?;
         }
         return Ok(());
     }
@@ -74,7 +90,7 @@ fn main() -> Result<()> {
                     specialty::clock_output_name(r2, "R2", output_dir, gzip),
                 )
             },
-            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores),
+            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.high_compression),
         )?;
         return Ok(());
     }
@@ -88,7 +104,17 @@ fn main() -> Result<()> {
                     specialty::implicon_output_name(r2, umi_len, "R2", output_dir, gzip),
                 )
             },
-            |r1, r2| specialty::implicon(r1, r2, umi_len, gzip, output_dir, cli.cores),
+            |r1, r2| {
+                specialty::implicon(
+                    r1,
+                    r2,
+                    umi_len,
+                    gzip,
+                    output_dir,
+                    cli.cores,
+                    cli.high_compression,
+                )
+            },
         )?;
         return Ok(());
     }
@@ -371,6 +397,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         poly_a: cli.poly_a,
         poly_g: poly_g_enabled,
         discard_untrimmed: cli.discard_untrimmed,
+        high_compression: cli.high_compression,
     };
 
     Ok((adapter_label, adapters_r1, adapters_r2, config))
@@ -467,7 +494,12 @@ fn run_single_file(
         parallel::run_single_end_parallel(input, &output_path, config, cli.cores, gzip)?
     } else {
         let mut reader = FastqReader::open(input)?;
-        let mut writer = FastqWriter::create(&output_path, gzip, 1)?;
+        let mut writer = FastqWriter::create(
+            &output_path,
+            gzip,
+            1,
+            output_gzip_level(config.high_compression),
+        )?;
         let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
         writer.flush()?;
         drop(writer);
@@ -610,7 +642,14 @@ fn run_single_file(
             barcode_file.display()
         );
         let barcodes = demux::read_barcode_file(barcode_file)?;
-        demux::demultiplex(&output_path, &barcodes, gzip, output_dir, cli.cores)?;
+        demux::demultiplex(
+            &output_path,
+            &barcodes,
+            gzip,
+            output_dir,
+            cli.cores,
+            cli.high_compression,
+        )?;
     }
 
     Ok(())
@@ -669,13 +708,14 @@ fn run_paired(
         // Sequential path (--cores 1)
         let mut reader_r1 = FastqReader::open(input_r1)?;
         let mut reader_r2 = FastqReader::open(input_r2)?;
-        let mut writer_r1 = FastqWriter::create(&output_r1, gzip, 1)?;
-        let mut writer_r2 = FastqWriter::create(&output_r2, gzip, 1)?;
+        let level = output_gzip_level(config.high_compression);
+        let mut writer_r1 = FastqWriter::create(&output_r1, gzip, 1, level)?;
+        let mut writer_r2 = FastqWriter::create(&output_r2, gzip, 1, level)?;
 
         let (mut unpaired_w1, mut unpaired_w2) = match (&unpaired_r1_path, &unpaired_r2_path) {
             (Some(p1), Some(p2)) => (
-                Some(FastqWriter::create(p1, gzip, 1)?),
-                Some(FastqWriter::create(p2, gzip, 1)?),
+                Some(FastqWriter::create(p1, gzip, 1, level)?),
+                Some(FastqWriter::create(p2, gzip, 1, level)?),
             ),
             _ => (None, None),
         };

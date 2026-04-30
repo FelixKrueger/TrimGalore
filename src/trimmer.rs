@@ -38,6 +38,9 @@ pub struct TrimConfig {
     pub poly_a: bool,
     pub poly_g: bool,
     pub discard_untrimmed: bool,
+    /// `--high_compression` opt-in: when true, output gzip uses level 6
+    /// instead of the default level 1. See `fastq::output_gzip_level()`.
+    pub high_compression: bool,
 }
 
 impl TrimConfig {
@@ -552,6 +555,7 @@ mod tests {
             poly_a: false,
             poly_g: false,
             discard_untrimmed: false,
+            high_compression: false,
         }
     }
 
