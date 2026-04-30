@@ -142,6 +142,14 @@ pub struct Cli {
     #[clap(long = "dont_gzip")]
     pub dont_gzip: bool,
 
+    /// Use gzip compression level 6 (smaller output, slower trimming) instead
+    /// of the default level 1 (faster trimming, ~75% larger output bytes).
+    /// Useful when storage cost or transfer bandwidth matters more than
+    /// runtime — e.g. archival workflows or shared object stores. Decompressed
+    /// output is byte-identical regardless of level.
+    #[clap(long = "high_compression", alias = "high-compression")]
+    pub high_compression: bool,
+
     /// Suppress the trimming report.
     #[clap(long = "no_report_file")]
     pub no_report_file: bool,

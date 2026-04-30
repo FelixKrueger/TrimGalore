@@ -13,6 +13,7 @@ Raw `hyperfine` outputs and run logs from the Trim Galore Buckberry-scale benchm
 | `<engine>_c<N>.json` | Hyperfine raw output: 10 sample wall-time runs, mean/min/max/stddev, user + system CPU time. Canonical reference data. |
 | `<engine>_c<N>.md` | Hyperfine human-readable markdown summary table. Same data, easier to skim. |
 | `byte_identity_summary.txt` | md5 cross-check between Rust beta.5 and beta.7 outputs at cores=8. Both R1 and R2 confirmed `MATCH` — Myers' prefilter is byte-identity-preserving by construction. |
+| `memory_summary.txt` | Peak RSS measurements via `/usr/bin/time -v` for v2.1.0-beta.7 at cores 1/2/4/8 (single run per condition). Wall times here match the hyperfine numbers in the corresponding `*.json` files within ~1%. |
 | `logs-and-scripts.tar.gz` | Verbose stdout logs from the main run (`bench_20260429_155450.log`) + extras run (`bench_extras_20260430_120230.log`) + the three wrapper scripts (`run_bench.sh`, `run_bench_extra.sh`, `watch_then_extras.sh`). Bundled to keep the directory listing readable. |
 
 ## Engines
