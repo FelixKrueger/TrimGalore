@@ -128,6 +128,12 @@ CPU time is what cloud providers bill for and what drives energy consumption. Tr
 
 On AWS at ~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs roughly **$0.041 with TG** vs **$0.007 with Oxidized** — a 5.9× saving per sample. Across a 1000-sample cohort that scales to **~$41 with TG vs ~$7 with Oxidized**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
 
+### Storage cost: opt-in `--high_compression`
+
+The Oxidized output gzip level is set to 1 (fastest) by default — this is what the headline numbers above measure. The trade is that output `.fq.gz` files are roughly 75% larger than gzip-level-6 output (the Perl/`gzip(1)` default). Decompressed bytes are byte-identical regardless of level — gzip levels 1 and 6 are both lossless; only the framing differs.
+
+For users where storage cost or transfer bandwidth matters more than runtime — archival workflows, shared object stores — pass `--high_compression` (v2.1.0-beta.8+) to write level-6 output instead. This inverts the trade: ~75% smaller files, ~2× slower trimming at saturation. The flag is the inverse-lever to the v2.1.0-beta.6 default change that captured the Buckberry-audit speed win.
+
 ## Methodology
 
 - **Timing:** All wall time and CPU time measured via `hyperfine --warmup 1 --runs 10` per condition. CPU time = user + system, summed across all OS threads.
