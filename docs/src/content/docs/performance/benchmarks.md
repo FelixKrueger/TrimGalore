@@ -42,8 +42,8 @@ This is the "v2.0-era" Rust binary — published to crates.io before the post-au
 | 4 | 4:37 (277s) | 1,176s |
 | 8 | 2:19 (139s) | 1,175s |
 | 10 | 1:51 (111s) | 1,178s |
-| 12 | **{TBD: extras, in progress}** | **{TBD}** |
-| 14 | **{TBD: extras}** | **{TBD}** |
+| 12 | 1:34 (94s) | 1,190s |
+| 14 | 1:21 (81s) | 1,195s |
 | 16 | 1:18 (78s) | 1,233s |
 | 24 | 1:25 (85s) | 1,349s |
 
@@ -59,9 +59,9 @@ Includes three optimizations from the Buckberry-scale audit (co-authored with [@
 | 1 | 5:29 (329s) | 329s | **2.74× faster** | **2.73× less** |
 | 4 | 1:21 (81s) | 389s | **3.43× faster** | **3.02× less** |
 | 8 | **0:57 (57s)** | **501s** | **2.46× faster** | **2.34× less** |
-| 10 | **{TBD}** | **{TBD}** | — | — |
-| 12 | **{TBD}** | **{TBD}** | — | — |
-| 14 | **{TBD}** | **{TBD}** | — | — |
+| 10 | 0:58 (58s) | 543s | 1.91× faster | 2.17× less |
+| 12 | 1:00 (60s) | 610s | 1.55× faster | 1.95× less |
+| 14 | 1:01 (61s) | 677s | 1.32× faster | 1.77× less |
 | 16 | 1:01 (61s) | 706s | 1.27× faster | 1.75× less |
 | 24 | 1:01 (61s) | 707s | 1.40× faster | 1.91× less |
 
@@ -75,7 +75,7 @@ Combined wall-time improvements at the headline core counts on Buckberry:
 | 4 | 277s | 81s | **−70.8%** |
 | 8 | 139s | 57s | **−59.3%** |
 
-Both versions saturate around `--cores 8` (beta.7) / `--cores 16` (beta.5) on this fixture; beyond that, gzip-output I/O on the disk overlay is the bottleneck. The c10/c12/c14 ladder rungs (filling in between c8 and c16) will sharpen the saturation-point picture when they land later this morning.
+Both versions hit the gzip-output I/O bottleneck on the disk overlay, but at very different core counts. **beta.7 saturates at `--cores 8`** — wall stays essentially flat from c8 → c14 (57s → 58s → 60s → 61s) while CPU climbs from 501s to 677s as extra workers pay coordination overhead without buying speed. **beta.5 saturates around `--cores 14-16`** — wall keeps dropping (139s → 111s → 94s → 81s → 78s) all the way through c14, then plateaus. beta.7 hits the I/O wall earlier because it's faster per-thread; the per-second write throughput on `/tmp` becomes binding before extra workers run out of useful per-read work to do.
 
 ### Head-to-head: Perl 0.6.11 vs Rust v2.1.0-beta.7
 
