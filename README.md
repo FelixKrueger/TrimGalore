@@ -35,10 +35,10 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 ## Installation
 
 > [!IMPORTANT]
-> **Beta testing v2.1.0-beta.7.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
+> **Beta testing v2.1.0-beta.8.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
 >
 > ```bash
-> cargo install trim-galore --version 2.1.0-beta.7
+> cargo install trim-galore --version 2.1.0-beta.8
 > docker pull ghcr.io/felixkrueger/trimgalore:beta
 > ```
 >
@@ -85,7 +85,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:beta trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.7`), `:v2.1.0-beta.7` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://felixkrueger.github.io/TrimGalore/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.8`), `:v2.1.0-beta.8` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://felixkrueger.github.io/TrimGalore/install/) for the full table.
 
 ### Prebuilt binaries
 
@@ -101,7 +101,7 @@ trim_galore input.fastq.gz
 trim_galore --paired file_R1.fastq.gz file_R2.fastq.gz
 
 # Parallel processing (recommended for large files)
-# Near-linear speedup up to ~8 cores on v2.1.0-beta.7; beyond that the
+# Near-linear speedup up to ~8 cores on v2.1.0-beta.8; beyond that the
 # gzip-output I/O on the storage layer typically becomes binding.
 trim_galore --cores 8 --paired file_R1.fastq.gz file_R2.fastq.gz
 
@@ -126,7 +126,7 @@ trim_galore --help
 | Paired-end | `*_val_1.fq.gz` / `*_val_2.fq.gz` | per-read text + JSON reports |
 | Unpaired (with `--retain_unpaired`) | `*_unpaired_1.fq.gz` / `*_unpaired_2.fq.gz` | |
 
-Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. Gzip output is written at compression level 1 (fastest) — decompressed content is byte-identical to higher-level output, but the resulting `.fq.gz` files are roughly 75% larger in exchange for substantially faster trimming on multi-core runs.
+Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. Gzip output is written at compression level 1 (fastest) — decompressed content is byte-identical to higher-level output, but the resulting `.fq.gz` files are roughly 75% larger in exchange for substantially faster trimming on multi-core runs. Pass `--high_compression` (v2.1.0-beta.8+) to invert that trade and write level-6 gzip output for storage-bound or archival workflows.
 
 The JSON report contains the same statistics as the text report in a structured format (schema v1), designed for native parsing by MultiQC.
 
