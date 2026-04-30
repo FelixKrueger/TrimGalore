@@ -27,7 +27,7 @@ Tested with `hyperfine --warmup 1 --runs 10` per condition. CPU time is user + s
 |-----:|----------:|---------:|
 | 1 | 45:17 (2,717s) | 4,437s |
 | 4 | 6:49 (409s) | 2,927s |
-| 8 | **{TBD: in progress, ETA ~10:00 UTC}** | **{TBD}** |
+| 8 | 4:17 (257s) | 2,972s |
 | 16 | **{TBD: ETA ~10:30 UTC}** | **{TBD}** |
 
 ### Trim Galore v2.1.0-beta.5 (Rust, pre-Buckberry-audit baseline)
@@ -81,7 +81,7 @@ Both versions saturate around `--cores 8` (beta.7) / `--cores 16` (beta.5) on th
 |------:|----------:|----------:|-----------------:|---------:|---------:|----------------:|
 | 1 | 2,717s | 329s | **8.26×** | 4,437s | 329s | **13.49×** |
 | 4 | 409s | 81s | **5.06×** | 2,927s | 389s | **7.52×** |
-| 8 | **{TBD}** | 57s | **{TBD}** | **{TBD}** | 501s | **{TBD}** |
+| 8 | 257s | 57s | **4.54×** | 2,972s | 501s | **5.93×** |
 | 16 | **{TBD}** | 61s | **{TBD}** | **{TBD}** | 706s | **{TBD}** |
 
 ### Production comparison: nf-core default (`--cores 8`)
@@ -90,15 +90,15 @@ In nf-core pipelines, Trim Galore is typically allocated 12 CPUs (`process_high`
 
 | | TG `-j 8` | Oxidized `--cores 4` | Oxidized `--cores 8` | Oxidized `--cores 24` |
 |---|---|---|---|---|
-| **Wall time** | **{TBD}** | 81s | **57s** ({TBD}× faster) | 61s ({TBD}× faster) |
-| **CPU time** | **{TBD}** | 389s ({TBD}× less) | **501s** ({TBD}× less) | 707s ({TBD}× less) |
+| **Wall time** | 257s | 81s (3.17× faster) | **57s (4.54× faster)** | 61s (4.21× faster) |
+| **CPU time** | 2,972s | 389s (7.64× less) | **501s (5.93× less)** | 707s (4.20× less) |
 | **Threads** | up to ~27 | 8 (deterministic) | 12 (deterministic) | 28 (deterministic) |
 
-Three ways to read this (narrative finalized once Perl c8 measurements land):
+Three ways to read this:
 
-- **Same speed, fewer resources:** Oxidized `--cores 4` matches TG `-j 8` in wall time at a fraction of the CPU and thread budget.
-- **Same resources, much faster:** Oxidized `--cores 8` saturates at fewer threads than TG and finishes ~{TBD}× faster.
-- **Comparable thread budget, dramatic speedup:** Oxidized `--cores 24` (~28 threads) vs TG `-j 8` (~27 threads).
+- **Smallest CPU footprint:** Oxidized `--cores 4` (8 threads, 389s CPU) already finishes **3.17× faster than TG `-j 8`** while using **7.64× less CPU**. Best choice when CPU/cluster-hours are the constraint.
+- **Headline speed at saturation:** Oxidized `--cores 8` (12 threads) finishes in **57 seconds — 4.54× faster than TG `-j 8`** at **5.93× less CPU**. The cleanest apples-to-apples cores-vs-cores comparison; this is the number nf-core users see.
+- **Maximum throughput at comparable thread budget:** Oxidized `--cores 24` (~28 threads) vs TG `-j 8` (~27 threads). Finishes in 61 seconds, **4.21× faster** at 4.20× less CPU. Diminishing returns past `--cores 8` because gzip-output I/O is the bottleneck.
 
 ## Laptop benchmark: Apple M1 Pro (10 cores)
 
@@ -124,14 +124,14 @@ Three ways to read this (narrative finalized once Perl c8 measurements land):
 
 ## Cost and CO₂
 
-CPU time is what cloud providers bill for and what drives energy consumption. Trim Galore v2.1.0-beta.7 uses **{TBD: ~6× to ~13.5×} less CPU time** than Perl Trim Galore for the same job:
+CPU time is what cloud providers bill for and what drives energy consumption. Trim Galore v2.1.0-beta.7 uses **5.9× to 13.5× less CPU time** than Perl Trim Galore for the same job, depending on the core count:
 
 | Scenario | Perl CPU time | Rust v2.1.0-beta.7 CPU time | **CPU savings** |
 |---|---|---|---|
 | Single-threaded | 4,437s | 329s | **13.49×** |
-| 8 cores (nf-core default) | **{TBD}** | 501s | **{TBD}** |
+| 8 cores (nf-core default) | 2,972s | 501s | **5.93×** |
 
-On AWS at ~$0.05/vCPU-hour, trimming 84M PE reads costs roughly **{TBD: $X.XX with TG}** vs **{TBD: $X.XX with Oxidized}** (at 8 cores). Across a 1000-sample cohort that scales to **{TBD: ~$X vs ~$Y}**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
+On AWS at ~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs roughly **$0.041 with TG** vs **$0.007 with Oxidized** — a 5.9× saving per sample. Across a 1000-sample cohort that scales to **~$41 with TG vs ~$7 with Oxidized**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
 
 ## Methodology
 
