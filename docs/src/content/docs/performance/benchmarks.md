@@ -28,7 +28,9 @@ Tested with `hyperfine --warmup 1 --runs 10` per condition. CPU time is user + s
 | 1 | 45:17 (2,717s) | 4,437s |
 | 4 | 6:49 (409s) | 2,927s |
 | 8 | 4:17 (257s) | 2,972s |
-| 16 | **{TBD: ETA ~10:30 UTC}** | **{TBD}** |
+| 16 | 3:51 (231s) | 3,100s |
+
+Perl saturates around `-j 8`: going from `-j 8` → `-j 16` shaves only 10% off wall time (257s → 231s) while CPU usage goes *up* 4% (2,972s → 3,100s) from thread-overhead. Past `-j 8`, you pay more cluster-hours for marginal speed.
 
 ### Trim Galore v2.1.0-beta.5 (Rust, pre-Buckberry-audit baseline)
 
@@ -82,7 +84,7 @@ Both versions saturate around `--cores 8` (beta.7) / `--cores 16` (beta.5) on th
 | 1 | 2,717s | 329s | **8.26×** | 4,437s | 329s | **13.49×** |
 | 4 | 409s | 81s | **5.06×** | 2,927s | 389s | **7.52×** |
 | 8 | 257s | 57s | **4.54×** | 2,972s | 501s | **5.93×** |
-| 16 | **{TBD}** | 61s | **{TBD}** | **{TBD}** | 706s | **{TBD}** |
+| 16 | 231s | 61s | **3.77×** | 3,100s | 706s | **4.39×** |
 
 ### Production comparison: nf-core default (`--cores 8`)
 
