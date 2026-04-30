@@ -52,9 +52,9 @@ At `--cores 1`, the worker-pool is bypassed entirely: a single thread does every
 | 8 | up to ~27 | 12 |
 | 16 | not measured | 20 |
 
-At `-j 8` vs `--cores 8`: up to ~27 vs exactly 12 threads, yet 1.9x faster.
+At `-j 8` vs `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
 
-Parallel efficiency on the Xeon: 82% (2 cores) to 82% (4 cores) to 81% (8 cores) to 78% (16 cores) to 64% (24 cores). Scaling remains near-linear up to 16 cores, with diminishing returns beyond that. For most production use, `--cores 8` to `--cores 16` is the sweet spot. Beyond 16, additional cores still help but deliver progressively less benefit per core.
+Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34% (cores=16) → 22% (cores=24). Scaling is near-linear up to `--cores 8`; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so adding cores helps progressively less. **`--cores 8` is the sweet spot for nf-core / Snakemake / CWL workflows** — also the saturation point.
 
 ## Memory profile
 
@@ -75,7 +75,7 @@ Each additional worker adds ~10 MB on average. The bulk of which is the per-work
 - **Simpler deployment:** `cargo install` or download a binary. No conda environment needed.
 - **Single-pass paired-end:** Both reads processed together, with guaranteed synchronization, no temp files.
 - **Lower memory:** 5 MB single-threaded, ~10 MB per additional worker. No Python interpreter, no subprocess pipes.
-- **CPU-efficient:** Uses 2.6 to 5x less CPU time than Trim Galore. Meaningful on shared HPC clusters where CPU-hours = money.
+- **CPU-efficient:** Uses 5.9× to 13.5× less CPU time than Trim Galore (nf-core default to single-thread, on the 84M-read Buckberry fixture). Meaningful on shared HPC clusters where CPU-hours = money.
 - **Reproducible:** Pure Rust with deterministic behaviour across platforms.
 - **New features:** Poly-G trimming (auto-detected for 2-colour instruments like NovaSeq/NextSeq) and poly-A trimming, both built in without external tools.
 
