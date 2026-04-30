@@ -9,13 +9,13 @@ description: Wall time and CPU time for Trim Galore v2.x (Rust) vs v0.6.x (Perl)
 
 ## At a glance
 
-(Charts below were generated from an earlier 56M-read benchmark; we'll regenerate them from the Buckberry data shortly. Numbers in the tables below are current.)
+![Wall time comparison](../../../assets/benchmarks/benchmark_wall_time.png)
 
-![Wall Time Comparison](../../../assets/benchmarks/benchmark_wall_time.png)
+![CPU time comparison](../../../assets/benchmarks/benchmark_threads_cpu.png)
 
-![Thread Overhead & CPU Efficiency](../../../assets/benchmarks/benchmark_threads_cpu.png)
+![Scaling — speedup vs Perl `-j 1`](../../../assets/benchmarks/benchmark_scaling.png)
 
-![Scaling Comparison](../../../assets/benchmarks/benchmark_scaling.png)
+Charts regenerate from `~/perf_data/2026-04-29/*.json` via `python3 docs/scripts/generate-benchmark-charts.py --data <dir> --out docs/src/assets/benchmarks/`. Re-run as additional matrix points (Perl c8/c16, Rust extras c10/12/14) land.
 
 ## Server benchmark: Intel Xeon 6975P-C (dockyard-oxy-0)
 
