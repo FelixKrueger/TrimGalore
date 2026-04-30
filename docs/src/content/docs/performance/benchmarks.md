@@ -26,8 +26,8 @@ Tested with `hyperfine --warmup 1 --runs 10` per condition. CPU time is user + s
 | `-j` | Wall time | CPU time |
 |-----:|----------:|---------:|
 | 1 | 45:17 (2,717s) | 4,437s |
-| 4 | **{TBD: in progress, ETA ~09:00 UTC}** | **{TBD}** |
-| 8 | **{TBD: ETA ~10:00 UTC}** | **{TBD}** |
+| 4 | 6:49 (409s) | 2,927s |
+| 8 | **{TBD: in progress, ETA ~10:00 UTC}** | **{TBD}** |
 | 16 | **{TBD: ETA ~10:30 UTC}** | **{TBD}** |
 
 ### Trim Galore v2.1.0-beta.5 (Rust, pre-Buckberry-audit baseline)
@@ -80,7 +80,7 @@ Both versions saturate around `--cores 8` (beta.7) / `--cores 16` (beta.5) on th
 | Cores | Perl wall | Rust wall | **Wall speedup** | Perl CPU | Rust CPU | **CPU savings** |
 |------:|----------:|----------:|-----------------:|---------:|---------:|----------------:|
 | 1 | 2,717s | 329s | **8.26×** | 4,437s | 329s | **13.49×** |
-| 4 | **{TBD}** | 81s | **{TBD}** | **{TBD}** | 389s | **{TBD}** |
+| 4 | 409s | 81s | **5.06×** | 2,927s | 389s | **7.52×** |
 | 8 | **{TBD}** | 57s | **{TBD}** | **{TBD}** | 501s | **{TBD}** |
 | 16 | **{TBD}** | 61s | **{TBD}** | **{TBD}** | 706s | **{TBD}** |
 
