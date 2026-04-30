@@ -137,7 +137,8 @@ On AWS at ~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs r
 
 ## Methodology
 
-- **Timing:** All wall time and CPU time measured via `hyperfine --warmup 1 --runs 10` per condition. CPU time = user + system, summed across all OS threads. JSON exports preserved at `~/perf_data/2026-04-29/` on the benchmarking host.
+- **Timing:** All wall time and CPU time measured via `hyperfine --warmup 1 --runs 10` per condition. CPU time = user + system, summed across all OS threads.
+- **Raw data:** All 20 hyperfine JSON outputs, the markdown summaries, the byte-identity cross-check report, and the run logs are committed to the repo at [`docs/perf_data/buckberry-2026-04-29/`](https://github.com/FelixKrueger/TrimGalore/tree/optimus_prime/docs/perf_data/buckberry-2026-04-29) — anyone can verify the numbers in the tables above against the source data.
 - **Reproducer:** [`scripts/benchmark.sh`](https://github.com/FelixKrueger/TrimGalore/blob/optimus_prime/scripts/benchmark.sh) on the `optimus_prime` branch — drives the full matrix (Rust beta.5/beta.7 at cores 1/4/8/10/12/14/16/24; Perl 0.6.11 + Cutadapt 5.2 at cores 1/4/8/16) with `hyperfine --warmup 1 --runs 10`. Includes a cross-version byte-identity check at the end (beta.5 vs beta.7 cores=8 outputs).
 - **Thread counts (TG):** Approximate peak values from architectural reasoning (Cutadapt workers + pigz compression workers + igzip/pigz decompression). Threads are spawned across three independent subprocesses whose lifetimes may not fully overlap.
 - **Thread counts (Oxidized):** Deterministic from the architecture: exactly N+4 threads for `--cores N` (N workers + 2 decompressors + 1 batcher + 1 writer), or exactly 1 thread for `--cores 1`.
