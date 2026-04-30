@@ -30,7 +30,7 @@ Outputs:
 
 ## Parallel processing
 
-Speedup is near-linear up to about 16 cores. Beyond about 20 the run is usually I/O-bound, so adding cores helps less.
+Speedup is near-linear up to about 8 cores on v2.1.0-beta.7; beyond that, gzip-output I/O on the storage layer typically becomes binding and adding cores helps less. For nf-core / Snakemake / CWL workflows, `--cores 8` is also the saturation point.
 
 ```bash
 trim_galore --cores 8 --paired sample_R1.fastq.gz sample_R2.fastq.gz
