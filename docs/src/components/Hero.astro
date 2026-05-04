@@ -1,0 +1,193 @@
+---
+import { LinkButton } from '@astrojs/starlight/components';
+
+// Mirrors Starlight's internal constant. Hardcoded because the package
+// doesn't export it, and a string literal is fine for an id.
+const PAGE_TITLE_ID = '_top';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+---
+
+<section class="tg-hero">
+  {/* Visually-hidden h1 for accessibility and Starlight TOC tracking. */}
+  <h1 id={PAGE_TITLE_ID} data-page-title class="sr-title">{title}</h1>
+
+  <div class="titleband" aria-hidden="true">
+    {/* Shared font on the SVG cascades into the inner <text> elements; per-line
+        weight/style/letter-spacing differ between "Trim" and "Galore.". The
+        title is defined once in <defs> and rendered twice via <use>: once as
+        the base ink fill, once inside the band mask as cream-on-lime. */}
+    <svg viewBox="0 0 1240 460" preserveAspectRatio="xMinYMid meet"
+         font-family="Bricolage Grotesque, Inter, sans-serif" font-size="240">
+      <defs>
+        {/*
+          Lime band geometry. Width 7000 means the stripe extends ~2900 viewBox
+          units past each side of the 1240-wide viewBox so the edges stay off
+          screen at any reasonable monitor width. The rect lives inside #band
+          at its base position; the -14° rotation and any cursor-driven offsets
+          are applied via CSS on the two .tg-band <use> elements below, so the
+          visible band and the mask version stay aligned during animation.
+        */}
+        <g id="band">
+          <rect x="-2880" y="225" width="7000" height="92" />
+        </g>
+        <mask id="band-mask" maskUnits="userSpaceOnUse" x="-3000" y="-100" width="7240" height="660">
+          <rect x="-3000" y="-100" width="7240" height="660" fill="black"/>
+          <use href="#band" fill="white" class="tg-band" />
+        </mask>
+        <g id="title-text">
+          <text x="0" y="240" font-weight="600" letter-spacing="-12">Trim</text>
+          <text x="100" y="440" font-weight="500" font-style="italic" letter-spacing="-8">Galore.</text>
+        </g>
+      </defs>
+
+      <use href="#band" class="band tg-band" />
+      <use href="#title-text" class="text-base" />
+      <g mask="url(#band-mask)">
+        <use href="#title-text" class="text-on-band" />
+      </g>
+    </svg>
+  </div>
+
+  {tagline && <p class="tagline" set:html={tagline} />}
+
+  {actions.length > 0 && (
+    <div class="actions">
+      {actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+        <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+          {text}
+          {icon?.html && <Fragment set:html={icon.html} />}
+        </LinkButton>
+      ))}
+    </div>
+  )}
+</section>
+
+<style>
+  /* Animated band. The two .tg-band <use> elements (visible band + mask
+     version) share these custom properties so the inversion stays aligned
+     while the band moves. CSS-driven transform composes a base rotation
+     with cursor-driven deltas. */
+  .tg-hero svg .tg-band {
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+    transform:
+      translateY(var(--tg-band-y, 0px))
+      rotate(calc(-14deg + var(--tg-band-rotate-delta, 0deg)))
+      scaleY(var(--tg-band-scale-y, 1));
+    transition:
+      transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tg-hero {
+    cursor: default;
+  }
+  /* Hover: subtle thickening to hint at interactivity. No cursor-tracked
+     motion at rest — that's reserved for the press gesture. */
+  .tg-hero:hover {
+    --tg-band-scale-y: 1.25;
+  }
+  /* Press: narrow ("cut") scale; cursor-tracked translate/rotate are set
+     from JS via --tg-band-y / --tg-band-rotate-delta. */
+  .tg-hero[data-pressing="true"] {
+    --tg-band-scale-y: 0.18;
+  }
+  .tg-hero[data-pressing="true"] .tg-band {
+    /* Faster snap on press; slower release. */
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tg-hero svg .tg-band {
+      transition-duration: 60ms;
+    }
+  }
+</style>
+
+<script>
+  // Hero band motion choreography:
+  //  - hover     → CSS-only: band thickens slightly to hint at interactivity
+  //  - mousedown → band narrows ("cut") AND tracks cursor (rotation + drift)
+  //  - mousemove → cursor tracking, but only while pressed
+  //  - mouseup   → band restores to rest (or hover-thick if still hovered)
+  //  - mouseleave → all values reset to defaults, eased
+  //  - dblclick  → toggle Starlight light/dark theme
+  //
+  // CSS handles the actual animation via transitions; JS only updates
+  // CSS custom properties at most once per frame (rAF-coalesced).
+  (() => {
+    const hero = document.querySelector<HTMLElement>('.tg-hero');
+    if (!hero) return;
+
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+    let rafId = 0;
+    let lastEvent: MouseEvent | null = null;
+    let pressed = false;
+
+    const setVar = (name: string, value: string) => hero.style.setProperty(name, value);
+    const clearVars = () => {
+      hero.style.removeProperty('--tg-band-rotate-delta');
+      hero.style.removeProperty('--tg-band-y');
+    };
+
+    const applyFromEvent = (e: MouseEvent) => {
+      const rect = hero.getBoundingClientRect();
+      const cx = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5 .. 0.5
+      const cy = (e.clientY - rect.top) / rect.height - 0.5;   // -0.5 .. 0.5
+      // Rotation delta: cursor far left = +4° (band tilts up on right),
+      // far right = -4° (tilts down on right). Subtle.
+      const rotateDelta = -cx * 8; // -4° .. +4°
+      // Vertical drift: roughly ±32px to either side of resting position.
+      const yDelta = cy * 64; // -32px .. +32px
+      setVar('--tg-band-rotate-delta', `${rotateDelta.toFixed(2)}deg`);
+      setVar('--tg-band-y', `${yDelta.toFixed(1)}px`);
+    };
+
+    const onMove = (e: MouseEvent) => {
+      if (!pressed) return;
+      lastEvent = e;
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (lastEvent) applyFromEvent(lastEvent);
+      });
+    };
+
+    const onDown = (e: MouseEvent) => {
+      pressed = true;
+      hero.dataset.pressing = 'true';
+      if (!reducedMotion.matches) applyFromEvent(e);
+    };
+    const onUp = () => {
+      pressed = false;
+      hero.dataset.pressing = 'false';
+      clearVars();
+    };
+
+    const onLeave = () => {
+      pressed = false;
+      hero.dataset.pressing = 'false';
+      clearVars();
+    };
+
+    const onDblClick = (e: MouseEvent) => {
+      // Don't toggle theme if the dblclick was on a link/button.
+      if ((e.target as HTMLElement).closest('a, button')) return;
+      const root = document.documentElement;
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('starlight-theme', next); } catch {}
+      // Sync the navbar theme picker so its active option matches.
+      (window as any).StarlightThemeProvider?.updatePickers(next);
+    };
+
+    if (!reducedMotion.matches) hero.addEventListener('mousemove', onMove);
+    hero.addEventListener('mousedown', onDown);
+    hero.addEventListener('mouseup', onUp);
+    hero.addEventListener('mouseleave', onLeave);
+    hero.addEventListener('dblclick', onDblClick);
+  })();
+</script>

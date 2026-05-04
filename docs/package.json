@@ -1,0 +1,25 @@
+{
+  "name": "trimgalore-docs",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "logos": "node scripts/generate-png-logos.mjs"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^5.0.4",
+    "@astrojs/starlight": "^0.38.4",
+    "@fontsource/bricolage-grotesque": "^5.2.10",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@resvg/resvg-js": "^2.6.2",
+    "astro": "^6.1.9",
+    "satori": "^0.26.0",
+    "sharp": "^0.34.5"
+  }
+}

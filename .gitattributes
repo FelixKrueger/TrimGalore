@@ -1,0 +1,12 @@
+# Documentation
+docs/**            linguist-documentation
+*.md               linguist-documentation
+CHANGELOG.md       linguist-documentation
+README.md          linguist-documentation
+LICENSE            linguist-documentation
+
+# Test fixtures
+test_files/**      linguist-vendored
+
+# Generated files
+Cargo.lock         linguist-generated

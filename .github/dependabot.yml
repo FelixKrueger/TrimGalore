@@ -1,0 +1,32 @@
+# Dependabot configuration (v2) — https://docs.github.com/en/code-security/dependabot
+#
+# Tracks two ecosystems:
+#   - cargo (direct + transitive dependencies in Cargo.lock)
+#   - github-actions (pinned action versions in .github/workflows/*.yml)
+#
+# Weekly Monday cadence matches a pre-week triage flow.  `open-pull-requests-
+# limit: 5` caps the initial surge when Dependabot first activates; raise if
+# we start dropping real updates.
+#
+# No `labels:` field — Dependabot will auto-create and apply its default
+# `dependencies` label on the first PR per ecosystem.  We can move to explicit
+# labels later if we want fine-grained categorisation.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    assignees:
+      - "FelixKrueger"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    assignees:
+      - "FelixKrueger"
