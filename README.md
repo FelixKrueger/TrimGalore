@@ -34,19 +34,9 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 
 ## Installation
 
-> [!IMPORTANT]
-> **Beta testing v2.1.0-beta.8.** The current stable release on crates.io is v2.0.0; v2.1.0 is in beta testing. Running `cargo install trim-galore` without `--version` installs v2.0.0 (the stable). To install the beta:
->
-> ```bash
-> cargo install trim-galore --version 2.1.0-beta.8
-> docker pull ghcr.io/felixkrueger/trimgalore:beta
-> ```
->
-> Feedback on the beta is welcome — open an issue with the `beta-feedback` label. This section will be removed at v2.1.0 GA.
-
 ### From crates.io
 
-Requires the [Rust toolchain](https://rustup.rs/) (1.85+):
+Requires the [Rust toolchain](https://rustup.rs/) (1.88+):
 
 ```bash
 cargo install trim-galore
@@ -82,10 +72,10 @@ The `--force` flag overwrites any existing `trim_galore` binary (e.g. a v2.0.0 i
 Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 
 ```bash
-docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:beta trim_galore input.fastq.gz
+docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:latest trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.8`), `:v2.1.0-beta.8` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.1.0`), `:v2.1.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to `optimus_prime`). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
 
 ### Prebuilt binaries
 
