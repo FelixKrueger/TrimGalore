@@ -242,11 +242,12 @@ jobs:
           conda create -n perl_tg -y -c conda-forge -c bioconda 'cutadapt=5.2=*_0' "xopen<2"
           # Fetch the legacy Perl source from the local repo's `master`
           # branch (#247 item 5). master tracks the v0.6.x release line;
-          # this gives byte-identical content to the previous
-          # raw.githubusercontent curl with zero external network
-          # dependency, eliminating a flaky source.
-          git fetch --depth=1 origin master
-          git show origin/master:trim_galore > /usr/local/bin/trim_galore_perl
+          # Pulls from the immutable `0.6.11` tag rather than the
+          # `master` branch — survives the v2.1.0 GA cut where master
+          # advances to the Rust trunk via PR #214; the legacy Perl
+          # source is preserved at the tag.
+          git fetch --depth=1 origin tag 0.6.11
+          git show 0.6.11:trim_galore > /usr/local/bin/trim_galore_perl
           chmod +x /usr/local/bin/trim_galore_perl
 
       - name: Verify Perl Trim Galore

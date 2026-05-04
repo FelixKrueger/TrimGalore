@@ -87,7 +87,7 @@ pub fn filter_paired_end(
 
     // Length check — can rescue individual reads with --retain_unpaired.
     //
-    // Perl-parity note (matches `master:trim_galore:2325-2343`):
+    // Perl-parity note (matches `0.6.11:trim_galore:2325-2343`):
     // when at least one mate fails the discard cutoff, each read is
     // independently routed to its unpaired file based solely on its own
     // length vs the per-side cutoff (`--length_1` / `--length_2`). There
@@ -226,7 +226,7 @@ mod tests {
         }
     }
 
-    /// Perl parity (master:trim_galore:2325-2343): when BOTH mates fail
+    /// Perl parity (0.6.11:trim_galore:2325-2343): when BOTH mates fail
     /// the discard `--length` cutoff but each is individually long enough
     /// for the per-side `--length_{1,2}` threshold, both reads route to
     /// their unpaired files. Regression for #245 — Rust previously had a
