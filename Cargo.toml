@@ -1,6 +1,6 @@
 [package]
 name = "trim-galore"
-version = "2.1.0-beta.8"
+version = "2.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Fast adapter and quality trimming for NGS data — Oxidized Edition"

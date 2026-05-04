@@ -1,6 +1,85 @@
 # Trim Galore Changelog
 
 
+### Version 2.1.0 (Release on 4 May 2026)
+
+**First stable release of the Oxidized Edition** — a complete Rust rewrite
+of the original Perl Trim Galore. Drop-in compatible with v0.6.x scripts
+and pipelines (same CLI, same output filenames, same report format).
+Single static binary, zero external runtime dependencies — no Python,
+Perl, Cutadapt, Java, igzip, or pigz required.
+
+#### Highlights
+
+- **Built-in FastQC** via the bundled
+  [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library. Pass
+  `--fastqc` and it just works (no external `fastqc` binary, no Java
+  runtime).
+- **Adapter auto-detection** for Illumina, Nextera, Small RNA, and
+  BGI/DNBSEQ on the first 1M reads. Per-pair detection in paired-end
+  mode (intentional improvement over Perl v0.6.x's once-per-run
+  detection).
+- **Multi-adapter support** via repeatable `-a`/`-a2` or
+  `-a "file:adapters.fa"` to load adapter sets from FASTA. Optional
+  multi-round trimming (`-n N`).
+- **Poly-G trimming** for 2-colour instruments (NovaSeq, NextSeq,
+  NovaSeq X), auto-detected from the data; opt-out with `--no_poly_g`.
+- **Generic poly-A trimming** for mRNA-seq libraries (`--poly_a`).
+- **Worker-pool parallelism** via `--cores N` — near-linear speedup up
+  to ~8 cores on Buckberry-scale data; saturation point depends on
+  per-thread compute vs gzip-output I/O bandwidth on your storage.
+- **Reproducible builds** via `SOURCE_DATE_EPOCH`; release binaries are
+  bit-identical when built twice with the same input. CI verifies this.
+- **Byte-identity to Perl v0.6.11** asserted by the CI validation
+  matrix across SE, PE, RRBS, hardtrim5, Clock, and demux flag paths.
+
+#### Performance vs Trim Galore 0.6.11 + Cutadapt 5.2
+
+Headline numbers from the
+[Buckberry-scale benchmarks](https://www.trimgalore.com/performance/benchmarks/)
+on 84M paired-end reads (Intel Xeon 6975P-C, Granite Rapids):
+
+- **5.93× less CPU time at `--cores 8`** (the nf-core `process_high`
+  default) — ~$7 vs ~$41 per 1000-sample cohort at AWS $0.05/vCPU-hour
+- **13.49× less CPU time at single-thread**
+- **4.54× faster wall time at `--cores 8`**: 57s vs 257s on the 84M
+  paired-end fixture
+
+#### Opt-in flags
+
+- `--high_compression` — gzip output level 6 instead of the default
+  level 1 (~75% smaller files, ~2× slower trimming). For archival
+  workflows where trimmed reads are deliberately retained downstream;
+  the dominant nf-core / Snakemake / CWL use case keeps trimmed FASTQs
+  ephemeral and benefits from the faster default level 1.
+
+#### Migration from v0.6.x
+
+The CLI surface is unchanged from v0.6.x for the dominant workflows.
+Most users will see no behavioural changes — the biggest visible change
+is performance. A few minor differences (mostly improvements: brace
+expansion `-a A{N}`, `-r1`/`-r2` short flags now parse cleanly,
+multi-pair specialty modes) are documented in the
+[v2 migration notes](https://www.trimgalore.com/reference/migration/).
+
+#### Cumulative changes from the v2.1.0 beta arc
+
+This GA release ships the cumulative changes from v2.1.0-beta.1 through
+v2.1.0-beta.8. The Buckberry-scale performance audit (#248, co-authored
+with [@an-altosian](https://github.com/an-altosian) — Dongze He, Altos
+Labs) drove the headline performance wins:
+
+- **beta.6**: gzip output level 6 → 1 (~−23% wall, ~−43% CPU at
+  saturation; output bytes ~75% larger; decompressed bytes
+  byte-identical)
+- **beta.6**: single buffered write per FASTQ record (~−10% wall)
+- **beta.7**: Myers' bit-parallel adapter alignment prefilter
+  (~−13% wall, byte-identity-preserving by construction)
+- **beta.8**: `--high_compression` opt-in flag for storage-bound users
+
+See the per-beta release notes below for full per-step detail.
+
+
 ### Version 2.1.0-beta.8 (Release on 30 Apr 2026)
 
 #### New feature
