@@ -12,10 +12,10 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 [![Crates.io](https://img.shields.io/crates/v/trim-galore)](https://crates.io/crates/trim-galore)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
 
-<h3 align="center"><a href="https://felixkrueger.github.io/TrimGalore/">https://felixkrueger.github.io/TrimGalore/</a></h3>
+<h3 align="center"><a href="https://www.trimgalore.com/">https://www.trimgalore.com/</a></h3>
 
 > [!NOTE]
-> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 migration notes](https://felixkrueger.github.io/TrimGalore/reference/migration/).
+> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 migration notes](https://www.trimgalore.com/reference/migration/).
 
 ## Features
 
@@ -85,7 +85,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:beta trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.8`), `:v2.1.0-beta.8` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://felixkrueger.github.io/TrimGalore/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:beta` (latest prerelease, currently `v2.1.0-beta.8`), `:v2.1.0-beta.8` (pinned to a specific prerelease), `:dev` (every push to `optimus_prime`), and `:latest` will track stable releases starting at v2.1.0 GA. See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
 
 ### Prebuilt binaries
 
@@ -132,12 +132,12 @@ The JSON report contains the same statistics as the text report in a structured 
 
 ## Documentation
 
-Full documentation is published at [https://felixkrueger.github.io/TrimGalore/](https://felixkrueger.github.io/TrimGalore/)
+Full documentation is published at [https://www.trimgalore.com/](https://www.trimgalore.com/)
 
-- [User Guide](https://felixkrueger.github.io/TrimGalore/guide/overview/) — full reference for all options and modes
-- [RRBS Guide](https://felixkrueger.github.io/TrimGalore/rrbs/guide/) — bisulfite sequencing and RRBS-specific guidance
-- [v2.0 migration notes](https://felixkrueger.github.io/TrimGalore/reference/migration/) — what changed in the Rust rewrite
-- [Benchmarks](https://felixkrueger.github.io/TrimGalore/performance/benchmarks/)
+- [User Guide](https://www.trimgalore.com/guide/overview/) — full reference for all options and modes
+- [RRBS Guide](https://www.trimgalore.com/rrbs/guide/) — bisulfite sequencing and RRBS-specific guidance
+- [v2.0 migration notes](https://www.trimgalore.com/reference/migration/) — what changed in the Rust rewrite
+- [Benchmarks](https://www.trimgalore.com/performance/benchmarks/)
 
 ## Credits
 

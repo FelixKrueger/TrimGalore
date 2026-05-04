@@ -3,8 +3,8 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://felixkrueger.github.io',
-  base: '/TrimGalore',
+  site: 'https://www.trimgalore.com',
+  base: '/',
   trailingSlash: 'ignore',
   // Disable smartypants. It rewrites `--` to em-dashes (—) even inside
   // JSX <code> elements in MDX, which silently mangles CLI flag names
