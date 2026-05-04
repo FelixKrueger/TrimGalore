@@ -1,14 +1,14 @@
 # Trim Galore documentation
 
 This directory holds the Astro Starlight site that publishes to
-<https://felixkrueger.github.io/TrimGalore/>.
+<https://www.trimgalore.com/>.
 
 ## Local development
 
 ```bash
 cd docs
 npm install
-npm run dev      # dev server on http://localhost:4321/TrimGalore/
+npm run dev      # dev server on http://localhost:4321/
 npm run build    # static build into docs/dist/
 npm run preview  # serve docs/dist/ locally
 ```
