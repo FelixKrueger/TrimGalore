@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Trim Galore — Oxidized Edition — is a Rust rewrite of the original Perl Trim Galore (the v0.6.x script lives upstream and is no longer in this repo). It is a single-binary, single-pass adapter and quality trimmer for NGS FASTQ data. There are no external runtime dependencies: adapter detection, alignment, quality trimming, filtering, gzip compression, **and** FastQC reporting (via the bundled `fastqc-rust` library) all run in-process. No Java, no Python, no Cutadapt, no external `fastqc`.
 
-The active development branch is `optimus_prime`; `master` is retained for the legacy Perl release line. The CI workflow `validation` job md5-compares Oxidized output against Perl Trim Galore 0.6.11 (installed from raw GitHub) for several core flag combinations — preserving byte-identity to v0.6.11 is a hard invariant for those flag paths.
+`master` is the stable trunk (v2.1.0 GA and onwards); `dev` is the active development branch where prereleases are cut from. (Pre-v2.1.0 GA the layout was inverted — `optimus_prime` was the dev trunk and `master` held the legacy Perl release line; PR #214 collapsed that on 2026-05-04 by merging the Rust trunk into `master` and renaming `optimus_prime` to `dev`. The legacy Perl 0.6.11 source remains accessible via the `0.6.11` git tag.) The CI workflow `validation` job md5-compares Oxidized output against Perl Trim Galore 0.6.11 (installed from raw GitHub) for several core flag combinations — preserving byte-identity to v0.6.11 is a hard invariant for those flag paths.
 
 ## Build, lint, test
 

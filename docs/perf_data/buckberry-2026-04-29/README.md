@@ -32,7 +32,7 @@ Raw `hyperfine` outputs and run logs from the Trim Galore Buckberry-scale benchm
 
 ## Reproducer
 
-`scripts/benchmark.sh` on the `optimus_prime` branch drives the same matrix end-to-end. The fixture path defaults to `~/benchmark_TG_oxy/SRR24827373_*_R{1,2}.fastq.gz`; override via `R1=...` `R2=...` env vars.
+`scripts/benchmark.sh` on the `dev` branch drives the same matrix end-to-end. The fixture path defaults to `~/benchmark_TG_oxy/SRR24827373_*_R{1,2}.fastq.gz`; override via `R1=...` `R2=...` env vars.
 
 ## Headline results
 

@@ -2,7 +2,7 @@ name: Deploy docs to GitHub Pages
 
 on:
   push:
-    branches: [master, optimus_prime]
+    branches: [master, dev]
     paths:
       - 'docs/**'
       - 'CHANGELOG.md'
