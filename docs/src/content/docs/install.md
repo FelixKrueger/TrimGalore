@@ -33,7 +33,7 @@ cargo build --release
 To install the latest unreleased changes from the development branch:
 
 ```bash
-cargo install --git https://github.com/FelixKrueger/TrimGalore --branch optimus_prime trim-galore --force
+cargo install --git https://github.com/FelixKrueger/TrimGalore --branch dev trim-galore --force
 ```
 
 `--force` overwrites any existing `trim_galore` binary (e.g. a v2.0.0 install from crates.io).
@@ -55,7 +55,7 @@ FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fast
 | `:latest` | latest stable release (currently v2.1.0) |
 | `:v2.1.0` | pinned to a specific release |
 | `:beta` | latest prerelease — only set during an active beta cycle |
-| `:dev` | every push to the `optimus_prime` development branch |
+| `:dev` | every push to the `dev` development branch |
 
 ## Prebuilt binaries
 

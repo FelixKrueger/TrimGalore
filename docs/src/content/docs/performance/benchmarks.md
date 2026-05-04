@@ -104,7 +104,7 @@ Three ways to read this:
 
 ## Laptop benchmark: Apple M1 Pro (10 cores, 32 GiB)
 
-Same Buckberry SRR24827373 fixture (84M PE reads, 4.4 GiB gzipped), Trim Galore v2.1.0-beta.7 (Apple Silicon native build via `cargo install`). Methodology: `hyperfine --warmup 1 --runs 3` per condition — intentionally lighter than the server-side `--runs 10` since the goal is a directional cross-platform datapoint, not paper-grade rigor. Cores ladder stops at 6 (of 10 physical) to leave headroom for the OS and other applications. Raw data: [`docs/perf_data/buckberry-2026-04-30-laptop/`](https://github.com/FelixKrueger/TrimGalore/tree/optimus_prime/docs/perf_data/buckberry-2026-04-30-laptop).
+Same Buckberry SRR24827373 fixture (84M PE reads, 4.4 GiB gzipped), Trim Galore v2.1.0-beta.7 (Apple Silicon native build via `cargo install`). Methodology: `hyperfine --warmup 1 --runs 3` per condition — intentionally lighter than the server-side `--runs 10` since the goal is a directional cross-platform datapoint, not paper-grade rigor. Cores ladder stops at 6 (of 10 physical) to leave headroom for the OS and other applications. Raw data: [`docs/perf_data/buckberry-2026-04-30-laptop/`](https://github.com/FelixKrueger/TrimGalore/tree/master/docs/perf_data/buckberry-2026-04-30-laptop).
 
 | `--cores` | Wall time | CPU time | Speedup vs c1 |
 |----------:|----------:|---------:|---------------:|
@@ -139,8 +139,8 @@ Note that the dominant nf-core / Snakemake / CWL use case typically *doesn't* ke
 ## Methodology
 
 - **Timing:** All wall time and CPU time measured via `hyperfine --warmup 1 --runs 10` per condition. CPU time = user + system, summed across all OS threads.
-- **Raw data:** All 20 hyperfine JSON outputs, the markdown summaries, the byte-identity cross-check report, and the run logs are committed to the repo at [`docs/perf_data/buckberry-2026-04-29/`](https://github.com/FelixKrueger/TrimGalore/tree/optimus_prime/docs/perf_data/buckberry-2026-04-29) — anyone can verify the numbers in the tables above against the source data.
-- **Reproducer:** [`scripts/benchmark.sh`](https://github.com/FelixKrueger/TrimGalore/blob/optimus_prime/scripts/benchmark.sh) on the `optimus_prime` branch — drives the full matrix (Rust beta.5/beta.7 at cores 1/4/8/10/12/14/16/24; Perl 0.6.11 + Cutadapt 5.2 at cores 1/4/8/16) with `hyperfine --warmup 1 --runs 10`. Includes a cross-version byte-identity check at the end (beta.5 vs beta.7 cores=8 outputs).
+- **Raw data:** All 20 hyperfine JSON outputs, the markdown summaries, the byte-identity cross-check report, and the run logs are committed to the repo at [`docs/perf_data/buckberry-2026-04-29/`](https://github.com/FelixKrueger/TrimGalore/tree/master/docs/perf_data/buckberry-2026-04-29) — anyone can verify the numbers in the tables above against the source data.
+- **Reproducer:** [`scripts/benchmark.sh`](https://github.com/FelixKrueger/TrimGalore/blob/master/scripts/benchmark.sh) — drives the full matrix (Rust beta.5/beta.7 at cores 1/4/8/10/12/14/16/24; Perl 0.6.11 + Cutadapt 5.2 at cores 1/4/8/16) with `hyperfine --warmup 1 --runs 10`. Includes a cross-version byte-identity check at the end (beta.5 vs beta.7 cores=8 outputs).
 - **Thread counts (TG):** Approximate peak values from architectural reasoning (Cutadapt workers + pigz compression workers + igzip/pigz decompression). Threads are spawned across three independent subprocesses whose lifetimes may not fully overlap.
 - **Thread counts (Oxidized):** Deterministic from the architecture: exactly N+4 threads for `--cores N` (N workers + 2 decompressors + 1 batcher + 1 writer), or exactly 1 thread for `--cores 1`.
 - **igzip:** The bioconda Trim Galore installation includes igzip (Intel ISA-L) for fast single-threaded decompression. Benchmarks run with igzip available to match the nf-core production environment.

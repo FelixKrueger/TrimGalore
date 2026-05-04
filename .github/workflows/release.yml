@@ -24,7 +24,7 @@ name: Release
 
 on:
   push:
-    branches: [optimus_prime, master]
+    branches: [dev, master]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -74,10 +74,10 @@ jobs:
 
             if [ "${{ github.ref_name }}" = "master" ]; then
               : # always allowed (GA)
-            elif [ "${{ github.ref_name }}" = "optimus_prime" ] && [ "$IS_PRERELEASE" = "true" ]; then
+            elif [ "${{ github.ref_name }}" = "dev" ] && [ "$IS_PRERELEASE" = "true" ]; then
               : # allowed for prereleases only
             else
-              echo "::error::Release must be from master (GA) or optimus_prime (prerelease only); got ${{ github.ref_name }} with version $RAW_VERSION"
+              echo "::error::Release must be from master (GA) or dev (prerelease only); got ${{ github.ref_name }} with version $RAW_VERSION"
               exit 1
             fi
 

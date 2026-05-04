@@ -8,7 +8,7 @@
 Consistent quality and adapter trimming for next-generation sequencing data, with special handling for RRBS libraries.
 
 
-[![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=optimus_prime)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
+[![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/trim-galore)](https://crates.io/crates/trim-galore)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
 
@@ -62,7 +62,7 @@ cargo build --release
 To install the latest unreleased changes directly from the development branch:
 
 ```bash
-cargo install --git https://github.com/FelixKrueger/TrimGalore --branch optimus_prime trim-galore --force
+cargo install --git https://github.com/FelixKrueger/TrimGalore --branch dev trim-galore --force
 ```
 
 The `--force` flag overwrites any existing `trim_galore` binary (e.g. a v2.0.0 install from crates.io).
@@ -75,7 +75,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:latest trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.1.0`), `:v2.1.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to `optimus_prime`). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.1.0`), `:v2.1.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
 
 ### Prebuilt binaries
 
