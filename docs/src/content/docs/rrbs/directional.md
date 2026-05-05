@@ -29,7 +29,7 @@ In this case, the sequencing read will contain the position which has been fille
 
 ## What Trim Galore does
 
-For directional RRBS libraries, [`--rrbs`](/TrimGalore/modes/rrbs/) handles case **B**:
+For directional RRBS libraries, [`--rrbs`](/modes/rrbs/) handles case **B**:
 
 - Adapter trimming removes the orange adapter contamination at the 3' end.
 - The extra 2 bp 3'-clip on adapter-trimmed reads removes the red filled-in cytosine position close to the second MspI site.

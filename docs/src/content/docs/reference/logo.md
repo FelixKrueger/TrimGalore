@@ -14,25 +14,25 @@ The 16:9 wordmark with the diagonal lime band — used as the homepage hero and 
 <div class="tg-asset-grid not-content">
   <div class="tg-asset">
     <div class="tg-asset__art tg-asset__art--light">
-      <img src="/TrimGalore/logos/hero-light.svg" alt="Trim Galore hero, light variant">
+      <img src="/logos/hero-light.svg" alt="Trim Galore hero, light variant">
     </div>
     <div class="tg-asset__bar">
       <code>hero-light</code>
       <span class="tg-asset__downloads">
-        <a href="/TrimGalore/logos/hero-light.svg" download>SVG</a>
-        <a href="/TrimGalore/logos/hero-light.png" download>PNG</a>
+        <a href="/logos/hero-light.svg" download>SVG</a>
+        <a href="/logos/hero-light.png" download>PNG</a>
       </span>
     </div>
   </div>
   <div class="tg-asset">
     <div class="tg-asset__art tg-asset__art--dark">
-      <img src="/TrimGalore/logos/hero-dark.svg" alt="Trim Galore hero, dark variant">
+      <img src="/logos/hero-dark.svg" alt="Trim Galore hero, dark variant">
     </div>
     <div class="tg-asset__bar">
       <code>hero-dark</code>
       <span class="tg-asset__downloads">
-        <a href="/TrimGalore/logos/hero-dark.svg" download>SVG</a>
-        <a href="/TrimGalore/logos/hero-dark.png" download>PNG</a>
+        <a href="/logos/hero-dark.svg" download>SVG</a>
+        <a href="/logos/hero-dark.png" download>PNG</a>
       </span>
     </div>
   </div>
@@ -45,25 +45,25 @@ The horizontal lockup — used in the docs site header. Transparent background. 
 <div class="tg-asset-grid not-content">
   <div class="tg-asset">
     <div class="tg-asset__art tg-asset__art--light tg-asset__art--wordmark">
-      <img src="/TrimGalore/logos/wordmark-light.svg" alt="Trim Galore wordmark, light variant">
+      <img src="/logos/wordmark-light.svg" alt="Trim Galore wordmark, light variant">
     </div>
     <div class="tg-asset__bar">
       <code>wordmark-light</code>
       <span class="tg-asset__downloads">
-        <a href="/TrimGalore/logos/wordmark-light.svg" download>SVG</a>
-        <a href="/TrimGalore/logos/wordmark-light.png" download>PNG</a>
+        <a href="/logos/wordmark-light.svg" download>SVG</a>
+        <a href="/logos/wordmark-light.png" download>PNG</a>
       </span>
     </div>
   </div>
   <div class="tg-asset">
     <div class="tg-asset__art tg-asset__art--dark tg-asset__art--wordmark">
-      <img src="/TrimGalore/logos/wordmark-dark.svg" alt="Trim Galore wordmark, dark variant">
+      <img src="/logos/wordmark-dark.svg" alt="Trim Galore wordmark, dark variant">
     </div>
     <div class="tg-asset__bar">
       <code>wordmark-dark</code>
       <span class="tg-asset__downloads">
-        <a href="/TrimGalore/logos/wordmark-dark.svg" download>SVG</a>
-        <a href="/TrimGalore/logos/wordmark-dark.png" download>PNG</a>
+        <a href="/logos/wordmark-dark.svg" download>SVG</a>
+        <a href="/logos/wordmark-dark.png" download>PNG</a>
       </span>
     </div>
   </div>
@@ -76,25 +76,25 @@ The T-mark — used as the favicon. Suitable for app icons and avatar squares. P
 <div class="tg-asset-grid tg-asset-grid--square not-content">
   <div class="tg-asset">
     <div class="tg-asset__art tg-asset__art--light tg-asset__art--square">
-      <img src="/TrimGalore/logos/square-light.svg" alt="Trim Galore square, light variant">
+      <img src="/logos/square-light.svg" alt="Trim Galore square, light variant">
     </div>
     <div class="tg-asset__bar">
       <code>square-light</code>
       <span class="tg-asset__downloads">
-        <a href="/TrimGalore/logos/square-light.svg" download>SVG</a>
-        <a href="/TrimGalore/logos/square-light.png" download>PNG</a>
+        <a href="/logos/square-light.svg" download>SVG</a>
+        <a href="/logos/square-light.png" download>PNG</a>
       </span>
     </div>
   </div>
   <div class="tg-asset">
     <div class="tg-asset__art tg-asset__art--dark tg-asset__art--square">
-      <img src="/TrimGalore/logos/square-dark.svg" alt="Trim Galore square, dark variant">
+      <img src="/logos/square-dark.svg" alt="Trim Galore square, dark variant">
     </div>
     <div class="tg-asset__bar">
       <code>square-dark</code>
       <span class="tg-asset__downloads">
-        <a href="/TrimGalore/logos/square-dark.svg" download>SVG</a>
-        <a href="/TrimGalore/logos/square-dark.png" download>PNG</a>
+        <a href="/logos/square-dark.svg" download>SVG</a>
+        <a href="/logos/square-dark.png" download>PNG</a>
       </span>
     </div>
   </div>

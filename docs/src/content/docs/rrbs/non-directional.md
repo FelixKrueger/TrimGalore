@@ -43,7 +43,7 @@ Similar to case **B**, the read does now contain the filled-in base at position 
 
 ## What Trim Galore does
 
-For non-directional libraries, [`--rrbs --non_directional`](/TrimGalore/modes/rrbs/#non-directional-mode) handles cases **B**, **C**, and **D**:
+For non-directional libraries, [`--rrbs --non_directional`](/modes/rrbs/#non-directional-mode) handles cases **B**, **C**, and **D**:
 
 - `--rrbs` removes the 3' fill-in artifact and adapter contamination (cases C, D).
 - `--non_directional` screens adapter-trimmed sequences for the presence of either CAA or CGA at the start of sequences and clips off the first 2 bases if found (cases B, D, the CTOT/CTOB-derived reads).
