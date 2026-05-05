@@ -11,6 +11,12 @@
 # No `labels:` field — Dependabot will auto-create and apply its default
 # `dependencies` label on the first PR per ecosystem.  We can move to explicit
 # labels later if we want fine-grained categorisation.
+#
+# Grouping: patch + minor bumps are batched into a single weekly PR per
+# ecosystem (one for cargo, one for github-actions). Major bumps still open
+# as individual PRs so breaking-change reviews stay focused. This collapsed
+# the post-v2.1.0-GA Dependabot inbox from ~9 emails (3 PRs × ~3 events) to
+# 1-2 emails per cycle.
 version: 2
 updates:
   - package-ecosystem: "cargo"
@@ -21,6 +27,11 @@ updates:
     open-pull-requests-limit: 5
     assignees:
       - "FelixKrueger"
+    groups:
+      cargo-patch-minor:
+        update-types:
+          - "patch"
+          - "minor"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -30,3 +41,8 @@ updates:
     open-pull-requests-limit: 5
     assignees:
       - "FelixKrueger"
+    groups:
+      github-actions-patch-minor:
+        update-types:
+          - "patch"
+          - "minor"

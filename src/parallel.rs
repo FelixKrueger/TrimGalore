@@ -868,11 +868,18 @@ mod tests {
         let dir = fresh_tmpdir("tg_high_compression");
         let input_path = dir.join("input.fq");
 
-        // 200 reads with a repeating-sequence motif so gzip can find
+        // 5_000 reads with a repeating-sequence motif so gzip can find
         // back-references at higher levels. Sized to span a single
         // batch so output is one gzip member regardless of cores.
+        //
+        // Why 5_000 (was 200): on tiny inputs (~13 KB) the level-6
+        // dictionary/framing overhead can erase the 2-byte compression
+        // win over level-1, and flate2 patch bumps periodically nudge
+        // that crossover (e.g. 1.1.9 flipped 200-reads from 571→573 vs
+        // 573→571). 5_000 reads gives level-6 ~325 KB to amortise the
+        // overhead so the assertion is robust against future tweaks.
         let mut content = String::new();
-        for i in 0..200 {
+        for i in 0..5_000 {
             content.push_str(&format!(
                 "@read_{i}\nACGTACGTACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n"
             ));
