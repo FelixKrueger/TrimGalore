@@ -13,11 +13,11 @@ trim_galore --rrbs sample.fq.gz
 trim_galore --rrbs --paired sample_R1.fq.gz sample_R2.fq.gz
 ```
 
-For the biology behind RRBS (strand types, fill-in artifacts, and why trimming is needed), see the [Bisulfite & RRBS guide](/TrimGalore/rrbs/guide/).
+For the biology behind RRBS (strand types, fill-in artifacts, and why trimming is needed), see the [Bisulfite & RRBS guide](/rrbs/guide/).
 
 ## Non-directional mode
 
-Trim Galore also has a `--non_directional` option, which will screen adapter-trimmed sequences for the presence of either CAA or CGA at the start of sequences and clip off the first 2 bases if found. If CAA or CGA are found at the start, no bases will be trimmed off from the 3' end even if the sequence had some contaminating adapter sequence removed (in this case the sequence read likely originated from either the CTOT or CTOB strand; refer to [the RRBS guide](/TrimGalore/rrbs/guide/) for the meaning of CTOT and CTOB strands).
+Trim Galore also has a `--non_directional` option, which will screen adapter-trimmed sequences for the presence of either CAA or CGA at the start of sequences and clip off the first 2 bases if found. If CAA or CGA are found at the start, no bases will be trimmed off from the 3' end even if the sequence had some contaminating adapter sequence removed (in this case the sequence read likely originated from either the CTOT or CTOB strand; refer to [the RRBS guide](/rrbs/guide/) for the meaning of CTOT and CTOB strands).
 
 ```bash
 trim_galore --rrbs --non_directional --paired sample_R1.fq.gz sample_R2.fq.gz

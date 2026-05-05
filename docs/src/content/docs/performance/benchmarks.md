@@ -146,4 +146,4 @@ Note that the dominant nf-core / Snakemake / CWL use case typically *doesn't* ke
 - **igzip:** The bioconda Trim Galore installation includes igzip (Intel ISA-L) for fast single-threaded decompression. Benchmarks run with igzip available to match the nf-core production environment.
 - **Outputs verified:** All Rust beta.5 and beta.7 outputs were confirmed byte-identical (decompressed) at `--cores 8` via md5 checksums. Myers' prefilter is byte-identity-preserving by construction.
 
-For the architectural reasons behind the numbers (single-pass vs three-pass architecture, worker-pool parallelism, thread-budget breakdown), see [Threading model](/TrimGalore/performance/threading/).
+For the architectural reasons behind the numbers (single-pass vs three-pass architecture, worker-pool parallelism, thread-budget breakdown), see [Threading model](/performance/threading/).

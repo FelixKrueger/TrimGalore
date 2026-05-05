@@ -7,7 +7,7 @@ description: Project history, maintenance, and license.
 
 Trim Galore was developed at [Babraham Bioinformatics](https://www.bioinformatics.babraham.ac.uk/) by [Felix Krueger](https://github.com/FelixKrueger) (now part of [Altos Labs](https://altoslabs.com/)). For roughly a decade it shipped as a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/) and was the de-facto standard for adapter trimming in many bisulfite sequencing pipelines.
 
-In 2026, Trim Galore was rewritten in Rust as a single static binary, the **Oxidized Edition** (v2.x). It is a drop-in replacement for v0.6.x with extra capabilities: poly-G auto-detection, a generic poly-A trimmer, per-pair adapter detection, cleaner multi-adapter syntax, and a structured JSON report. See [Migrating from v0.6.x](/TrimGalore/reference/migration/) for the changes.
+In 2026, Trim Galore was rewritten in Rust as a single static binary, the **Oxidized Edition** (v2.x). It is a drop-in replacement for v0.6.x with extra capabilities: poly-G auto-detection, a generic poly-A trimmer, per-pair adapter detection, cleaner multi-adapter syntax, and a structured JSON report. See [Migrating from v0.6.x](/reference/migration/) for the changes.
 
 Current development is at [github.com/FelixKrueger/TrimGalore](https://github.com/FelixKrueger/TrimGalore).
 

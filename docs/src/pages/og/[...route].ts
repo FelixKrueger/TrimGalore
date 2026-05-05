@@ -7,7 +7,7 @@ import type { APIRoute } from 'astro';
 // V4 brand-aligned OG card. Cream paper, the trim/galore wordmark top-left,
 // a diagonal lime band cutting through the middle, and the page title +
 // description bottom-left. Rendered with satori (HTML/JSX → SVG) and
-// resvg-js (SVG → PNG) at build time. Output: /TrimGalore/og/<slug>.png.
+// resvg-js (SVG → PNG) at build time. Output: /og/<slug>.png.
 
 // Fonts and the entries collection are loaded at module scope so they're read
 // once per build, not once per page route.

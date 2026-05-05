@@ -42,7 +42,7 @@ trim_galore --cores 8 --paired sample_R1.fastq.gz sample_R2.fastq.gz
 trim_galore --rrbs --paired sample_R1.fastq.gz sample_R2.fastq.gz
 ```
 
-For non-directional libraries, add `--non_directional`. See the [Bisulfite & RRBS guide](/TrimGalore/rrbs/guide/) for the biology behind these modes.
+For non-directional libraries, add `--non_directional`. See the [Bisulfite & RRBS guide](/rrbs/guide/) for the biology behind these modes.
 
 ## Run FastQC alongside
 
@@ -80,4 +80,4 @@ trim_galore -a "file:./adapters.fa" input.fastq.gz
 trim_galore --help
 ```
 
-For context on individual flags and how they interact, see the [user guide](/TrimGalore/guide/overview/).
+For context on individual flags and how they interact, see the [user guide](/guide/overview/).

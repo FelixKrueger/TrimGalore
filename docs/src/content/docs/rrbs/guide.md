@@ -15,7 +15,7 @@ The fairly small fragment size of RRBS fragments can become a potential problem 
 
 Such read-through adapter contamination may result in a lower mapping efficiency if the read does not align at all, or it may lead to false alignments which can result in incorrect methylation calls. As a simple rule, the longer the read length the higher the proportion of reads with adapter contamination. If such adapter contamination is not spotted and removed appropriately, a longer read length is most likely resulting in a lower mapping efficiency!
 
-If the read length is longer than the MspI fragment one will also read (and perform a methylation call) for a cytosine that has been filled in with a predefined methylation state during the end-repair step. This is discussed further in [Directional libraries](/TrimGalore/rrbs/directional/) and [Non-directional & paired-end](/TrimGalore/rrbs/non-directional/).
+If the read length is longer than the MspI fragment one will also read (and perform a methylation call) for a cytosine that has been filled in with a predefined methylation state during the end-repair step. This is discussed further in [Directional libraries](/rrbs/directional/) and [Non-directional & paired-end](/rrbs/non-directional/).
 
 ## Single-end or paired-end?
 
@@ -37,6 +37,6 @@ Up to a read length of around 60–70 bp, the basecall quality of these reads is
 
 RRBS reads suffer disproportionally from problems associated with long read lengths because they are, compared to other -Seq applications, size-selected for rather short fragment sizes. The following sections cover further aspects to consider when analysing RRBS samples, and how Trim Galore handles read-length-related problems and experimentally introduced biases.
 
-- [Directional libraries](/TrimGalore/rrbs/directional/). OT / OB strands only.
-- [Non-directional & paired-end](/TrimGalore/rrbs/non-directional/). All four bisulfite strands.
-- [QC measures for RRBS](/TrimGalore/rrbs/qc/). What to check, and how Trim Galore helps.
+- [Directional libraries](/rrbs/directional/). OT / OB strands only.
+- [Non-directional & paired-end](/rrbs/non-directional/). All four bisulfite strands.
+- [QC measures for RRBS](/rrbs/qc/). What to check, and how Trim Galore helps.
