@@ -43,7 +43,7 @@ Oxidized Edition --cores N thread breakdown:
                                                        = N+4 total
 ```
 
-At `--cores 1`, the worker-pool is bypassed entirely: a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). The infrastructure cost only applies from `--cores 2` upward, where each additional core adds exactly 1 thread and ~10 MB of memory.
+At `--cores 1`, the worker-pool is bypassed entirely: a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). From `--cores 2` upward the **N+4 model** applies — each added core is exactly 1 worker thread plus ~10 MB of memory on top of the 4 fixed-cost threads (2 decompressors + 1 batcher + 1 writer). Wall-clock speedup is **near-linear up to `--cores 8` for paired-end runs**; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so each additional core helps progressively less.
 
 | Cores | TG threads (up to ~3N+3) | Oxidized threads (N+4) |
 |------:|-------------------------:|-----------------------:|
