@@ -9,6 +9,27 @@ description: Reorder reads in the trimmed FASTQ output to make .fq.gz files sign
 
 ## When to use it
 
+### Clumpify
+
+- ✅ Low complexity data: yes (ATAC-seq, ChIP-seq, Ribo-Seq, RNA-Seq, high sequencing depth WES)
+- ❌ High complexity data: no (whole-genome sequencing) - has no effect
+- ❌ Long reads: no (Oxford Nanopore) - has no effect
+- ❌ Unusual paired-end formats: no - can have deleterious effect
+
+### Compression
+
+Whether to push up `--compression` level or not depends on what the trimmed FASTQ is used for:
+
+- **Pipeline intermediates** (trimmed FASTQ is ephemeral, deleted after the pipeline finishes)
+    - Leave as compression level 1, but can still use `--clumpify`.
+    - The reorder is essentially free (1.0–1.4× slowdown on most data) and the smaller output makes the *next* step (typically an aligner) read less from disk — net I/O win for the whole pipeline.
+- **Long-term storage or disk-constrained workdirs**
+    - Add `--compression 6` (or `--compression 9` for archival)
+    - `--clumpify --compression 6` can halve output file sizes (15–50% less) but makes the run time 4–6× slower.
+    - Can be specified without `--clumpify`, but with redundant data types (ATAC-seq, Ribo-seq) it typically runs *faster* than with clumpify on, because deflate finds matches more cheaply on sorted runs.
+
+### Data types
+
 | Data type | Typical saving (`--clumpify --compression 9`) | Recommendation |
 |---|---|---|
 | **ATAC-seq (paired)** | ~50% | ✅ **Strong yes** — Tn5 insertion bias creates very high fragment redundancy |
@@ -101,77 +122,146 @@ Memory usage without `--clumpify` is typically significantly lower, around the 1
 
 ## Benchmark results
 
-Real-world numbers from Phil's MacBook Pro (Apple Silicon, 16 GiB RAM, `--cores 6 --memory 1G`, all defaults). Each row shows three configurations vs the same dataset's plain trim:
+Real-world numbers from a benchmark using a MacBook Pro (Apple Silicon, 16 GiB RAM, `--cores 6 --memory 1G`, all defaults). Each dataset has 3 bars:
 
-| Library | Reads | Plain size | `--clumpify` <small>(L1, default)</small> | `--compression 6` <small>(no clumpify)</small> | `--clumpify --compression 6` |
-|---|---|---|---|---|---|
-| MiSeq amplicon (CRISPR) | 4.4M SE | 500 MB | −16.3% | −25.1% | **−31.7%** |
-| ChIP-seq (Illumina SE) | 28.6M SE | 1.5 GB | ~0% | −14.1% | **−15.2%** |
-| WES (Illumina SE) | 105M SE | 9.2 GB | −4.4% | −15.4% | **−20.5%** |
-| Long-read (ONT/PacBio) | 100K SE | 558 MB | 0% | −8.6% | **−8.8%** |
-| ATAC-seq (Illumina PE) | 31.5M PE | 2.9 GB | −34.8% | −21.7% | **−48.5%** |
-| Ribo-seq (Illumina PE) | ~30M PE | 4.0 GB | −15.2% | −18.8% | **−32.0%** |
-| RNA-seq (Illumina PE) | 93M PE | 17.0 GB | −15.1% | −14.0% | **−27.2%** |
-| scRNA-seq 10x Chromium (PE) | 392M PE | 39.6 GB | **+6.2%** ⚠ | **−17.1%** | −12.1% |
+- `--clumpify`(L1, default)
+- `--compression 6` (no clumpify)
+- `--clumpify --compression 6`.
 
-For most short-read data, **`--clumpify --compression 6` is the headline configuration** — it saves the most, and on ATAC-seq and Ribo-seq it's also *faster* than `--compression 6` alone (the bin-sorted gzip members compress more efficiently, so deflate finds matches with less hash-chain work). The default `--clumpify` (compression 1) is essentially free in wall time and still gets you 15–35% saving on the most redundant data types.
+Plots show compression savings (how much smaller the resulting FastQ files are versus the regular run) and the Wall-time effect (how much slower the run was, 1x is original run).
 
-The huge ATAC-seq and Ribo-seq savings come from the underlying biology: Tn5 transposase has insertion-site biases that produce densely clustered fragments; ribosome footprints are short and stack at start codons. Both produce data where many reads share long substrings, which is exactly what gzip's dictionary loves once those reads are co-located.
+<svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, sans-serif" fill="currentColor" role="img" aria-label="Compression saving vs plain, percentage. Bar chart with 8 datasets, 3 configurations each.">
+  <text x="550" y="28" text-anchor="middle" font-weight="600" font-size="22">Compression saving vs plain (%)</text>
+  <text x="550" y="50" text-anchor="middle" font-size="15" fill-opacity="0.65">positive = output smaller; negative = output grew</text>
+  <line x1="70" y1="60" x2="70" y2="370" stroke="currentColor" stroke-opacity="0.5"/>
+  <line x1="70" y1="370" x2="1040" y2="370" stroke="currentColor" stroke-opacity="0.5"/>
+  <line x1="70" y1="318.33" x2="1040" y2="318.33" stroke="currentColor" stroke-opacity="0.35" stroke-dasharray="2 3"/>
+  <text x="62" y="65" text-anchor="end" font-size="14" fill-opacity="0.75">50%</text>
+  <text x="62" y="117" text-anchor="end" font-size="14" fill-opacity="0.75">40%</text>
+  <text x="62" y="169" text-anchor="end" font-size="14" fill-opacity="0.75">30%</text>
+  <text x="62" y="220" text-anchor="end" font-size="14" fill-opacity="0.75">20%</text>
+  <text x="62" y="272" text-anchor="end" font-size="14" fill-opacity="0.75">10%</text>
+  <text x="62" y="323" text-anchor="end" font-size="14" fill-opacity="0.75">0%</text>
+  <text x="62" y="375" text-anchor="end" font-size="14" fill-opacity="0.75">−10%</text>
+  <g font-size="19">
+    <text x="130" y="385" text-anchor="end" transform="rotate(-25 130 385)">MiSeq</text>
+    <text x="250" y="385" text-anchor="end" transform="rotate(-25 250 385)">ChIP-seq</text>
+    <text x="370" y="385" text-anchor="end" transform="rotate(-25 370 385)">WES</text>
+    <text x="490" y="385" text-anchor="end" transform="rotate(-25 490 385)">Long-read</text>
+    <text x="610" y="385" text-anchor="end" transform="rotate(-25 610 385)">ATAC-seq</text>
+    <text x="730" y="385" text-anchor="end" transform="rotate(-25 730 385)">Ribo-seq</text>
+    <text x="850" y="385" text-anchor="end" transform="rotate(-25 850 385)">RNA-seq</text>
+    <text x="970" y="385" text-anchor="end" transform="rotate(-25 970 385)">scRNA-seq 10x</text>
+  </g>
+  <rect x="87" y="234.10" width="26" height="84.23" fill="#2a4d8f"/>
+  <rect x="117" y="188.65" width="26" height="129.68" fill="#c25400"/>
+  <rect x="147" y="154.55" width="26" height="163.78" fill="#1a7f1a"/>
+  <rect x="207" y="318.33" width="26" height="0.41" fill="#2a4d8f"/>
+  <rect x="237" y="245.48" width="26" height="72.85" fill="#c25400"/>
+  <rect x="267" y="239.80" width="26" height="78.53" fill="#1a7f1a"/>
+  <rect x="327" y="295.60" width="26" height="22.73" fill="#2a4d8f"/>
+  <rect x="357" y="238.76" width="26" height="79.57" fill="#c25400"/>
+  <rect x="387" y="212.41" width="26" height="105.92" fill="#1a7f1a"/>
+  <rect x="447" y="318.33" width="26" height="0.5" fill="#2a4d8f"/>
+  <rect x="477" y="273.90" width="26" height="44.43" fill="#c25400"/>
+  <rect x="507" y="272.86" width="26" height="45.47" fill="#1a7f1a"/>
+  <rect x="567" y="138.53" width="26" height="179.80" fill="#2a4d8f"/>
+  <rect x="597" y="206.21" width="26" height="112.12" fill="#c25400"/>
+  <rect x="627" y="67.75" width="26" height="250.58" fill="#1a7f1a"/>
+  <rect x="687" y="239.80" width="26" height="78.53" fill="#2a4d8f"/>
+  <rect x="717" y="221.20" width="26" height="97.13" fill="#c25400"/>
+  <rect x="747" y="152.99" width="26" height="165.34" fill="#1a7f1a"/>
+  <rect x="807" y="240.31" width="26" height="78.02" fill="#2a4d8f"/>
+  <rect x="837" y="245.99" width="26" height="72.34" fill="#c25400"/>
+  <rect x="867" y="177.80" width="26" height="140.53" fill="#1a7f1a"/>
+  <rect x="927" y="318.33" width="26" height="32.03" fill="#2a4d8f"/>
+  <rect x="957" y="229.97" width="26" height="88.36" fill="#c25400"/>
+  <rect x="987" y="255.83" width="26" height="62.50" fill="#1a7f1a"/>
+  <g transform="translate(820, 80)" font-size="15">
+    <rect x="0" y="0" width="18" height="14" fill="#2a4d8f"/>
+    <text x="26" y="12">--clumpify (L1, default)</text>
+    <rect x="0" y="20" width="18" height="14" fill="#c25400"/>
+    <text x="26" y="32">--compression 6</text>
+    <rect x="0" y="40" width="18" height="14" fill="#1a7f1a"/>
+    <text x="26" y="52">--clumpify --compression 6</text>
+  </g>
+</svg>
 
-The modest WES saving reflects whole-genome diversity: ~4× coverage of 60 MB exome means each genomic position has ~4 forward + ~4 reverse reads, and minimizer clustering only reaches that small group.
+<svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, sans-serif" fill="currentColor" role="img" aria-label="Wall time vs plain, multiplier. Bar chart with 8 datasets, 3 configurations each.">
+  <text x="550" y="28" text-anchor="middle" font-weight="600" font-size="22">Wall time vs plain (×)</text>
+  <text x="550" y="50" text-anchor="middle" font-size="15" fill-opacity="0.65">how much longer than the plain run took</text>
+  <line x1="70" y1="60" x2="70" y2="370" stroke="currentColor" stroke-opacity="0.5"/>
+  <line x1="70" y1="370" x2="1040" y2="370" stroke="currentColor" stroke-opacity="0.5"/>
+  <line x1="70" y1="347.86" x2="1040" y2="347.86" stroke="currentColor" stroke-opacity="0.4" stroke-dasharray="3 3"/>
+  <text x="1040" y="340" text-anchor="end" font-size="13" fill-opacity="0.65">1× (plain wall)</text>
+  <text x="62" y="375" text-anchor="end" font-size="14" fill-opacity="0.75">0×</text>
+  <text x="62" y="331" text-anchor="end" font-size="14" fill-opacity="0.75">2×</text>
+  <text x="62" y="287" text-anchor="end" font-size="14" fill-opacity="0.75">4×</text>
+  <text x="62" y="243" text-anchor="end" font-size="14" fill-opacity="0.75">6×</text>
+  <text x="62" y="199" text-anchor="end" font-size="14" fill-opacity="0.75">8×</text>
+  <text x="62" y="155" text-anchor="end" font-size="14" fill-opacity="0.75">10×</text>
+  <text x="62" y="110" text-anchor="end" font-size="14" fill-opacity="0.75">12×</text>
+  <text x="62" y="66" text-anchor="end" font-size="14" fill-opacity="0.75">14×</text>
+  <g font-size="19">
+    <text x="130" y="385" text-anchor="end" transform="rotate(-25 130 385)">MiSeq</text>
+    <text x="250" y="385" text-anchor="end" transform="rotate(-25 250 385)">ChIP-seq</text>
+    <text x="370" y="385" text-anchor="end" transform="rotate(-25 370 385)">WES</text>
+    <text x="490" y="385" text-anchor="end" transform="rotate(-25 490 385)">Long-read</text>
+    <text x="610" y="385" text-anchor="end" transform="rotate(-25 610 385)">ATAC-seq</text>
+    <text x="730" y="385" text-anchor="end" transform="rotate(-25 730 385)">Ribo-seq</text>
+    <text x="850" y="385" text-anchor="end" transform="rotate(-25 850 385)">RNA-seq</text>
+    <text x="970" y="385" text-anchor="end" transform="rotate(-25 970 385)">scRNA-seq 10x</text>
+  </g>
+  <rect x="87" y="347.41" width="26" height="22.59" fill="#2a4d8f"/>
+  <rect x="117" y="333.69" width="26" height="36.31" fill="#c25400"/>
+  <rect x="147" y="336.57" width="26" height="33.43" fill="#1a7f1a"/>
+  <rect x="207" y="339.00" width="26" height="31.00" fill="#2a4d8f"/>
+  <rect x="237" y="261.29" width="26" height="108.71" fill="#c25400"/>
+  <rect x="267" y="264.40" width="26" height="105.60" fill="#1a7f1a"/>
+  <rect x="327" y="345.43" width="26" height="24.57" fill="#2a4d8f"/>
+  <rect x="357" y="228.74" width="26" height="141.26" fill="#c25400"/>
+  <rect x="387" y="232.28" width="26" height="137.72" fill="#1a7f1a"/>
+  <rect x="447" y="346.31" width="26" height="23.69" fill="#2a4d8f"/>
+  <rect x="477" y="296.93" width="26" height="73.07" fill="#c25400"/>
+  <rect x="507" y="301.14" width="26" height="68.86" fill="#1a7f1a"/>
+  <rect x="567" y="344.98" width="26" height="25.02" fill="#2a4d8f"/>
+  <rect x="597" y="278.11" width="26" height="91.89" fill="#c25400"/>
+  <rect x="627" y="317.52" width="26" height="52.48" fill="#1a7f1a"/>
+  <rect x="687" y="346.31" width="26" height="23.69" fill="#2a4d8f"/>
+  <rect x="717" y="253.32" width="26" height="116.68" fill="#c25400"/>
+  <rect x="747" y="284.97" width="26" height="85.03" fill="#1a7f1a"/>
+  <rect x="807" y="346.75" width="26" height="23.25" fill="#2a4d8f"/>
+  <rect x="837" y="239.36" width="26" height="130.64" fill="#c25400"/>
+  <rect x="867" y="258.84" width="26" height="111.16" fill="#1a7f1a"/>
+  <rect x="927" y="342.77" width="26" height="27.23" fill="#2a4d8f"/>
+  <rect x="957" y="236.26" width="26" height="133.74" fill="#c25400"/>
+  <rect x="987" y="229.00" width="26" height="141.00" fill="#1a7f1a"/>
+  <g transform="translate(820, 80)" font-size="15">
+    <rect x="0" y="0" width="18" height="14" fill="#2a4d8f"/>
+    <text x="26" y="12">--clumpify (L1, default)</text>
+    <rect x="0" y="20" width="18" height="14" fill="#c25400"/>
+    <text x="26" y="32">--compression 6</text>
+    <rect x="0" y="40" width="18" height="14" fill="#1a7f1a"/>
+    <text x="26" y="52">--clumpify --compression 6</text>
+  </g>
+</svg>
 
-**scRNA-seq 10x is the exception.** Cell-barcode R1 is highly redundant and reorders cleanly, but R2 (cDNA) is forced to follow R1's order to preserve pair lockstep, and ends up scrambled vs the natural flowcell-cluster order of the input. At L1 the R2 disruption flips the result to a 6% loss; at L6 the larger gzip dictionary recovers most of the R2 loss but `--clumpify` still costs you ~5 ppt vs `--compression 6` alone. **For 10x scRNA-seq, use `--compression 6` without `--clumpify`.**
+Datasets covered:
 
-The 0% long-read result holds the disclaimer line: ONT and PacBio reads are mostly unique multi-kb fragments, so there's nothing for clumpify to cluster.
-
-## How it works (briefly)
-
-For each (paired-end pair of) trimmed reads, the dispatcher:
-
-1. Computes the **canonical 16-mer minimizer** of R1 — the lexicographically smallest of `min(forward, revcomp)` over all 16-mer windows in the read. R2 follows R1's bin assignment in lockstep so paired reads stay together.
-2. Hashes the minimizer (FNV-1a) into one of `n_bins` per-bin in-memory buffers.
-3. When a bin's accumulated raw bytes exceed `bin_byte_budget`, the bin is sorted by minimizer key (with sequence/quality/id tie-breaks for determinism) and shipped to a worker thread for trimming + gzip compression. Each worker emits one gzip member per batch.
-4. The main thread reassembles compressed bytes in flush order via the existing BTreeMap-keyed queue, identical to the non-clumpify parallel pipeline.
-
-Each gzip member therefore contains a sorted run of records sharing a minimizer hash bucket, which is what gzip's 32 KB sliding window exploits to find long back-references.
+- **MiSeq amplicon (CRISPR)** — 4.4M SE, 500 MB plain output
+- **ChIP-seq (Illumina SE)** — 28.6M SE, 1.5 GB
+- **WES (Illumina SE)** — 105M SE, 9.2 GB
+- **Long-read (ONT/PacBio)** — 100K SE, 558 MB
+- **ATAC-seq (Illumina PE)** — 31.5M PE, 2.9 GB
+- **Ribo-seq (Illumina PE)** — ~30M PE, 4.0 GB
+- **RNA-seq (Illumina PE)** — 93M PE, 17.0 GB
+- **scRNA-seq 10x Chromium (PE)** — 392M PE, 39.6 GB
 
 ## Comparison with other tools
 
-If you've used `bbmap clumpify` or [`stevekm/squish`](https://github.com/stevekm/squish), `--clumpify` produces compression results in the same ballpark on most data:
+If you've used [`bbmap clumpify`](https://archive.jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/clumpify-guide/) or [`stevekm/squish`](https://github.com/stevekm/squish), `--clumpify` produces compression results in the same ballpark on most data:
 
 - On amplicon-type data, all three tools converge to ~37–38% saving at gzip level 9.
 - On diverse data (WES, WGS), all three give ~20–30% saving — none of them works miracles on inherently diverse libraries.
 
-The advantage of `--clumpify` over running a separate tool is that it's part of the trim pass, so there's no extra read-and-rewrite cycle. For an X GB input, a separate clumpify step would mean reading the trimmed output, sorting, and writing it back — typically +3–5× the trim wall time. `--clumpify` does it in one pass.
-
-## Summary — which configuration should I use?
-
-The right configuration depends on **what happens to the trimmed FASTQ after Trim Galore finishes**.
-
-### Pipeline intermediates (deleted after the run): use `--clumpify` alone
-
-If trimmed FASTQ is an ephemeral artefact in a pipeline workdir — typical for nf-core / Snakemake / CWL workflows where the trim step's output feeds an aligner and gets garbage-collected after the pipeline completes — leave gzip compression at the default level 1 and just add `--clumpify`:
-
-```bash
-trim_galore --clumpify <input>
-```
-
-Wall-time penalty is essentially zero (1.0–1.4× plain on the datasets that benefit), and the smaller intermediate file pays you back in faster I/O for the *next* step (alignment reads less data from disk). Pure win for the dominant pipeline use case.
-
-### Long-term storage / disk-constrained workdirs: add `--compression 6`
-
-If trimmed FASTQ will be retained as a deliverable, archived to object storage, transferred over the network, or kept around because work-dir disk space is tight, the extra gzip CPU at level 6 is worth the run time:
-
-```bash
-trim_galore --clumpify --compression 6 <input>
-```
-
-This is roughly 4–6× plain wall on most data, but saves 15–50% on output size depending on data type. On the most redundant inputs (ATAC-seq, Ribo-seq) clumpify lets gzip find matches faster than it would on unsorted data, so `--clumpify --compression 6` can actually be *faster* than `--compression 6` alone — a strict win.
-
-For maximum compression at archival cost, `--compression 9` is also available; it adds 2–5 ppt of saving for roughly double the L6 wall time.
-
-### Special cases
-
-- **10x scRNA-seq:** skip `--clumpify`. R2 fragmentation outweighs the R1 sort win at every gzip level on this data; use `--compression 6` without `--clumpify` for a clean ~17% saving.
-- **Long-read (ONT / PacBio):** skip `--clumpify`. Long reads are unique fragments — there's nothing for the minimizer sort to cluster.
-- **Memory:** the default `--memory 1G` is fine for almost all inputs. Bumping to `2G` adds ~2 ppt of saving on big datasets; going higher has sharply diminishing returns and risks memory pressure on 16 GiB hosts.
+The advantage of `--clumpify` over running a separate tool is that it's part of the trim pass, so there's no extra read-and-rewrite cycle. For an X GB input, a separate clumpify step would mean reading the trimmed output, sorting, and writing it back; typically +3–5× the trim wall time as well as double the disk I/O. `--clumpify` does it in one pass.

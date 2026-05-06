@@ -132,25 +132,9 @@ On AWS at \~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs 
 
 The default output gzip level is 1 (fastest), this is what the headline numbers above measure. The trade is that output `.fq.gz` files are roughly 75% larger than gzip-level-6 output (the older Perl/`gzip(1)` default). Decompressed bytes are byte-identical regardless of level — all gzip levels are lossless; only the framing differs.
 
-Two opt-in flags shrink the output: `--clumpify` and `--compression`. They can be used indepedently or together.
+Two opt-in flags shrink the output: `--clumpify` and `--compression`. They can be used indepedently or together. For some data types they can give up to 50% smaller FastQ files with zero data loss.
 
-The `--clumpify` flag instructs Trim Galore to roughly sort your data by sequence before compression, making the gzip compression more effective. Whether to use it or not depends on your data type:
-
-- ✅ Low complexity data: yes (ATAC-seq, ChIP-seq, Ribo-Seq, RNA-Seq, high sequencing depth WES)
-- ❌ High complexity data: no (whole-genome sequencing) - has no effect
-- ❌ Long reads: no (Oxford Nanopore) - has no effect
-- ❌ Unusual paired-end formats: no - can have deleterious effect
-    - Example: scRNA-seq where read 1 is a short index, clumpify can make the FastQ files _larger_
-
-Whether to push up `--compression` level or not depends on what the trimmed FASTQ is used for:
-
-- **Pipeline intermediates** (trimmed FASTQ is ephemeral, deleted after the pipeline finishes)
-    - Leave as compression level 1, but can still use `--clumpify`.
-    - The reorder is essentially free (1.0–1.4× slowdown on most data) and the smaller output makes the *next* step (typically an aligner) read less from disk — net I/O win for the whole pipeline.
-- **Long-term storage or disk-constrained workdirs**
-    - Add `--compression 6` (or `--compression 9` for archival)
-    - `--clumpify --compression 6` can halve output file sizes (15–50% less) but makes the run time 4–6× slower.
-    - Can be specified without `--clumpify`, but with redundant data types (ATAC-seq, Ribo-seq) it typically runs *faster* than with clumpify on, because deflate finds matches more cheaply on sorted runs.
+The `--clumpify` flag instructs Trim Galore to roughly sort your data by sequence before compression, making the gzip compression more effective. Whether to use it or not depends on your data type.
 
 See [Clumpy compression](/performance/clumpy/) for the full per-data-type table.
 
