@@ -31,8 +31,8 @@ trim_galore --clumpify <input>
 # Maximum compression (slowest, smallest output)
 trim_galore --clumpify --compression 9 <input>
 
-# Compose for archival storage: max compression with full memory budget
-trim_galore --clumpify --compression 9 --memory 16G <input>
+# Compose for archival storage: max compression with extra memory
+trim_galore --clumpify --compression 9 --memory 4G <input>
 
 # Higher gzip without reordering (gzip-only win, no clumping cost)
 trim_galore --compression 6 <input>
@@ -58,7 +58,7 @@ The minimizer computation uses 2-bit packed integer ops (one O(1) bitwise step p
 
 ### Memory
 
-`--memory` (default `4G`) is a Trim Galore-wide memory budget. The clumpify dispatcher sizes the per-bin sort runs against it, with the formula picked so **predicted peak RSS ≤ `--memory`**:
+`--memory` (default `1G`) is a Trim Galore-wide memory budget. The clumpify dispatcher sizes the per-bin sort runs against it, with the formula picked so **predicted peak RSS ≤ `--memory`**:
 
 ```
 n_bins          = max(16, 4 × cores)
@@ -66,17 +66,32 @@ usable          = memory − 512 MiB        (FastQC + allocator + runtime overhe
 bin_byte_budget = 4 × usable / (5 × n_bins + 7 × cores)
 ```
 
-So with `--cores 8 --memory 4G` you get **32 bins × 66 MB**, predicted peak ≈ 4 GB — and the binary prints those resolved values at startup. On a 16 GiB ATAC-seq run this matches the actual `/usr/bin/time -l` "peak memory footprint" within 1%. Bigger budget → bigger per-gzip-member sort runs → better compression, asymptoting once the budget exceeds the uncompressed input size.
+So with `--cores 8 --memory 1G` you get **32 bins × 12 MB**; with `--cores 8 --memory 4G` you get 32 bins × 66 MB. The binary prints those resolved values at startup. On large-budget runs the formula matches the actual `/usr/bin/time -l` "peak memory footprint" within 1%; on small budgets the model overshoots somewhat (allocator churn dominates). Bigger budget → bigger per-gzip-member sort runs → better compression, asymptoting once the budget exceeds the uncompressed input size.
 
-For the same input:
+#### Diminishing returns
 
-| `--memory` | Bin size | Saving (MiSeq amplicon `--compression 9`) |
-|---|---|---|
-| 1G | ~9 MB | 30% |
-| 4G (default) | ~66 MB | 36% |
-| 16G | ~290 MB | 37% |
+From an ATAC-seq paired-end benchmark (31 M pairs, `--clumpify --compression 1`, `--cores 6`):
 
-The default `4G` is the sweet spot for typical ~1–10 GB inputs. For very large inputs (multi-GB compressed RNA-seq, 10x scRNA-seq), bumping to `8G` or `16G` adds a few percentage points if you have the headroom.
+| `--memory` | Bin size | Wall vs plain | Saving |
+|---|---|---|---|
+| 1G (default) | ~12 MB | 1.1× | 34.8% |
+| 2G | ~37 MB | 1.6× | 36.7% |
+| 4G | ~88 MB | ~5–6× | 38.0% |
+| 8G | ~190 MB | ~35× (memory-pressure thrash on 16 GiB host) | 38.9% |
+
+Going from 1G to 8G adds only **4 percentage points** of saving while wall time grows by an order of magnitude on memory-tight hosts. The default `1G` is fine for most short-read inputs. Bump to `2G` if you have the headroom and want the last couple of percentage points; only push higher when storage cost truly dominates and you're on a host with comfortable headroom.
+
+#### Below-floor behaviour
+
+`--clumpify` needs a minimum of ~535 MiB to run (mostly from a fixed 512 MiB reservation for FastQC, allocator, and runtime overhead). The exact floor varies slightly with `--cores` but stays in the 535–730 MiB range for any sensible core count. If `--memory` is below the floor, Trim Galore prints a loud warning and **falls back to plain mode** rather than refusing the job:
+
+```
+WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 552 MiB).
+         Falling back to plain mode (no read reordering). Increase --memory or
+         drop --clumpify to silence this warning.
+```
+
+The trim itself proceeds normally; only the read-reordering step is skipped. Output is byte-identical to a `--clumpify`-free invocation.
 
 ### What doesn't change
 
@@ -93,7 +108,7 @@ For scRNA-seq with 10x Chromium reads, this is fine — the cell barcode + UMI a
 
 ## Benchmark results
 
-Real-world numbers from Phil's MacBook Pro (Apple Silicon, `--cores 8`, `--memory 4G`):
+Real-world numbers from Phil's MacBook Pro (Apple Silicon, `--cores 8`, `--memory 4G` — pre-default-change run; the saving column is unchanged but wall times scale roughly with the memory-sweep table above):
 
 | Library | Reads | Plain size | `--clumpify --compression 6` saving | `--clumpify --compression 9` saving |
 |---|---|---|---|---|
@@ -138,4 +153,4 @@ The advantage of `--clumpify` over running a separate tool is that it's part of 
 - Use `--clumpify --compression 9` when storage cost dominates (archival, S3 transfer, tape).
 - `--compression` works without `--clumpify` too — handy when you want a smaller output without paying for the reorder.
 - Skip `--clumpify` for long-read data — it's a no-op there with non-trivial wall-time cost.
-- Bump `--memory` (e.g. `--memory 16G`) on big inputs (multi-GB compressed) for the last few percentage points.
+- The default `--memory 1G` already gets you most of the compression saving. Bumping to `2G` adds ~2 ppt; going beyond that has sharply diminishing returns and risks memory pressure on tight hosts.

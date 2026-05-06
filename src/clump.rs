@@ -153,6 +153,15 @@ impl ClumpLayout {
     }
 }
 
+/// Minimum `--memory` (in bytes) that `--clumpify` needs at this `cores` count
+/// for the bin pool to clear `MIN_BIN_BYTES`. Used by `main.rs` to decide
+/// whether to warn-and-fall-back to plain mode rather than bail.
+pub fn clumpify_min_memory_bytes(cores: usize) -> u64 {
+    let n_bins = (16_usize).max(4 * cores) as u64;
+    let denom = 5 * n_bins + 7 * cores as u64;
+    STATIC_OVERHEAD_BYTES + (MIN_BIN_BYTES * denom).div_ceil(4)
+}
+
 /// Fixed memory overhead (FastQC histograms, allocator retention, Rust runtime,
 /// gzip decoder state, IO buffers) reserved out of `--memory` before sizing the
 /// bin pool. Calibrated empirically against macOS `/usr/bin/time -l` "peak

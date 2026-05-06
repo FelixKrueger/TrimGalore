@@ -168,13 +168,13 @@ pub struct Cli {
     )]
     pub compression: u32,
 
-    /// Total memory budget for Trim Galore (e.g. `4G`, `512M`, `2G`).
+    /// Total memory budget for Trim Galore (e.g. `1G`, `512M`, `8G`).
     /// Currently used only by `--clumpify` for bin buffer sizing — bigger
     /// budget → bigger gzip members → better compression, up to a limit
-    /// roughly equal to the uncompressed input size. Default: `4G`.
+    /// roughly equal to the uncompressed input size. Default: `1G`.
     /// Resolved bin layout and predicted peak RSS are printed at startup
     /// when `--clumpify` is set.
-    #[clap(long = "memory", default_value = "4G")]
+    #[clap(long = "memory", default_value = "1G")]
     pub memory: String,
 
     /// Suppress the trimming report.
@@ -508,12 +508,12 @@ impl Cli {
             if self.demux.is_some() {
                 anyhow::bail!("--clumpify is not yet supported with --demux");
             }
-            // Resolve & validate the layout up front so misconfigured runs
-            // fail before any I/O. The same call is repeated at dispatch
-            // time so the resolved values are passed through to workers.
-            let memory_bytes = crate::clump::parse_memory_size(&self.memory)
+            // Validate --memory format up front. Whether the resolved bin
+            // pool is *large enough* for clumpify to actually run is decided
+            // later in main.rs::resolve_clump_layout, which warns and falls
+            // back to plain mode if the budget is below the floor.
+            crate::clump::parse_memory_size(&self.memory)
                 .map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
-            crate::clump::resolve_layout(memory_bytes, self.cores)?;
         }
 
         if let Some(n) = self.hardtrim5
@@ -1041,7 +1041,11 @@ mod tests {
     }
 
     #[test]
-    fn test_clumpify_rejects_too_small_memory_for_cores() {
+    fn test_clumpify_too_small_memory_passes_validation() {
+        // Validation now accepts a too-small --memory; main.rs resolves the
+        // layout at runtime and either succeeds, or warns + falls back to
+        // plain mode. This avoids hard-failing a job over a configuration
+        // detail the program can recover from.
         let cli = Cli::parse_from([
             "trim_galore",
             "--clumpify",
@@ -1051,8 +1055,8 @@ mod tests {
             "64M",
             R1,
         ]);
-        let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("--memory"), "got: {err}");
+        cli.validate()
+            .expect("validation should pass; runtime warns and falls back to plain");
     }
 
     #[test]

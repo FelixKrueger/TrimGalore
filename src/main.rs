@@ -23,13 +23,32 @@ type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, 
 
 /// Resolve `--memory` into a `(n_bins, bin_byte_budget)` layout when
 /// `--clumpify` is set, and emit a one-line startup notice with the
-/// resolved values. Returns `None` if clumpify is off.
+/// resolved values. Returns `None` if clumpify is off — or if the budget
+/// is below the floor, in which case we print a loud warning and fall back
+/// to plain mode rather than refusing to run.
 fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     if !cli.clumpify {
         return Ok(None);
     }
     let memory_bytes =
         clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
+    let min_required = clump::clumpify_min_memory_bytes(cli.cores);
+    if memory_bytes < min_required {
+        eprintln!();
+        eprintln!(
+            "WARNING: --memory {} is too small for --clumpify at --cores {} \
+             (need ≥ {} MiB).",
+            cli.memory,
+            cli.cores,
+            min_required / (1024 * 1024),
+        );
+        eprintln!(
+            "         Falling back to plain mode (no read reordering). \
+             Increase --memory or drop --clumpify to silence this warning."
+        );
+        eprintln!();
+        return Ok(None);
+    }
     let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
     eprintln!(
         "clumpify: {} bins × {} MB; predicted peak ≈ {} MB (gzip level {})",

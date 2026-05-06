@@ -129,7 +129,7 @@ trim_galore --compression 6 <input>                     # smaller output, no reo
 
 No information loss — only the on-disk order of records changes. Output records are byte-identical to the unsorted output and trimming reports are unaffected. `--clumpify` requires `--cores >= 2`.
 
-Memory budget is controlled by the global `--memory` flag (default `4G`); bigger budgets give bigger per-gzip-member sort runs and better compression up to roughly the uncompressed input size. The bin layout formula keeps predicted peak RSS within 1% of `--memory`. With enough memory, `--clumpify --compression 9` gets you within 1–2 percentage points of `bbmap clumpify` and `stevekm/squish` on the same data.
+Memory budget is controlled by the global `--memory` flag (default `1G`); bigger budgets give bigger per-gzip-member sort runs and better compression up to roughly the uncompressed input size, with sharply diminishing returns above ~2 GB. With enough memory, `--clumpify --compression 9` gets you within 1–2 percentage points of `bbmap clumpify` and `stevekm/squish` on the same data.
 
 Intended for short reads (Illumina, AVITI). Long-read inputs (Oxford Nanopore, PacBio) typically see no size change at non-trivial wall-time cost.
 
