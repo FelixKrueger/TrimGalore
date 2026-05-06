@@ -118,34 +118,15 @@ pub fn canonical_minimizer(seq: &[u8]) -> MinimizerKey {
 
 /// FNV-1a 32-bit hash of the minimizer key, mod `n_bins`.
 ///
-/// Used by the original (minimizer-only) bin-assignment strategy. Kept
-/// for testability and reference; current default is `bin_for_seq`.
+/// We hash (rather than mod the key directly) so the bin distribution is
+/// even even when minimizer keys are structurally biased. The dominant
+/// compression win comes from the in-bin sort, not cross-bin locality —
+/// even dispersion is the right objective for the bin index.
 pub fn bin_for(key: MinimizerKey, n_bins: usize) -> usize {
     debug_assert!(n_bins > 0);
     let mut h: u32 = 0x811c_9dc5;
     for byte in key.to_be_bytes() {
         h ^= byte as u32;
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    (h as usize) % n_bins
-}
-
-/// Bin assignment from a sequence's leading bytes — co-locates reads that
-/// share a 5' prefix in the same gzip member, which is the dominant lever
-/// on compression. Matches stevekm/squish's "sequence-prefix" bucket
-/// strategy (with FNV-1a hashing instead of raw bytes-as-int because our
-/// `n_bins` is much smaller than squish's 65536 default and Illumina 5'
-/// starts skew heavily — hashing avoids load-balance disasters where
-/// most reads land in one or two raw-prefix buckets).
-pub fn bin_for_seq(seq: &[u8], n_bins: usize) -> usize {
-    debug_assert!(n_bins > 0);
-    // 16 bytes is enough to discriminate Illumina library prefixes without
-    // being so long that natural noise (read 1 vs read 17 differ at byte
-    // 12) explodes the bucket count. Reads shorter than 16 bp pad with 0.
-    let mut h: u32 = 0x811c_9dc5;
-    let take = seq.len().min(16);
-    for &b in &seq[..take] {
-        h ^= b.to_ascii_uppercase() as u32;
         h = h.wrapping_mul(0x0100_0193);
     }
     (h as usize) % n_bins
@@ -181,8 +162,8 @@ pub fn resolve_layout(memory_budget_bytes: u64, cores: usize) -> Result<ClumpLay
     let bin_byte_budget = memory_budget_bytes / denom;
     if bin_byte_budget < MIN_BIN_BYTES {
         bail!(
-            "--clumpy_memory budget too small for --cores {}: derived {} bins × {} bytes \
-             is below the {}-byte per-bin floor. Increase --clumpy_memory or decrease --cores.",
+            "--memory budget too small for --cores {}: derived {} bins × {} bytes \
+             is below the {}-byte per-bin floor. Increase --memory or decrease --cores.",
             cores,
             n_bins,
             bin_byte_budget,
@@ -232,34 +213,32 @@ pub fn estimated_record_bytes(rec: &FastqRecord) -> usize {
 /// quality, id, and finally input position for total determinism.
 ///
 /// Why minimizer-primary instead of sequence-primary (alpha): empirically
-/// (May 2026 benchmark) alpha-sort + sequence-prefix-bucket beats
-/// minimizer-sort by ~3 ppt on amplicon-like data where most reads share
-/// a 5' prefix, but underperforms by ~2 ppt on diverse short-read data
-/// (WGS/WES) because (a) it only catches forward-strand prefix matches
-/// while minimizer mode catches forward+revcomp anchors anywhere in the
-/// read and (b) streaming bin flushes fragment same-prefix runs across
-/// multiple gzip members. Disk-spill (squish-style) avoids (b) but is
-/// out of scope for our streaming dispatcher. Keeping minimizer-primary
-/// as the robust default; alpha mode could ship as an opt-in in future.
+/// (May 2026 benchmark) alpha sort beats minimizer sort by ~3 ppt on
+/// amplicon-like data where most reads share a 5' prefix, but
+/// underperforms by ~2 ppt on diverse short-read data (WGS/WES) because
+/// (a) it only catches forward-strand prefix matches while minimizer
+/// mode catches forward+revcomp anchors anywhere in the read, and (b)
+/// streaming bin flushes fragment same-prefix runs across multiple gzip
+/// members. Minimizer-primary is the robust default across data types.
 ///
 /// `keys` is reordered to match — callers that no longer need them can
-/// drop them after the sort.
+/// drop them after the sort. Sort is stable (`Vec::sort_by`), so equal
+/// keys preserve insertion order — the deterministic input-position
+/// tie-break is implicit.
 pub fn sort_single_by_key(records: &mut Vec<FastqRecord>, keys: &mut Vec<MinimizerKey>) {
     debug_assert_eq!(records.len(), keys.len());
-    let n = records.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    // Most comparisons resolve at the u32 level — we only fall through to
-    // string compares on minimizer ties, which are rare in real data.
-    idx.sort_by(|&a, &b| {
-        keys[a]
-            .cmp(&keys[b])
-            .then_with(|| records[a].seq.cmp(&records[b].seq))
-            .then_with(|| records[a].qual.cmp(&records[b].qual))
-            .then_with(|| records[a].id.cmp(&records[b].id))
-            .then_with(|| a.cmp(&b))
+    let mut paired: Vec<(MinimizerKey, FastqRecord)> =
+        keys.drain(..).zip(records.drain(..)).collect();
+    paired.sort_by(|(ka, ra), (kb, rb)| {
+        ka.cmp(kb)
+            .then_with(|| ra.seq.cmp(&rb.seq))
+            .then_with(|| ra.qual.cmp(&rb.qual))
+            .then_with(|| ra.id.cmp(&rb.id))
     });
-    apply_permutation(records, &idx);
-    apply_permutation(keys, &idx);
+    for (k, r) in paired {
+        keys.push(k);
+        records.push(r);
+    }
 }
 
 /// Sort paired-end batches in lockstep by R1's minimizer key. R1 and R2
@@ -271,71 +250,23 @@ pub fn sort_paired_by_key(
 ) {
     debug_assert_eq!(r1.len(), r2.len());
     debug_assert_eq!(r1.len(), keys.len());
-    let n = r1.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| {
-        keys[a]
-            .cmp(&keys[b])
-            .then_with(|| r1[a].seq.cmp(&r1[b].seq))
-            .then_with(|| r1[a].qual.cmp(&r1[b].qual))
-            .then_with(|| r1[a].id.cmp(&r1[b].id))
-            .then_with(|| a.cmp(&b))
+    let mut grouped: Vec<(MinimizerKey, FastqRecord, FastqRecord)> = keys
+        .drain(..)
+        .zip(r1.drain(..))
+        .zip(r2.drain(..))
+        .map(|((k, a), b)| (k, a, b))
+        .collect();
+    grouped.sort_by(|(ka, ra, _), (kb, rb, _)| {
+        ka.cmp(kb)
+            .then_with(|| ra.seq.cmp(&rb.seq))
+            .then_with(|| ra.qual.cmp(&rb.qual))
+            .then_with(|| ra.id.cmp(&rb.id))
     });
-    apply_permutation(r1, &idx);
-    apply_permutation(r2, &idx);
-    apply_permutation(keys, &idx);
-}
-
-/// Sort by full sequence (alpha sort) — used by disk-spill mode where each
-/// bin is sorted globally before being emitted as one gzip member.
-/// Without streaming fragmentation, alpha-sort produces longer
-/// shared-prefix runs than minimizer sort, which is what gzip's 32 KB
-/// dictionary turns into compression.
-///
-/// Tie-break: quality, id, input position. Deterministic.
-pub fn sort_single_alpha(records: &mut Vec<FastqRecord>) {
-    let n = records.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| {
-        records[a]
-            .seq
-            .cmp(&records[b].seq)
-            .then_with(|| records[a].qual.cmp(&records[b].qual))
-            .then_with(|| records[a].id.cmp(&records[b].id))
-            .then_with(|| a.cmp(&b))
-    });
-    apply_permutation(records, &idx);
-}
-
-/// Paired-end alpha sort: orders by R1's full sequence, R2 follows in
-/// lockstep. Used by disk-spill mode.
-pub fn sort_paired_alpha(r1: &mut Vec<FastqRecord>, r2: &mut Vec<FastqRecord>) {
-    debug_assert_eq!(r1.len(), r2.len());
-    let n = r1.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| {
-        r1[a]
-            .seq
-            .cmp(&r1[b].seq)
-            .then_with(|| r1[a].qual.cmp(&r1[b].qual))
-            .then_with(|| r1[a].id.cmp(&r1[b].id))
-            .then_with(|| a.cmp(&b))
-    });
-    apply_permutation(r1, &idx);
-    apply_permutation(r2, &idx);
-}
-
-fn apply_permutation<T>(v: &mut Vec<T>, perm: &[usize]) {
-    debug_assert_eq!(v.len(), perm.len());
-    // Move elements out via `Option::take` so the borrow checker is happy
-    // with arbitrary index reads. One transient allocation of N pointers —
-    // negligible at the bin sizes we use (< 200K records).
-    let mut taken: Vec<Option<T>> = v.drain(..).map(Some).collect();
-    let mut out: Vec<T> = Vec::with_capacity(perm.len());
-    for &i in perm {
-        out.push(taken[i].take().expect("each index used exactly once"));
+    for (k, a, b) in grouped {
+        keys.push(k);
+        r1.push(a);
+        r2.push(b);
     }
-    *v = out;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────
@@ -491,7 +422,7 @@ mod tests {
         let res = resolve_layout(64 * 1024 * 1024, 16);
         assert!(res.is_err(), "expected bail, got {res:?}");
         let msg = format!("{}", res.unwrap_err());
-        assert!(msg.contains("--clumpy_memory"));
+        assert!(msg.contains("--memory"));
     }
 
     #[test]

@@ -86,6 +86,7 @@ export default defineConfig({
           items: [
             { label: 'Benchmarks', slug: 'performance/benchmarks' },
             { label: 'Threading model', slug: 'performance/threading' },
+            { label: 'Clumpy compression', slug: 'performance/clumpy' },
           ],
         },
         {

@@ -8,37 +8,37 @@ use trim_galore::adapter;
 use trim_galore::cli::{Cli, rewrite_perl_short_flags};
 use trim_galore::clump;
 use trim_galore::demux;
-use trim_galore::fastq::{FastqReader, FastqWriter, output_gzip_level};
+use trim_galore::fastq::{FastqReader, FastqWriter};
 use trim_galore::fastqc;
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
 use trim_galore::io as naming;
 use trim_galore::parallel;
 use trim_galore::report;
 use trim_galore::specialty;
-use trim_galore::spill;
 use trim_galore::trimmer;
 
 type AdapterList = Vec<(String, String)>;
 type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
 type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
 
-/// Resolve the `--clumpy_memory` budget into a `(n_bins, bin_byte_budget)`
-/// layout when `--clumpy` is set, and emit a one-line startup notice with
-/// the resolved values. Returns `None` if clumpy is off.
+/// Resolve `--memory` into a `(n_bins, bin_byte_budget)` layout when
+/// `--clumpy` is set, and emit a one-line startup notice with the
+/// resolved values. Returns `None` if clumpy is off.
 fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
-    if !cli.clumpy {
+    if cli.clumpy.is_none() {
         return Ok(None);
     }
-    let memory_bytes = clump::parse_memory_size(&cli.clumpy_memory)
-        .map_err(|e| anyhow::anyhow!("--clumpy_memory: {e}"))?;
+    let memory_bytes =
+        clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
     let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
     let total_mib =
         (layout.n_bins + cli.cores) as u64 * layout.bin_byte_budget as u64 / (1024 * 1024);
     eprintln!(
-        "clumpy: {} bins × {} MB ≈ {} MB peak buffer",
+        "clumpy: {} bins × {} MB ≈ {} MB peak buffer (gzip level {})",
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
         total_mib,
+        cli.clumpy.unwrap(),
     );
     Ok(Some(layout))
 }
@@ -84,7 +84,7 @@ fn main() -> Result<()> {
                 output_dir,
                 cli.rename,
                 cli.cores,
-                cli.high_compression,
+                cli.gzip_level(),
             )?;
         }
         return Ok(());
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
                 output_dir,
                 cli.rename,
                 cli.cores,
-                cli.high_compression,
+                cli.gzip_level(),
             )?;
         }
         return Ok(());
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
                     specialty::clock_output_name(r2, "R2", output_dir, gzip),
                 )
             },
-            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.high_compression),
+            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.gzip_level()),
         )?;
         return Ok(());
     }
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
                     gzip,
                     output_dir,
                     cli.cores,
-                    cli.high_compression,
+                    cli.gzip_level(),
                 )
             },
         )?;
@@ -420,7 +420,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         poly_a: cli.poly_a,
         poly_g: poly_g_enabled,
         discard_untrimmed: cli.discard_untrimmed,
-        high_compression: cli.high_compression,
+        gzip_level: cli.gzip_level(),
     };
 
     Ok((adapter_label, adapters_r1, adapters_r2, config))
@@ -513,18 +513,7 @@ fn run_single_file(
     eprintln!("Trimming: {}", input.display());
     eprintln!("Output:   {}", output_path.display());
 
-    let stats = if let Some(ref tmp_arg) = cli.clumpy_tmp {
-        // Tier 3: disk-spill clumpy (--clumpy_tmp [DIR])
-        let tmp_root = spill::resolve_tmp_root(tmp_arg);
-        let tmp_guard = spill::SpillTempDir::new(&tmp_root)?;
-        spill::run_single_end_clumpy_spill(
-            input,
-            &output_path,
-            config,
-            cli.cores,
-            tmp_guard.path(),
-        )?
-    } else if cli.cores > 1 || cli.clumpy {
+    let stats = if cli.cores > 1 || cli.clumpy.is_some() {
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_single_end_parallel(
             input,
@@ -536,12 +525,7 @@ fn run_single_file(
         )?
     } else {
         let mut reader = FastqReader::open(input)?;
-        let mut writer = FastqWriter::create(
-            &output_path,
-            gzip,
-            1,
-            output_gzip_level(config.high_compression),
-        )?;
+        let mut writer = FastqWriter::create(&output_path, gzip, 1, config.gzip_level)?;
         let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
         writer.flush()?;
         drop(writer);
@@ -690,7 +674,7 @@ fn run_single_file(
             gzip,
             output_dir,
             cli.cores,
-            cli.high_compression,
+            cli.gzip_level(),
         )?;
     }
 
@@ -729,26 +713,7 @@ fn run_paired(
         (None, None)
     };
 
-    let (stats_r1, stats_r2, pair_stats) = if let Some(ref tmp_arg) = cli.clumpy_tmp {
-        // Tier 3: disk-spill clumpy.
-        let tmp_root = spill::resolve_tmp_root(tmp_arg);
-        let tmp_guard = spill::SpillTempDir::new(&tmp_root)?;
-        spill::run_paired_end_clumpy_spill(
-            input_r1,
-            input_r2,
-            &output_r1,
-            &output_r2,
-            unpaired_r1_path.as_deref(),
-            unpaired_r2_path.as_deref(),
-            config,
-            cli.cores,
-            UnpairedLengths {
-                r1: cli.length_1,
-                r2: cli.length_2,
-            },
-            tmp_guard.path(),
-        )?
-    } else if cli.cores > 1 || cli.clumpy {
+    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpy.is_some() {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpy` always routes here (validation enforces cores >= 2).
         let clump_layout = resolve_clump_layout(cli)?;
@@ -772,7 +737,7 @@ fn run_paired(
         // Sequential path (--cores 1)
         let mut reader_r1 = FastqReader::open(input_r1)?;
         let mut reader_r2 = FastqReader::open(input_r2)?;
-        let level = output_gzip_level(config.high_compression);
+        let level = config.gzip_level;
         let mut writer_r1 = FastqWriter::create(&output_r1, gzip, 1, level)?;
         let mut writer_r2 = FastqWriter::create(&output_r2, gzip, 1, level)?;
 

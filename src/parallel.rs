@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::mpsc;
 
 use crate::clump::{self, ClumpLayout, MinimizerKey, canonical_minimizer, estimated_record_bytes};
-use crate::fastq::{FastqReader, FastqRecord, output_gzip_level};
+use crate::fastq::{FastqReader, FastqRecord};
 use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
 use crate::report::{PairValidationStats, TrimStats};
 use crate::trimmer::{self, TrimConfig, update_adapter_stats};
@@ -213,7 +213,7 @@ fn process_paired_batch(
     let mut buf_up_r2 = Vec::new();
 
     if gzip {
-        let level = output_gzip_level(config.high_compression);
+        let level = config.gzip_level;
         // Scoped block: GzEncoders borrow the buffers; finish() before block
         // ends releases the borrows so we can return the buffers.
         {
@@ -292,9 +292,8 @@ fn process_paired_batch(
 /// Outcome of trim+filter on a single read pair. Stats and the records
 /// themselves are mutated in-place by `classify_paired`; this enum just
 /// tells the caller what to *do* with the (now trimmed) records, so the
-/// in-memory pipeline can write to gzip encoders and the disk-spill
-/// pipeline can route to per-bin temp files using the same trim core.
-pub(crate) enum PairOutcome {
+/// inner loop can stay sink-agnostic.
+enum PairOutcome {
     /// Pair passed all filters — write both records.
     Pass,
     /// Pair dropped (discard_untrimmed, too-many-N, too-long, or
@@ -309,7 +308,7 @@ pub(crate) enum PairOutcome {
 /// Returns what the caller should do with the (now trimmed) records.
 /// Sink-agnostic: callers pick gzip writers, plain temp files, etc.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn classify_paired(
+fn classify_paired(
     r1: &mut FastqRecord,
     r2: &mut FastqRecord,
     config: &TrimConfig,
@@ -419,9 +418,7 @@ pub(crate) fn classify_paired(
 }
 
 /// Inner loop: trim + filter + write each read pair in a batch via
-/// `Write` sinks. Used by the in-memory parallel pipeline (gzip encoder
-/// or `Vec<u8>` for plain output). The disk-spill path uses
-/// `classify_paired` directly with per-record routing.
+/// `Write` sinks (gzip encoder or `Vec<u8>` for plain output).
 #[allow(clippy::too_many_arguments)]
 fn process_pairs<W: Write>(
     reads_r1: &mut [FastqRecord],
@@ -706,10 +703,7 @@ fn process_single_batch(
 
     if gzip {
         {
-            let mut gz = GzEncoder::new(
-                &mut buf,
-                Compression::new(output_gzip_level(config.high_compression)),
-            );
+            let mut gz = GzEncoder::new(&mut buf, Compression::new(config.gzip_level));
             process_reads(reads, config, &mut stats, &mut gz)?;
             gz.finish()?;
         }
@@ -728,14 +722,14 @@ fn process_single_batch(
 /// `PairOutcome` but unary — `Pass` means write the (trimmed) record,
 /// `Discarded` means drop it. Stats and the record are mutated in place
 /// by `classify_single`.
-pub(crate) enum SingleOutcome {
+enum SingleOutcome {
     Pass,
     Discarded,
 }
 
 /// Trim + filter a single record, mutating it and stats in place.
 /// Returns whether the caller should write it. Sink-agnostic.
-pub(crate) fn classify_single(
+fn classify_single(
     record: &mut FastqRecord,
     config: &TrimConfig,
     stats: &mut TrimStats,
@@ -795,9 +789,8 @@ pub(crate) fn classify_single(
     }
 }
 
-/// Inner loop: trim + filter + write each read in a batch via `Write`
-/// sinks. Used by the in-memory parallel pipeline; disk-spill uses
-/// `classify_single` directly with per-record routing.
+/// Inner loop: trim + filter + write each read in a batch via a
+/// `Write` sink (gzip encoder or `Vec<u8>` for plain output).
 fn process_reads<W: Write>(
     reads: &mut [FastqRecord],
     config: &TrimConfig,
@@ -958,7 +951,7 @@ mod tests {
             poly_a: false,
             poly_g: false,
             discard_untrimmed: false,
-            high_compression: false,
+            gzip_level: crate::fastq::DEFAULT_GZIP_LEVEL,
         }
     }
 
@@ -1000,7 +993,7 @@ mod tests {
         let stats_serial = {
             let mut reader = FastqReader::open(&input_path)?;
             let mut writer =
-                FastqWriter::create(&serial_output, false, 1, crate::fastq::OUTPUT_GZIP_LEVEL)?;
+                FastqWriter::create(&serial_output, false, 1, crate::fastq::DEFAULT_GZIP_LEVEL)?;
             let stats = crate::trimmer::run_single_end(&mut reader, &mut writer, &config)?;
             writer.flush()?;
             stats
@@ -1139,26 +1132,22 @@ mod tests {
         Ok(())
     }
 
-    /// `--high_compression` smoke test: same input, two runs (default
-    /// level 1 vs `high_compression: true` level 6). The level-6 output
-    /// must be smaller on disk, and decompressed output must be
-    /// byte-identical between the two — gzip framing differs but
-    /// payload is preserved (gzip levels 1 and 6 are both lossless).
+    /// Higher gzip level smoke test: same input, level 1 vs level 9.
+    /// The level-9 output must be smaller on disk, and decompressed
+    /// output must be byte-identical between the two — gzip framing
+    /// differs but payload is preserved (all gzip levels are lossless).
     #[test]
-    fn test_high_compression_produces_smaller_output() -> Result<()> {
-        let dir = fresh_tmpdir("tg_high_compression");
+    fn test_higher_gzip_level_produces_smaller_output() -> Result<()> {
+        let dir = fresh_tmpdir("tg_higher_gzip_level");
         let input_path = dir.join("input.fq");
 
         // 5_000 reads with a repeating-sequence motif so gzip can find
         // back-references at higher levels. Sized to span a single
-        // batch so output is one gzip member regardless of cores.
-        //
-        // Why 5_000 (was 200): on tiny inputs (~13 KB) the level-6
-        // dictionary/framing overhead can erase the 2-byte compression
-        // win over level-1, and flate2 patch bumps periodically nudge
-        // that crossover (e.g. 1.1.9 flipped 200-reads from 571→573 vs
-        // 573→571). 5_000 reads gives level-6 ~325 KB to amortise the
-        // overhead so the assertion is robust against future tweaks.
+        // batch so output is one gzip member regardless of cores. On
+        // tiny inputs the level-9 dictionary/framing overhead can erase
+        // the per-byte win, and flate2 patch bumps periodically nudge
+        // that crossover; 5_000 reads gives level 9 ~325 KB to amortise
+        // the overhead so the assertion is robust.
         let mut content = String::new();
         for i in 0..5_000 {
             content.push_str(&format!(
@@ -1169,7 +1158,7 @@ mod tests {
 
         let config_default = parity_test_config();
         let mut config_high = parity_test_config();
-        config_high.high_compression = true;
+        config_high.gzip_level = 9;
 
         let out_default = dir.join("out_default.fq.gz");
         let out_high = dir.join("out_high.fq.gz");
@@ -1177,14 +1166,9 @@ mod tests {
         run_single_end_parallel(&input_path, &out_default, &config_default, 2, true, None)?;
         run_single_end_parallel(&input_path, &out_high, &config_high, 2, true, None)?;
 
-        let size_default = fs::metadata(&out_default)?.len();
-        let size_high = fs::metadata(&out_high)?.len();
-
         assert!(
-            size_high < size_default,
-            "high_compression output ({} bytes) must be smaller than default ({} bytes)",
-            size_high,
-            size_default
+            fs::metadata(&out_high)?.len() < fs::metadata(&out_default)?.len(),
+            "level-9 output should be smaller than level-1 default"
         );
 
         // Decompressed output must match: gzip levels are lossless;
@@ -1197,11 +1181,10 @@ mod tests {
             }
             Ok(v)
         };
-        let recs_default = read_records(&out_default)?;
-        let recs_high = read_records(&out_high)?;
         assert_eq!(
-            recs_default, recs_high,
-            "decompressed records must be byte-identical between gzip levels 1 and 6"
+            read_records(&out_default)?,
+            read_records(&out_high)?,
+            "decompressed records must be byte-identical between gzip levels 1 and 9"
         );
 
         fs::remove_dir_all(&dir).ok();

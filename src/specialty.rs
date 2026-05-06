@@ -6,7 +6,7 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 
-use crate::fastq::{FastqReader, FastqWriter, output_gzip_level};
+use crate::fastq::{FastqReader, FastqWriter};
 use crate::io as naming;
 
 /// Hard-trim every read to keep only the first `keep` bases from the 5' end.
@@ -19,7 +19,7 @@ pub fn hardtrim5(
     output_dir: Option<&Path>,
     rename: bool,
     cores: usize,
-    high_compression: bool,
+    gzip_level: u32,
 ) -> Result<()> {
     let output_path = hardtrim_output_name(input, keep, "5prime", output_dir, gzip);
     eprintln!(
@@ -30,12 +30,7 @@ pub fn hardtrim5(
     );
 
     let mut reader = FastqReader::open(input)?;
-    let mut writer = FastqWriter::create(
-        &output_path,
-        gzip,
-        cores,
-        output_gzip_level(high_compression),
-    )?;
+    let mut writer = FastqWriter::create(&output_path, gzip, cores, gzip_level)?;
     let mut count: usize = 0;
 
     while let Some(mut record) = reader.next_record()? {
@@ -67,7 +62,7 @@ pub fn hardtrim3(
     output_dir: Option<&Path>,
     rename: bool,
     cores: usize,
-    high_compression: bool,
+    gzip_level: u32,
 ) -> Result<()> {
     let output_path = hardtrim_output_name(input, keep, "3prime", output_dir, gzip);
     eprintln!(
@@ -78,12 +73,7 @@ pub fn hardtrim3(
     );
 
     let mut reader = FastqReader::open(input)?;
-    let mut writer = FastqWriter::create(
-        &output_path,
-        gzip,
-        cores,
-        output_gzip_level(high_compression),
-    )?;
+    let mut writer = FastqWriter::create(&output_path, gzip, cores, gzip_level)?;
     let mut count: usize = 0;
 
     while let Some(mut record) = reader.next_record()? {
@@ -126,7 +116,7 @@ pub fn clock(
     gzip: bool,
     output_dir: Option<&Path>,
     cores: usize,
-    high_compression: bool,
+    gzip_level: u32,
 ) -> Result<()> {
     let out1 = clock_output_name(input_r1, "R1", output_dir, gzip);
     let out2 = clock_output_name(input_r2, "R2", output_dir, gzip);
@@ -144,10 +134,8 @@ pub fn clock(
 
     let mut reader_r1 = FastqReader::open(input_r1)?;
     let mut reader_r2 = FastqReader::open(input_r2)?;
-    let mut writer_r1 =
-        FastqWriter::create(&out1, gzip, cores, output_gzip_level(high_compression))?;
-    let mut writer_r2 =
-        FastqWriter::create(&out2, gzip, cores, output_gzip_level(high_compression))?;
+    let mut writer_r1 = FastqWriter::create(&out1, gzip, cores, gzip_level)?;
+    let mut writer_r2 = FastqWriter::create(&out2, gzip, cores, gzip_level)?;
 
     let mut count: usize = 0;
     let mut filtered_count: usize = 0;
@@ -241,7 +229,7 @@ pub fn implicon(
     gzip: bool,
     output_dir: Option<&Path>,
     cores: usize,
-    high_compression: bool,
+    gzip_level: u32,
 ) -> Result<()> {
     let out1 = implicon_output_name(input_r1, umi_length, "R1", output_dir, gzip);
     let out2 = implicon_output_name(input_r2, umi_length, "R2", output_dir, gzip);
@@ -259,10 +247,8 @@ pub fn implicon(
 
     let mut reader_r1 = FastqReader::open(input_r1)?;
     let mut reader_r2 = FastqReader::open(input_r2)?;
-    let mut writer_r1 =
-        FastqWriter::create(&out1, gzip, cores, output_gzip_level(high_compression))?;
-    let mut writer_r2 =
-        FastqWriter::create(&out2, gzip, cores, output_gzip_level(high_compression))?;
+    let mut writer_r1 = FastqWriter::create(&out1, gzip, cores, gzip_level)?;
+    let mut writer_r2 = FastqWriter::create(&out2, gzip, cores, gzip_level)?;
 
     let mut count: usize = 0;
 
@@ -398,7 +384,7 @@ mod tests {
     }
 
     fn write_fastq(path: &Path, records: &[FastqRecord]) -> Result<()> {
-        let mut w = FastqWriter::create(path, false, 1, crate::fastq::OUTPUT_GZIP_LEVEL)?;
+        let mut w = FastqWriter::create(path, false, 1, crate::fastq::DEFAULT_GZIP_LEVEL)?;
         for r in records {
             w.write_record(r)?;
         }
@@ -441,7 +427,14 @@ mod tests {
             ],
         )?;
 
-        clock(&r1_path, &r2_path, false, Some(&dir), 1, false)?;
+        clock(
+            &r1_path,
+            &r2_path,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        )?;
 
         let out_r1 = dir.join("sample_R1.clock_UMI.R1.fq");
         let out_r2 = dir.join("sample_R2.clock_UMI.R2.fq");
@@ -491,7 +484,14 @@ mod tests {
             &[mk_rec("@r", "TTTTTTTTCAGTNNNN", "IIIIIIIIIIIIIIII")],
         )?;
 
-        let result = clock(&r1_path, &r2_path, false, Some(&dir), 1, false);
+        let result = clock(
+            &r1_path,
+            &r2_path,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        );
         assert!(result.is_err(), "should bail on too-short R1");
         let err = format!("{}", result.unwrap_err());
         assert!(err.contains("too short"), "got: {}", err);
@@ -517,7 +517,14 @@ mod tests {
             &[mk_rec("@r", "TTTTTTTTCAGTNN", "IIIIIIIIIIIIII")],
         )?;
 
-        let result = clock(&r1_path, &r2_path, false, Some(&dir), 1, false);
+        let result = clock(
+            &r1_path,
+            &r2_path,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        );
         assert!(result.is_err(), "should bail on too-short R2");
 
         std::fs::remove_dir_all(&dir).ok();
@@ -549,7 +556,15 @@ mod tests {
             ],
         )?;
 
-        implicon(&r1_path, &r2_path, 8, false, Some(&dir), 1, false)?;
+        implicon(
+            &r1_path,
+            &r2_path,
+            8,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        )?;
 
         // Filename pattern: {stem_minus_R1_suffix}_{umi}bp_UMI_R[12].fastq
         let out_r1 = dir.join("sample_8bp_UMI_R1.fastq");
@@ -590,7 +605,15 @@ mod tests {
         write_fastq(&r1_path, &[mk_rec("@r", "ACGTACGT", "IIIIIIII")])?;
         write_fastq(&r2_path, &[mk_rec("@r", "TTTTTTGGG", "IIIIIIIII")])?;
 
-        implicon(&r1_path, &r2_path, 6, false, Some(&dir), 1, false)?;
+        implicon(
+            &r1_path,
+            &r2_path,
+            6,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        )?;
 
         let out_r1 = dir.join("foo_6bp_UMI_R1.fastq");
         let out_r2 = dir.join("foo_6bp_UMI_R2.fastq");
@@ -617,7 +640,15 @@ mod tests {
         write_fastq(&r1_path, &[mk_rec("@r", "ACGTACGT", "IIIIIIII")])?;
         write_fastq(&r2_path, &[mk_rec("@r", "ACGTA", "IIIII")])?;
 
-        let result = implicon(&r1_path, &r2_path, 8, false, Some(&dir), 1, false);
+        let result = implicon(
+            &r1_path,
+            &r2_path,
+            8,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        );
         assert!(result.is_err(), "should bail when R2 < umi_length");
         let err = format!("{}", result.unwrap_err());
         assert!(

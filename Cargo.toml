@@ -33,11 +33,6 @@ anyhow = "1"
 memchr = "2"
 log = "0.4"
 env_logger = "0.11"
-# RAII temp dir for `--clumpy_tmp` disk-spill mode: cleans up on Drop, even on
-# panic, so interrupted runs don't leave terabytes of plain-FASTQ scratch
-# behind. Used only when --clumpy_tmp is set; the in-memory clumpy and plain
-# trim paths never touch it.
-tempfile = "3"
 # Bundled FastQC integration. Exact-pin: brand-new crate (v1.0.0 published
 # 2026-04-26) — treat upstream bumps as deliberate-test events. See
 # /Users/fkrueger/.claude/plans/bundled-fastqc-rust.md for the design notes.

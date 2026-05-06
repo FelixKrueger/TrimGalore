@@ -142,61 +142,42 @@ pub struct Cli {
     #[clap(long = "dont_gzip")]
     pub dont_gzip: bool,
 
-    /// Use gzip compression level 6 (smaller output, slower trimming) instead
-    /// of the default level 1 (faster trimming, ~75% larger output bytes).
-    /// Useful when storage cost or transfer bandwidth matters more than
-    /// runtime — e.g. archival workflows or shared object stores. Decompressed
-    /// output is byte-identical regardless of level.
-    #[clap(long = "high_compression", alias = "high-compression")]
-    pub high_compression: bool,
-
     /// Reorder reads in the gzip output so reads sharing a canonical 16-mer
-    /// minimizer land adjacent inside each gzip member, letting gzip's
-    /// 32 KB dictionary find longer redundant runs. Typical saving: 20–35%
-    /// of output size on short-read FASTQ. Output records are identical
-    /// (same IDs, sequences, qualities) — only their order on disk
-    /// changes. Trimming reports are unaffected. Requires `--cores >= 2`
-    /// and gzip output (`--dont_gzip` is rejected). Intended for
-    /// short-read FASTQ; long-read inputs (e.g. Oxford Nanopore) are
-    /// unlikely to compress better and may compress slightly worse.
-    #[clap(long = "clumpy", alias = "clump")]
-    pub clumpy: bool,
-
-    /// Memory budget for the `--clumpy` bin buffers (e.g. `512M`, `2G`).
-    /// Bigger budget → bigger gzip members → better compression, up to a
-    /// limit. Default: 512M. The dispatcher derives `n_bins = max(16, 4 ×
-    /// cores)` and `bin_byte_budget = clumpy_memory / (n_bins + cores)`;
-    /// the resolved values are printed at startup.
-    #[clap(
-        long = "clumpy_memory",
-        alias = "clumpy-memory",
-        default_value = "512M"
-    )]
-    pub clumpy_memory: String,
-
-    /// Enable disk-spill clumpy mode for maximum compression. Writes
-    /// trimmed records to per-bin temp files during a first pass, then
-    /// reads each bin back, sorts it by sequence, and emits one large
-    /// gzip member per bin. Eliminates the streaming-fragmentation
-    /// limit of in-memory clumpy and matches stevekm/squish-equivalent
-    /// compression (typically 30-45% smaller output on Illumina data).
-    /// Costs ~3× the input size in transient temp-file space and 5-10×
-    /// the wall time of plain trimming.
+    /// minimizer land adjacent, letting gzip's dictionary find longer
+    /// redundant runs. Typical saving: 16–37% on short-read FASTQ.
     ///
-    /// Pass with no value to use the system temp directory (respects
-    /// `$TMPDIR`); pass a path to use that location, e.g.
-    /// `--clumpy_tmp /scratch/nvme`. The temp dir is **never** the
-    /// output directory — Seqera Fusion users should let this default
-    /// or point it at a local NVMe scratch path so intermediate files
-    /// don't trigger object-store uploads. Requires `--clumpy`.
+    /// The optional argument is the gzip compression level (1–9, default
+    /// 6 when no value given): higher = smaller output, slower trimming.
+    /// Pass `--clumpy=9` for max compression, `--clumpy=1` for fastest.
+    /// Records are byte-identical — only their order on disk changes.
+    ///
+    /// Requires `--cores >= 2` and gzip output. Intended for short-read
+    /// FASTQ; long-read inputs (ONT, PacBio) are unlikely to compress
+    /// better.
     #[clap(
-        long = "clumpy_tmp",
-        alias = "clumpy-tmp",
+        long = "clumpy",
+        alias = "clump",
         num_args = 0..=1,
-        default_missing_value = "__SYSTEM_TMP__",
+        // Stringly-typed because clap's `default_missing_value` only
+        // accepts `&'static str`; kept in sync with the numeric
+        // `crate::fastq::DEFAULT_CLUMPY_GZIP_LEVEL` by the compile-time
+        // assertion below.
+        default_missing_value = "6",
         require_equals = true,
+        value_parser = clap::value_parser!(u32).range(1..=9),
     )]
-    pub clumpy_tmp: Option<String>,
+    pub clumpy: Option<u32>,
+
+    /// Total memory budget for Trim Galore (e.g. `4G`, `512M`, `2G`).
+    /// Currently used only by `--clumpy` for bin buffer sizing — bigger
+    /// budget → bigger gzip members → better compression, up to a limit
+    /// roughly equal to the uncompressed input size. Default: `4G`. With
+    /// `--cores N`, the clumpy dispatcher derives
+    /// `n_bins = max(16, 4 × cores)` and
+    /// `bin_byte_budget = memory / (n_bins + cores)`; resolved values
+    /// are printed at startup.
+    #[clap(long = "memory", default_value = "4G")]
+    pub memory: String,
 
     /// Suppress the trimming report.
     #[clap(long = "no_report_file")]
@@ -390,6 +371,17 @@ where
         .collect()
 }
 
+// Compile-time check that the string literal in `--clumpy`'s
+// `default_missing_value` matches `DEFAULT_CLUMPY_GZIP_LEVEL`. If someone
+// changes one without the other, build fails here.
+const _: () = {
+    let dml: &str = "6";
+    assert!(
+        dml.len() == 1 && dml.as_bytes()[0] == b'0' + crate::fastq::DEFAULT_CLUMPY_GZIP_LEVEL as u8,
+        "--clumpy default_missing_value drifted from DEFAULT_CLUMPY_GZIP_LEVEL"
+    );
+};
+
 impl Cli {
     /// Shared validation for any paired-end mode (`--paired`, `--clock`,
     /// `--implicon`) that takes input files in pairwise (R1, R2, R1, R2, …)
@@ -503,7 +495,7 @@ impl Cli {
             anyhow::bail!("--cores must be at least 1");
         }
 
-        if self.clumpy {
+        if self.clumpy.is_some() {
             if self.cores < 2 {
                 anyhow::bail!(
                     "--clumpy requires --cores >= 2 (the bin dispatcher feeds parallel workers)"
@@ -532,28 +524,9 @@ impl Cli {
             // Resolve & validate the layout up front so misconfigured runs
             // fail before any I/O. The same call is repeated at dispatch
             // time so the resolved values are passed through to workers.
-            let memory_bytes = crate::clump::parse_memory_size(&self.clumpy_memory)
-                .map_err(|e| anyhow::anyhow!("--clumpy_memory: {e}"))?;
+            let memory_bytes = crate::clump::parse_memory_size(&self.memory)
+                .map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
             crate::clump::resolve_layout(memory_bytes, self.cores)?;
-        }
-
-        // --clumpy_tmp validation. Without --clumpy it makes no sense.
-        // The path (when not the system-tmp sentinel) must exist and be
-        // writable; we only check existence here — write-permission is
-        // probed at startup when we create the per-pid subdir.
-        if let Some(ref tmp) = self.clumpy_tmp {
-            if !self.clumpy {
-                anyhow::bail!("--clumpy_tmp requires --clumpy");
-            }
-            if tmp != "__SYSTEM_TMP__" {
-                let path = std::path::Path::new(tmp);
-                if !path.exists() {
-                    anyhow::bail!("--clumpy_tmp path does not exist: {}", tmp);
-                }
-                if !path.is_dir() {
-                    anyhow::bail!("--clumpy_tmp must be a directory: {}", tmp);
-                }
-            }
         }
 
         if let Some(n) = self.hardtrim5
@@ -630,6 +603,13 @@ impl Cli {
     /// Otherwise uses the standard `--quality` value.
     pub fn effective_quality_cutoff(&self) -> u8 {
         self.nextseq.unwrap_or(self.quality)
+    }
+
+    /// Resolve the gzip compression level for output FASTQ. Uses
+    /// `--clumpy [LEVEL]`'s value when set; falls back to the fast
+    /// default (level 1) for non-clumpy runs.
+    pub fn gzip_level(&self) -> u32 {
+        self.clumpy.unwrap_or(crate::fastq::DEFAULT_GZIP_LEVEL)
     }
 }
 
@@ -1048,12 +1028,12 @@ mod tests {
             "--clumpy",
             "--cores",
             "2",
-            "--clumpy_memory",
+            "--memory",
             "garbage",
             R1,
         ]);
         let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("--clumpy_memory"), "got: {err}");
+        assert!(err.contains("--memory"), "got: {err}");
     }
 
     #[test]
@@ -1064,67 +1044,32 @@ mod tests {
             "--clumpy",
             "--cores",
             "16",
-            "--clumpy_memory",
+            "--memory",
             "64M",
             R1,
         ]);
         let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("--clumpy_memory"), "got: {err}");
-    }
-
-    // ── --clumpy_tmp validation ──────────────────────────────────────────
-
-    #[test]
-    fn test_clumpy_tmp_requires_clumpy() {
-        // --clumpy_tmp without --clumpy makes no sense.
-        let cli = Cli::parse_from(["trim_galore", "--clumpy_tmp=/tmp", R1]);
-        let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("--clumpy_tmp requires --clumpy"), "got: {err}");
+        assert!(err.contains("--memory"), "got: {err}");
     }
 
     #[test]
-    fn test_clumpy_tmp_no_value_uses_system_default() {
-        // --clumpy_tmp with no value is the "use system temp" sentinel —
-        // validation passes; resolution to std::env::temp_dir() happens
-        // at startup.
-        let cli = Cli::parse_from([
-            "trim_galore",
-            "--clumpy",
-            "--cores",
-            "2",
-            "--clumpy_tmp",
-            R1,
-        ]);
+    fn test_clumpy_default_level_is_six() {
+        let cli = Cli::parse_from(["trim_galore", "--clumpy", "--cores", "2", R1]);
         cli.validate()
-            .expect("--clumpy_tmp without value should validate");
-        assert_eq!(cli.clumpy_tmp.as_deref(), Some("__SYSTEM_TMP__"));
+            .expect("clumpy with default level should validate");
+        assert_eq!(cli.clumpy, Some(6));
     }
 
     #[test]
-    fn test_clumpy_tmp_rejects_nonexistent_path() {
-        let cli = Cli::parse_from([
-            "trim_galore",
-            "--clumpy",
-            "--cores",
-            "2",
-            "--clumpy_tmp=/nonexistent_path_for_testing_xyz123",
-            R1,
-        ]);
-        let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("does not exist"), "got: {err}");
+    fn test_clumpy_explicit_level() {
+        let cli = Cli::parse_from(["trim_galore", "--clumpy=9", "--cores", "2", R1]);
+        cli.validate().expect("clumpy=9 should validate");
+        assert_eq!(cli.clumpy, Some(9));
     }
 
     #[test]
-    fn test_clumpy_tmp_accepts_existing_dir() {
-        // /tmp exists on every Unix system.
-        let cli = Cli::parse_from([
-            "trim_galore",
-            "--clumpy",
-            "--cores",
-            "2",
-            "--clumpy_tmp=/tmp",
-            R1,
-        ]);
-        cli.validate().expect("--clumpy_tmp=/tmp should validate");
+    fn test_clumpy_rejects_out_of_range_level() {
+        let result = Cli::try_parse_from(["trim_galore", "--clumpy=10", "--cores", "2", R1]);
+        assert!(result.is_err(), "level 10 should be rejected by clap");
     }
 }

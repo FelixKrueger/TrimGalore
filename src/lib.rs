@@ -11,5 +11,4 @@ pub mod parallel;
 pub mod quality;
 pub mod report;
 pub mod specialty;
-pub mod spill;
 pub mod trimmer;

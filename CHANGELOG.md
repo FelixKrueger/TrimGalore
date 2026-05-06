@@ -1,6 +1,27 @@
 # Trim Galore Changelog
 
 
+### Unreleased (clumpy branch)
+
+- **`--clumpy [LEVEL]` opt-in compression mode.** Reorders reads inside each
+  gzip member of the trimmed output by canonical 16-mer minimizer so reads
+  sharing similar sequence land adjacent on disk; gzip's 32 KB dictionary
+  then finds long redundant runs and shrinks the `.fq.gz` by 15–55%
+  depending on data type (see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/)
+  for the full benchmark table). The optional argument is the gzip
+  compression level (1–9, default 6). No information loss — only the
+  on-disk order of records changes; trimming reports are byte-identical.
+- **`--memory <SIZE>` global memory budget** (default `4G`). Currently used
+  only by `--clumpy` for bin buffer sizing — bigger budgets give bigger
+  per-gzip-member sort runs and better compression. Replaces the
+  `--clumpy_memory` flag from earlier development branches.
+- **`--high_compression` removed.** Subsumed by `--clumpy <level>`. Users who
+  previously passed `--high_compression` for level-6 archival output should
+  switch to `--clumpy=6` (which also reorders for an additional ~15-50%
+  compression on top of the level bump). Both flags landed in pre-release
+  development; `--high_compression` was never on a stable release line.
+
+
 ### Version 2.1.0 (Release on 4 May 2026)
 
 **First stable release of the Oxidized Edition** — a complete Rust rewrite

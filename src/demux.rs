@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-use crate::fastq::{FastqReader, FastqWriter, output_gzip_level};
+use crate::fastq::{FastqReader, FastqWriter};
 
 /// A parsed barcode entry: barcode sequence → sample name.
 #[derive(Debug)]
@@ -119,7 +119,7 @@ pub fn demultiplex(
     gzip: bool,
     output_dir: Option<&Path>,
     cores: usize,
-    high_compression: bool,
+    gzip_level: u32,
 ) -> Result<()> {
     let barcode_length = barcodes[0].barcode.len();
     eprintln!("Setting barcode length to {}", barcode_length);
@@ -145,8 +145,6 @@ pub fn demultiplex(
             .unwrap_or(Path::new("."))
             .to_path_buf()
     });
-
-    let gzip_level = output_gzip_level(high_compression);
 
     // Open per-sample output writers + NoCode
     let mut writers: HashMap<String, FastqWriter> = HashMap::new();
@@ -354,7 +352,15 @@ mod tests {
             barcode: "ACGTACGT".to_string(),
         }];
 
-        demultiplex(&trimmed, &barcodes, false, Some(&dir), 1, false).unwrap();
+        demultiplex(
+            &trimmed,
+            &barcodes,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        )
+        .unwrap();
 
         // Output base is the trimmed-file basename minus .gz/.fq suffixes:
         // "input_trimmed.fq" → "input_trimmed" + "_<sample>.fq".
