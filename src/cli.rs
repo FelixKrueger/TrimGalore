@@ -233,9 +233,12 @@ pub struct Cli {
     pub fastqc_args: Option<String>,
 
     /// Number of worker threads for parallel processing (default: 1).
-    /// Values > 1 run trimming and gzip compression across multiple threads.
-    /// Scaling is near-linear up to ~8 cores; beyond that returns diminish
-    /// (the run typically becomes I/O-bound rather than CPU-bound).
+    /// At --cores 1 the worker-pool is bypassed (single thread, ~5 MB RAM).
+    /// From --cores 2 upward, an N+4 thread model applies: N workers + 2
+    /// decompressors + 1 batcher + 1 writer. Wall-clock speedup is near-linear
+    /// up to --cores 8 for paired-end runs; beyond that, gzip-output I/O on
+    /// the storage layer typically becomes binding before workers run out of
+    /// useful per-read work, so additional cores help progressively less.
     #[clap(short = 'j', long = "cores", default_value = "1")]
     pub cores: usize,
 

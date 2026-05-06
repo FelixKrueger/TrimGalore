@@ -27,7 +27,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **Poly-G trimming** — sequence-based removal of no-signal G-runs at the 3' end of Read 1 (and poly-C at the 5' end of Read 2) from 2-colour instruments (NovaSeq, NextSeq, NovaSeq X). Auto-detected from the data; opt-out with `--no_poly_g`
 - **NextSeq / 2-colour quality trim** — `--nextseq N` / `--2colour N` applies 2-colour-aware quality trimming (opt-in; replaces `-q`)
 - **Poly-A trimming** — built-in removal of poly-A tails without external tools; recommended for mRNA-seq / poly-A-selected RNA-seq libraries
-- **Parallel processing** — `--cores N` runs trimming and gzip compression in worker threads for near-linear speedup on multi-core systems
+- **Parallel processing** — `--cores N` runs trimming and gzip compression in worker threads under an N+4 thread model (N workers + 2 decompressors + 1 batcher + 1 writer); near-linear speedup up to `--cores 8` for paired-end runs, then gzip-output I/O typically becomes binding
 - **FastQC integration** — optional post-trimming quality reports built in via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library; produces FastQC 0.12.1-compatible HTML + ZIP outputs without requiring Java or an external `fastqc` on `$PATH`
 - **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
 - **Demultiplexing** — 3' inline barcode demultiplexing

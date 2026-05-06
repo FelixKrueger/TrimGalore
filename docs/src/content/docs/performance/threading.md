@@ -19,19 +19,6 @@ Each worker independently handles trimming **and** gzip compression for its batc
 
 ## 3. Fewer threads, more work per thread
 
-When you pass `-j N` to Trim Galore, three separate programs each independently spawn threads. The theoretical maximum is approximately 3N+3, though not all threads are necessarily active simultaneously:
-
-```
-Trim Galore -j N thread breakdown (theoretical maximum):
-  Cutadapt:                    N workers + 1 reader + 1 writer  =  N+2
-  pigz (compress):             N threads                         =  N
-  pigz/igzip (decompress):     up to N threads                   ≈  N
-  Perl:                        1 main process                    =  1
-                                                                 ≈ 3N+3 total
-```
-
-Note: The nf-core trimgalore module accounts for this by reserving `task.cpus - 4` cores for the `-j` flag (e.g., 12 allocated CPUs to `-j 8`). Thread counts above were observed via `ps` during benchmarking and represent approximate peak values.
-
 The Oxidized Edition uses a single process with a fixed infrastructure cost of +4 threads:
 
 ```
@@ -43,16 +30,20 @@ Oxidized Edition --cores N thread breakdown:
                                                        = N+4 total
 ```
 
-At `--cores 1`, the worker-pool is bypassed entirely: a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). The infrastructure cost only applies from `--cores 2` upward, where each additional core adds exactly 1 thread and ~10 MB of memory.
+Legacy Perl Trim Galore (v0.6.x) instead orchestrated three subprocesses (Cutadapt + pigz compress + pigz/igzip decompress) that each spawned their own threads, peaking around `3N+3` and forcing the nf-core module to reserve `task.cpus - 4` cores for the `-j` flag. See the [migration guide](/reference/migration/#whats-new-in-v2) for the full v0.6.x → v2 contrast.
 
-| Cores | TG threads (up to ~3N+3) | Oxidized threads (N+4) |
-|------:|-------------------------:|-----------------------:|
+At `--cores 1`, the worker-pool is bypassed entirely: a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). From `--cores 2` upward the **N+4 model** applies — each added core is exactly 1 worker thread plus ~10 MB of memory on top of the 4 fixed-cost threads (2 decompressors + 1 batcher + 1 writer). Wall-clock speedup is **near-linear up to `--cores 8` for paired-end runs**; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so each additional core helps progressively less.
+
+For reference, the contrast against the legacy Perl 0.6.x model at the same `-j N` / `--cores N` setting:
+
+| Cores | Perl 0.6.x threads (~3N+3) | Oxidized threads (N+4) |
+|------:|---------------------------:|-----------------------:|
 | 1 | up to ~6 | 1 |
 | 4 | up to ~15 | 8 |
 | 8 | up to ~27 | 12 |
 | 16 | not measured | 20 |
 
-At `-j 8` vs `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
+At Perl `-j 8` vs Oxidized `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
 
 Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34% (cores=16) → 22% (cores=24). Scaling is near-linear up to `--cores 8`; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so adding cores helps progressively less. **`--cores 8` is the sweet spot for nf-core / Snakemake / CWL workflows** — also the saturation point.
 
