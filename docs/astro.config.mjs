@@ -1,6 +1,9 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import addClasses from "rehype-class-names";
 
 export default defineConfig({
   site: 'https://www.trimgalore.com',
@@ -10,7 +13,11 @@ export default defineConfig({
   // JSX <code> elements in MDX, which silently mangles CLI flag names
   // like --fastqc → —fastqc on the homepage. Em-dashes we actually want
   // are typed literally throughout, so nothing is lost.
-  markdown: { smartypants: false },
+  markdown: {
+    smartypants: false,
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [rehypeKatex, [addClasses, { ".katex": "not-content" }]],
+  },
   integrations: [
     starlight({
       title: 'Trim Galore',
@@ -99,7 +106,12 @@ export default defineConfig({
           ],
         },
       ],
-      customCss: ['./src/styles/custom.css'],
+      customCss: ['katex/dist/katex.min.css', './src/styles/custom.css'],
     }),
   ],
+  vite: {
+    ssr: {
+      noExternal: ["katex"],
+    },
+  },
 });

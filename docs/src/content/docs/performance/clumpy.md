@@ -38,7 +38,9 @@ trim_galore --clumpify --compression 9 --memory 4G <input>
 trim_galore --compression 6 <input>
 ```
 
-`--clumpify` requires `--cores >= 2` (it feeds the existing parallel worker pool with binned batches) and gzip output (`--dont_gzip` is rejected). `--compression` is independent — it works with or without `--clumpify`, and applies to the regular trimming pipeline too.
+`--clumpify` requires `--cores >= 2` (it feeds the existing parallel worker pool with binned batches) and gzip output (`--dont_gzip` is rejected).
+
+`--compression` is independent: it works with or without `--clumpify`, and applies to the regular trimming pipeline too.
 
 ## Performance and compression considerations
 
@@ -58,34 +60,28 @@ The minimizer computation uses 2-bit packed integer ops (one O(1) bitwise step p
 
 ### Memory
 
-`--memory` (default `1G`) is a Trim Galore-wide memory budget. The clumpify dispatcher sizes the per-bin sort runs against it, with the formula picked so **predicted peak RSS ≤ `--memory`**:
+`--memory` (default `1G`) is a Trim Galore-wide memory budget.
 
-```
-n_bins          = max(16, 4 × cores)
-usable          = memory − 512 MiB        (FastQC + allocator + runtime overhead)
-bin_byte_budget = 4 × usable / (5 × n_bins + 7 × cores)
-```
+The clumpify dispatcher sizes the per-bin sort runs against it, with the formula picked in an attempt to get the predicted peak RSS ≤ `--memory`:
 
-So with `--cores 8 --memory 1G` you get **32 bins × 12 MB**; with `--cores 8 --memory 4G` you get 32 bins × 66 MB. The binary prints those resolved values at startup. On large-budget runs the formula matches the actual `/usr/bin/time -l` "peak memory footprint" within 1%; on small budgets the model overshoots somewhat (allocator churn dominates). Bigger budget → bigger per-gzip-member sort runs → better compression, asymptoting once the budget exceeds the uncompressed input size.
+$$
+\begin{aligned}
+n_{\text{bins}}          &= \max(16,\; 4 \times \text{cores}) \\[0.8em]
+\text{usable}            &= \text{memory} - 512\,\text{MiB}
+  \quad\small\text{(FastQC + allocator + runtime overhead)} \\[0.8em]
+\text{bin\_byte\_budget} &= \frac{4 \times \text{usable}}{5 \times n_{\text{bins}} + 7 \times \text{cores}}
+\end{aligned}
+$$
 
-#### Diminishing returns
+So with `--cores 8 --memory 1G` you get **32 bins × 12 MB**; with `--cores 8 --memory 4G` you get 32 bins × 66 MB. The binary prints those resolved values at startup.
 
-From an ATAC-seq paired-end benchmark (31 M pairs, `--clumpify --compression 1`, `--cores 6`, 16 GiB MacBook Pro):
-
-| `--memory` | Bin size | Wall vs plain | Saving |
-|---|---|---|---|
-| 1G (default) | ~12 MB | 1.1× | 34.8% |
-| 2G | ~37 MB | 1.6× | 36.7% |
-| 4G | ~88 MB | ~5–6× | 38.0% |
-| 8G | ~190 MB | ~35× (memory-pressure thrash on 16 GiB host) | 38.9% |
-
-The 4G and 8G wall-time blow-ups reflect OS-level memory pressure on this particular 16 GiB host — half of physical RAM going to one process leaves the page cache thrashing. On a server with comfortable headroom you'd see the 4G / 8G rows scale closer to the 1G / 2G rows.
-
-Going from 1G to 8G adds only **4 percentage points** of saving regardless of how much wall time you pay for it. The default `1G` is fine for most short-read inputs. Bump to `2G` if you have the headroom and want the last couple of percentage points; only push higher when storage cost truly dominates and you're on a host with comfortable headroom.
+In theory, bigger budget → bigger per-gzip-member sort runs → better compression. In practice, increasing memory doesn't seem to make very much difference in our tests.
 
 #### Below-floor behaviour
 
-`--clumpify` needs a minimum of ~535 MiB to run (mostly from a fixed 512 MiB reservation for FastQC, allocator, and runtime overhead). The exact floor varies slightly with `--cores` but stays in the 535–730 MiB range for any sensible core count. If `--memory` is below the floor, Trim Galore prints a loud warning and **falls back to plain mode** rather than refusing the job:
+`--clumpify` needs a minimum of ~535 MiB to run (mostly from a fixed 512 MiB reservation for FastQC, allocator, and runtime overhead). The exact floor varies slightly with `--cores` but stays in the 535–730 MiB range for any sensible core count.
+
+If `--memory` is below the floor, Trim Galore prints a warning and falls back to plain mode:
 
 ```
 WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 552 MiB).
@@ -93,7 +89,8 @@ WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 552 Mi
          drop --clumpify to silence this warning.
 ```
 
-The trim itself proceeds normally; only the read-reordering step is skipped. Output is byte-identical to a `--clumpify`-free invocation.
+The trim itself proceeds normally; only the read-reordering step is skipped.
+Memory usage without `--clumpify` is typically significantly lower, around the 100MB mark.
 
 ### What doesn't change
 
@@ -101,12 +98,6 @@ The trim itself proceeds normally; only the read-reordering step is skipped. Out
 - All `*_trimming_report.txt` / `.json` numbers are byte-identical between plain and clumpify runs (filter + stats code is order-independent).
 - Multi-member gzip is RFC 1952 valid; `zcat`, `seqkit`, `samtools fastq`, and `MultiGzDecoder` all handle it transparently.
 - Pair lockstep is preserved: R1[i] and R2[i] are still mates after clumpify reorders them.
-
-### What can break
-
-If a downstream tool walks reads in input order **and** depends on that order matching some external file (e.g. a separate barcode whitelist file with positional mapping), clumpify will break it. The trimmed FASTQ as a multiset of pairs is unchanged, but the line-by-line order is not.
-
-For scRNA-seq with 10x Chromium reads, clumpify is functionally safe — the cell barcode + UMI are encoded in R1's sequence, and downstream tools (Cell Ranger, STARsolo, etc.) parse the barcode from each read independently and don't depend on read order. (The benchmark below shows clumpify isn't a *good* idea for 10x for compression-size reasons, but if you do enable it, downstream tools won't break.)
 
 ## Benchmark results
 

@@ -90,7 +90,7 @@ Both versions hit the gzip-output I/O bottleneck on the disk overlay, but at ver
 
 In nf-core pipelines, Trim Galore is typically allocated 12 CPUs (`process_high`) and run with `-j 8` (the module subtracts 4 for overhead). With `-j 8`, TG spawns up to ~27 threads across Cutadapt workers, pigz compression, and pigz/igzip decompression. nf-core installs TG from bioconda, which includes igzip (Intel ISA-L) for decompression.
 
-| | TG `-j 8` | Oxidized `--cores 4` | Oxidized `--cores 8` | Oxidized `--cores 24` |
+| | TG `-j 8` | Rust `--cores 4` | Rust `--cores 8` | Rust `--cores 24` |
 |---|---|---|---|---|
 | **Wall time** | 257s | 81s (3.17× faster) | **57s (4.54× faster)** | 61s (4.21× faster) |
 | **CPU time** | 2,972s | 389s (7.64× less) | **501s (5.93× less)** | 707s (4.20× less) |
@@ -98,9 +98,9 @@ In nf-core pipelines, Trim Galore is typically allocated 12 CPUs (`process_high`
 
 Three ways to read this:
 
-- **Smallest CPU footprint:** Oxidized `--cores 4` (8 threads, 389s CPU) already finishes **3.17× faster than TG `-j 8`** while using **7.64× less CPU**. Best choice when CPU/cluster-hours are the constraint.
-- **Headline speed at saturation:** Oxidized `--cores 8` (12 threads) finishes in **57 seconds — 4.54× faster than TG `-j 8`** at **5.93× less CPU**. The cleanest apples-to-apples cores-vs-cores comparison; this is the number nf-core users see.
-- **Maximum throughput at comparable thread budget:** Oxidized `--cores 24` (~28 threads) vs TG `-j 8` (~27 threads). Finishes in 61 seconds, **4.21× faster** at 4.20× less CPU. Diminishing returns past `--cores 8` because gzip-output I/O is the bottleneck.
+- **Smallest CPU footprint:** Rust `--cores 4` (8 threads, 389s CPU) already finishes **3.17× faster than TG `-j 8`** while using **7.64× less CPU**. Best choice when CPU/cluster-hours are the constraint.
+- **Headline speed at saturation:** Rust `--cores 8` (12 threads) finishes in **57 seconds — 4.54× faster than TG `-j 8`** at **5.93× less CPU**. The cleanest apples-to-apples cores-vs-cores comparison; this is the number nf-core users see.
+- **Maximum throughput at comparable thread budget:** Rust `--cores 24` (~28 threads) vs TG `-j 8` (~27 threads). Finishes in 61 seconds, **4.21× faster** at 4.20× less CPU. Diminishing returns past `--cores 8` because gzip-output I/O is the bottleneck.
 
 ## Laptop benchmark: Apple M1 Pro (10 cores, 32 GiB)
 
@@ -126,19 +126,33 @@ CPU time is what cloud providers bill for and what drives energy consumption. Tr
 | Single-threaded | 4,437s | 329s | **13.49×** |
 | 8 cores (nf-core default) | 2,972s | 501s | **5.93×** |
 
-On AWS at ~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs roughly **$0.041 with TG** vs **$0.007 with Oxidized** — a 5.9× saving per sample. Across a 1000-sample cohort that scales to **~$41 with TG vs ~$7 with Oxidized**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
+On AWS at \~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs roughly **$0.041 with TG** vs **$0.007 with the Rust v2 build** — a 5.9× saving per sample. Across a 1000-sample cohort that scales to **\~$41 with TG vs \~$7 with Rust v2**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
 
-### Output size: opt-in `--clumpify` and `--compression`
+### Output file size
 
-The Oxidized output gzip level is set to 1 (fastest) by default — this is what the headline numbers above measure. The trade is that output `.fq.gz` files are roughly 75% larger than gzip-level-6 output (the Perl/`gzip(1)` default). Decompressed bytes are byte-identical regardless of level — all gzip levels are lossless; only the framing differs.
+The default output gzip level is 1 (fastest), this is what the headline numbers above measure. The trade is that output `.fq.gz` files are roughly 75% larger than gzip-level-6 output (the older Perl/`gzip(1)` default). Decompressed bytes are byte-identical regardless of level — all gzip levels are lossless; only the framing differs.
 
-Two opt-in flags shrink the output, with the right choice depending on what the trimmed FASTQ is used for:
+Two opt-in flags shrink the output: `--clumpify` and `--compression`. They can be used indepedently or together.
 
-**Pipeline intermediates** (the dominant nf-core / Snakemake / CWL case — trimmed FASTQ is an ephemeral workdir artefact, deleted after the pipeline finishes): pass `--clumpify` and leave gzip at the default level 1. The reorder is essentially free (1.0–1.4× plain wall on most data) and the smaller output makes the *next* step (typically an aligner) read less from disk — net I/O win for the whole pipeline.
+The `--clumpify` flag instructs Trim Galore to roughly sort your data by sequence before compression, making the gzip compression more effective. Whether to use it or not depends on your data type:
 
-**Long-term storage or disk-constrained workdirs** (archival pipelines, deliverables, S3 transfer, tight scratch space): add `--compression 6` (or `--compression 9` for archival): `--clumpify --compression 6` typically saves 15–50% on output size at 4–6× plain wall. On the most redundant data (ATAC-seq, Ribo-seq) it can also run *faster* than `--compression 6` alone because deflate finds matches more cheaply on sorted runs.
+- ✅ Low complexity data: yes (ATAC-seq, ChIP-seq, Ribo-Seq, RNA-Seq, high sequencing depth WES)
+- ❌ High complexity data: no (whole-genome sequencing) - has no effect
+- ❌ Long reads: no (Oxford Nanopore) - has no effect
+- ❌ Unusual paired-end formats: no - can have deleterious effect
+    - Example: scRNA-seq where read 1 is a short index, clumpify can make the FastQ files _larger_
 
-Typical savings across short-read libraries are 15–50% smaller `.fq.gz` (varies by data type — see [Clumpy compression](/performance/clumpy/) for the full per-data-type table and exceptions like 10x scRNA-seq, where `--clumpify` is not recommended).
+Whether to push up `--compression` level or not depends on what the trimmed FASTQ is used for:
+
+- **Pipeline intermediates** (trimmed FASTQ is ephemeral, deleted after the pipeline finishes)
+    - Leave as compression level 1, but can still use `--clumpify`.
+    - The reorder is essentially free (1.0–1.4× slowdown on most data) and the smaller output makes the *next* step (typically an aligner) read less from disk — net I/O win for the whole pipeline.
+- **Long-term storage or disk-constrained workdirs**
+    - Add `--compression 6` (or `--compression 9` for archival)
+    - `--clumpify --compression 6` can halve output file sizes (15–50% less) but makes the run time 4–6× slower.
+    - Can be specified without `--clumpify`, but with redundant data types (ATAC-seq, Ribo-seq) it typically runs *faster* than with clumpify on, because deflate finds matches more cheaply on sorted runs.
+
+See [Clumpy compression](/performance/clumpy/) for the full per-data-type table.
 
 ## Methodology
 
@@ -146,7 +160,7 @@ Typical savings across short-read libraries are 15–50% smaller `.fq.gz` (varie
 - **Raw data:** All 20 hyperfine JSON outputs, the markdown summaries, the byte-identity cross-check report, and the run logs are committed to the repo at [`docs/perf_data/buckberry-2026-04-29/`](https://github.com/FelixKrueger/TrimGalore/tree/master/docs/perf_data/buckberry-2026-04-29) — anyone can verify the numbers in the tables above against the source data.
 - **Reproducer:** [`scripts/benchmark.sh`](https://github.com/FelixKrueger/TrimGalore/blob/master/scripts/benchmark.sh) — drives the full matrix (Rust beta.5/beta.7 at cores 1/4/8/10/12/14/16/24; Perl 0.6.11 + Cutadapt 5.2 at cores 1/4/8/16) with `hyperfine --warmup 1 --runs 10`. Includes a cross-version byte-identity check at the end (beta.5 vs beta.7 cores=8 outputs).
 - **Thread counts (TG):** Approximate peak values from architectural reasoning (Cutadapt workers + pigz compression workers + igzip/pigz decompression). Threads are spawned across three independent subprocesses whose lifetimes may not fully overlap.
-- **Thread counts (Oxidized):** Deterministic from the architecture: exactly N+4 threads for `--cores N` (N workers + 2 decompressors + 1 batcher + 1 writer), or exactly 1 thread for `--cores 1`.
+- **Thread counts (Rust v2):** Deterministic from the architecture: exactly N+4 threads for `--cores N` (N workers + 2 decompressors + 1 batcher + 1 writer), or exactly 1 thread for `--cores 1`.
 - **igzip:** The bioconda Trim Galore installation includes igzip (Intel ISA-L) for fast single-threaded decompression. Benchmarks run with igzip available to match the nf-core production environment.
 - **Outputs verified:** All Rust beta.5 and beta.7 outputs were confirmed byte-identical (decompressed) at `--cores 8` via md5 checksums. Myers' prefilter is byte-identity-preserving by construction.
 
