@@ -32,7 +32,7 @@ pub const OUTPUT_GZIP_LEVEL: u32 = 1;
 /// gzip(1)'s default — the "balanced" point on the size/speed curve.
 /// Output bytes are ~75% smaller than level 1; per-block compression
 /// CPU is roughly 2× higher.
-pub const HIGH_COMPRESSION_GZIP_LEVEL: u32 = 6;
+pub const HIGH_COMPRESSION_GZIP_LEVEL: u32 = 9;
 
 /// Returns the gzip output level to use given the `--high_compression`
 /// flag state. Centralises the size-vs-speed trade so every output

@@ -6,6 +6,7 @@ use std::path::Path;
 
 use trim_galore::adapter;
 use trim_galore::cli::{Cli, rewrite_perl_short_flags};
+use trim_galore::clump;
 use trim_galore::demux;
 use trim_galore::fastq::{FastqReader, FastqWriter, output_gzip_level};
 use trim_galore::fastqc;
@@ -14,11 +15,33 @@ use trim_galore::io as naming;
 use trim_galore::parallel;
 use trim_galore::report;
 use trim_galore::specialty;
+use trim_galore::spill;
 use trim_galore::trimmer;
 
 type AdapterList = Vec<(String, String)>;
 type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
 type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
+
+/// Resolve the `--clumpy_memory` budget into a `(n_bins, bin_byte_budget)`
+/// layout when `--clumpy` is set, and emit a one-line startup notice with
+/// the resolved values. Returns `None` if clumpy is off.
+fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
+    if !cli.clumpy {
+        return Ok(None);
+    }
+    let memory_bytes = clump::parse_memory_size(&cli.clumpy_memory)
+        .map_err(|e| anyhow::anyhow!("--clumpy_memory: {e}"))?;
+    let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
+    let total_mib =
+        (layout.n_bins + cli.cores) as u64 * layout.bin_byte_budget as u64 / (1024 * 1024);
+    eprintln!(
+        "clumpy: {} bins × {} MB ≈ {} MB peak buffer",
+        layout.n_bins,
+        layout.bin_byte_budget / (1024 * 1024),
+        total_mib,
+    );
+    Ok(Some(layout))
+}
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -490,8 +513,27 @@ fn run_single_file(
     eprintln!("Trimming: {}", input.display());
     eprintln!("Output:   {}", output_path.display());
 
-    let stats = if cli.cores > 1 {
-        parallel::run_single_end_parallel(input, &output_path, config, cli.cores, gzip)?
+    let stats = if let Some(ref tmp_arg) = cli.clumpy_tmp {
+        // Tier 3: disk-spill clumpy (--clumpy_tmp [DIR])
+        let tmp_root = spill::resolve_tmp_root(tmp_arg);
+        let tmp_guard = spill::SpillTempDir::new(&tmp_root)?;
+        spill::run_single_end_clumpy_spill(
+            input,
+            &output_path,
+            config,
+            cli.cores,
+            tmp_guard.path(),
+        )?
+    } else if cli.cores > 1 || cli.clumpy {
+        let clump_layout = resolve_clump_layout(cli)?;
+        parallel::run_single_end_parallel(
+            input,
+            &output_path,
+            config,
+            cli.cores,
+            gzip,
+            clump_layout,
+        )?
     } else {
         let mut reader = FastqReader::open(input)?;
         let mut writer = FastqWriter::create(
@@ -687,8 +729,29 @@ fn run_paired(
         (None, None)
     };
 
-    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
-        // Worker-pool parallel path: N workers each handle trim + compress
+    let (stats_r1, stats_r2, pair_stats) = if let Some(ref tmp_arg) = cli.clumpy_tmp {
+        // Tier 3: disk-spill clumpy.
+        let tmp_root = spill::resolve_tmp_root(tmp_arg);
+        let tmp_guard = spill::SpillTempDir::new(&tmp_root)?;
+        spill::run_paired_end_clumpy_spill(
+            input_r1,
+            input_r2,
+            &output_r1,
+            &output_r2,
+            unpaired_r1_path.as_deref(),
+            unpaired_r2_path.as_deref(),
+            config,
+            cli.cores,
+            UnpairedLengths {
+                r1: cli.length_1,
+                r2: cli.length_2,
+            },
+            tmp_guard.path(),
+        )?
+    } else if cli.cores > 1 || cli.clumpy {
+        // Worker-pool parallel path: N workers each handle trim + compress.
+        // `--clumpy` always routes here (validation enforces cores >= 2).
+        let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_paired_end_parallel(
             input_r1,
             input_r2,
@@ -703,6 +766,7 @@ fn run_paired(
                 r1: cli.length_1,
                 r2: cli.length_2,
             },
+            clump_layout,
         )?
     } else {
         // Sequential path (--cores 1)

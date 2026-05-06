@@ -118,6 +118,22 @@ trim_galore --help
 
 Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. Gzip output is written at compression level 1 (fastest) — decompressed content is byte-identical to higher-level output, but the resulting `.fq.gz` files are roughly 75% larger in exchange for substantially faster trimming on multi-core runs. Pass `--high_compression` (v2.1.0-beta.8+) to invert that trade and write level-6 gzip output for storage-bound or archival workflows.
 
+Pass `--clumpy` to additionally reorder reads inside each gzip member so reads sharing similar sequence land adjacent on disk, letting gzip's dictionary find longer back-references. Three tiers, increasingly aggressive:
+
+| Mode | Algorithm | Saving | Wall-time cost | Disk |
+|------|-----------|--------|----------------|------|
+| `--clumpy` | In-memory streaming, canonical-minimizer bins | 5–18% (gzip L1) | ~1.0–1.3× plain | none |
+| `--clumpy --high_compression` | Same + gzip L9 | 22–35% | 5–10× plain | none |
+| `--clumpy --clumpy_tmp[=DIR] --high_compression` | External bucket sort, writes uncompressed bins to disk then loads each fully and emits one gzip member per bin | **30–45%** (matches `bbmap clumpify` and `stevekm/squish`) | 5–15× plain | ~2-3× input size, transient |
+
+No information loss in any tier — only the on-disk order of records changes; trimming reports are unaffected. Output records are byte-identical to the unsorted output. Requires `--cores >= 2`.
+
+The disk-spill mode (`--clumpy_tmp`) defaults its temp directory to `std::env::temp_dir()` (respects `$TMPDIR`), or you can pass an explicit path: `--clumpy_tmp=/scratch/nvme`. **Seqera Platform / Fusion users**: the default is local-disk-safe on standard Nextflow + Fusion deployments. For best performance, point `--clumpy_tmp` at a fast local NVMe scratch path; never let it default to the output directory because that's the Fusion mount. The temp dir is auto-created with a unique per-run subdirectory and cleaned up on exit (success, error, or panic).
+
+Memory budget for the in-memory tiers defaults to 512 MiB and is configurable with `--clumpy_memory 2G` etc. — bigger budgets give bigger per-member sort runs and more compression. Disk-spill mode uses memory for one bin at a time during Phase 2 (see Phase 2 progress logs for size).
+
+Intended for short reads (Illumina/AVITI). Long-read inputs (Oxford Nanopore, PacBio) typically see no size change at non-trivial wall-time cost.
+
 The JSON report contains the same statistics as the text report in a structured format (schema v1), designed for native parsing by MultiQC.
 
 ## Documentation

@@ -150,6 +150,54 @@ pub struct Cli {
     #[clap(long = "high_compression", alias = "high-compression")]
     pub high_compression: bool,
 
+    /// Reorder reads in the gzip output so reads sharing a canonical 16-mer
+    /// minimizer land adjacent inside each gzip member, letting gzip's
+    /// 32 KB dictionary find longer redundant runs. Typical saving: 20–35%
+    /// of output size on short-read FASTQ. Output records are identical
+    /// (same IDs, sequences, qualities) — only their order on disk
+    /// changes. Trimming reports are unaffected. Requires `--cores >= 2`
+    /// and gzip output (`--dont_gzip` is rejected). Intended for
+    /// short-read FASTQ; long-read inputs (e.g. Oxford Nanopore) are
+    /// unlikely to compress better and may compress slightly worse.
+    #[clap(long = "clumpy", alias = "clump")]
+    pub clumpy: bool,
+
+    /// Memory budget for the `--clumpy` bin buffers (e.g. `512M`, `2G`).
+    /// Bigger budget → bigger gzip members → better compression, up to a
+    /// limit. Default: 512M. The dispatcher derives `n_bins = max(16, 4 ×
+    /// cores)` and `bin_byte_budget = clumpy_memory / (n_bins + cores)`;
+    /// the resolved values are printed at startup.
+    #[clap(
+        long = "clumpy_memory",
+        alias = "clumpy-memory",
+        default_value = "512M"
+    )]
+    pub clumpy_memory: String,
+
+    /// Enable disk-spill clumpy mode for maximum compression. Writes
+    /// trimmed records to per-bin temp files during a first pass, then
+    /// reads each bin back, sorts it by sequence, and emits one large
+    /// gzip member per bin. Eliminates the streaming-fragmentation
+    /// limit of in-memory clumpy and matches stevekm/squish-equivalent
+    /// compression (typically 30-45% smaller output on Illumina data).
+    /// Costs ~3× the input size in transient temp-file space and 5-10×
+    /// the wall time of plain trimming.
+    ///
+    /// Pass with no value to use the system temp directory (respects
+    /// `$TMPDIR`); pass a path to use that location, e.g.
+    /// `--clumpy_tmp /scratch/nvme`. The temp dir is **never** the
+    /// output directory — Seqera Fusion users should let this default
+    /// or point it at a local NVMe scratch path so intermediate files
+    /// don't trigger object-store uploads. Requires `--clumpy`.
+    #[clap(
+        long = "clumpy_tmp",
+        alias = "clumpy-tmp",
+        num_args = 0..=1,
+        default_missing_value = "__SYSTEM_TMP__",
+        require_equals = true,
+    )]
+    pub clumpy_tmp: Option<String>,
+
     /// Suppress the trimming report.
     #[clap(long = "no_report_file")]
     pub no_report_file: bool,
@@ -453,6 +501,59 @@ impl Cli {
 
         if self.cores == 0 {
             anyhow::bail!("--cores must be at least 1");
+        }
+
+        if self.clumpy {
+            if self.cores < 2 {
+                anyhow::bail!(
+                    "--clumpy requires --cores >= 2 (the bin dispatcher feeds parallel workers)"
+                );
+            }
+            if self.dont_gzip {
+                anyhow::bail!(
+                    "--clumpy and --dont_gzip are mutually exclusive (clumping plain text is pointless)"
+                );
+            }
+            if self.clock {
+                anyhow::bail!("--clumpy is not yet supported with --clock");
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!("--clumpy is not yet supported with --implicon");
+            }
+            if self.hardtrim5.is_some() {
+                anyhow::bail!("--clumpy is not yet supported with --hardtrim5");
+            }
+            if self.hardtrim3.is_some() {
+                anyhow::bail!("--clumpy is not yet supported with --hardtrim3");
+            }
+            if self.demux.is_some() {
+                anyhow::bail!("--clumpy is not yet supported with --demux");
+            }
+            // Resolve & validate the layout up front so misconfigured runs
+            // fail before any I/O. The same call is repeated at dispatch
+            // time so the resolved values are passed through to workers.
+            let memory_bytes = crate::clump::parse_memory_size(&self.clumpy_memory)
+                .map_err(|e| anyhow::anyhow!("--clumpy_memory: {e}"))?;
+            crate::clump::resolve_layout(memory_bytes, self.cores)?;
+        }
+
+        // --clumpy_tmp validation. Without --clumpy it makes no sense.
+        // The path (when not the system-tmp sentinel) must exist and be
+        // writable; we only check existence here — write-permission is
+        // probed at startup when we create the per-pid subdir.
+        if let Some(ref tmp) = self.clumpy_tmp {
+            if !self.clumpy {
+                anyhow::bail!("--clumpy_tmp requires --clumpy");
+            }
+            if tmp != "__SYSTEM_TMP__" {
+                let path = std::path::Path::new(tmp);
+                if !path.exists() {
+                    anyhow::bail!("--clumpy_tmp path does not exist: {}", tmp);
+                }
+                if !path.is_dir() {
+                    anyhow::bail!("--clumpy_tmp must be a directory: {}", tmp);
+                }
+            }
         }
 
         if let Some(n) = self.hardtrim5
@@ -870,5 +971,160 @@ mod tests {
         assert_eq!(cli.clip_r2, Some(2));
         assert_eq!(cli.three_prime_clip_r1, Some(3));
         assert_eq!(cli.three_prime_clip_r2, Some(4));
+    }
+
+    // ── --clumpy validation ──────────────────────────────────────────────
+
+    #[test]
+    fn test_clumpy_requires_cores_at_least_two() {
+        let cli = Cli::parse_from(["trim_galore", "--clumpy", "--cores", "1", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clumpy requires --cores >= 2"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_rejects_dont_gzip() {
+        let cli = Cli::parse_from(["trim_galore", "--clumpy", "--cores", "2", "--dont_gzip", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--dont_gzip"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_rejects_clock() {
+        let cli = Cli::parse_from(["trim_galore", "--clumpy", "--cores", "2", "--clock", R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clock"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_rejects_implicon() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "2",
+            "--implicon=8",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--implicon"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_rejects_hardtrim5() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "2",
+            "--hardtrim5",
+            "30",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--hardtrim5"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_accepts_paired() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "4",
+            "--paired",
+            R1,
+            R2,
+        ]);
+        cli.validate()
+            .expect("clumpy + paired + cores=4 should validate");
+    }
+
+    #[test]
+    fn test_clumpy_rejects_garbage_memory() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "2",
+            "--clumpy_memory",
+            "garbage",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clumpy_memory"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_rejects_too_small_memory_for_cores() {
+        // 64 MiB / (max(16, 64) + 16) ≈ 800 KiB < 1 MiB floor.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "16",
+            "--clumpy_memory",
+            "64M",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clumpy_memory"), "got: {err}");
+    }
+
+    // ── --clumpy_tmp validation ──────────────────────────────────────────
+
+    #[test]
+    fn test_clumpy_tmp_requires_clumpy() {
+        // --clumpy_tmp without --clumpy makes no sense.
+        let cli = Cli::parse_from(["trim_galore", "--clumpy_tmp=/tmp", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clumpy_tmp requires --clumpy"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_tmp_no_value_uses_system_default() {
+        // --clumpy_tmp with no value is the "use system temp" sentinel —
+        // validation passes; resolution to std::env::temp_dir() happens
+        // at startup.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "2",
+            "--clumpy_tmp",
+            R1,
+        ]);
+        cli.validate()
+            .expect("--clumpy_tmp without value should validate");
+        assert_eq!(cli.clumpy_tmp.as_deref(), Some("__SYSTEM_TMP__"));
+    }
+
+    #[test]
+    fn test_clumpy_tmp_rejects_nonexistent_path() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "2",
+            "--clumpy_tmp=/nonexistent_path_for_testing_xyz123",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("does not exist"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpy_tmp_accepts_existing_dir() {
+        // /tmp exists on every Unix system.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpy",
+            "--cores",
+            "2",
+            "--clumpy_tmp=/tmp",
+            R1,
+        ]);
+        cli.validate().expect("--clumpy_tmp=/tmp should validate");
     }
 }
