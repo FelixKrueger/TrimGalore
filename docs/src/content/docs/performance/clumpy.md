@@ -32,16 +32,16 @@ Whether to push up `--compression` level or not depends on what the trimmed FAST
 
 | Data type | Typical saving (`--clumpify --compression 9`) | Recommendation |
 |---|---|---|
-| **ATAC-seq (paired)** | ~50% | ✅ **Strong yes** — Tn5 insertion bias creates very high fragment redundancy |
-| **Ribo-seq (paired)** | ~45% | ✅ **Strong yes** — short ribosome-protected fragments are highly clustered |
-| **MiSeq amplicon / CRISPR / sgRNA** | 30–37% | ✅ **Strong yes** — explicit amplification produces lots of duplicates |
-| **Bisulfite-seq / RRBS (paired)** | ~25–35% | ✅ Yes — restriction-enzyme + bisulfite produces a redundant read fingerprint |
-| **ChIP-seq (single-end)** | ~24% | ✅ Yes — peaks generate clustered reads |
-| **RNA-seq (paired)** | 16–30% | ✅ Yes — highly-expressed transcripts create dense clusters; bigger savings at higher gzip levels |
-| **WES / WGS (paired)** | 6–22% | 🟡 Modest — diverse coverage gives less clustering |
-| **scRNA-seq (10x Chromium)** | negative — output grows | ❌ **No** — R1 (cell barcode + UMI) reorders cleanly, but R2 (cDNA) follows R1's order to preserve pair lockstep and ends up scrambled vs the natural flowcell-cluster order. R2 disruption beats the R1 win. Use `--compression 6` without `--clumpify` for ~17% saving |
-| **Long-read (ONT, PacBio)** | ~0% | ❌ **No** — long reads are mostly unique fragments; clumpify doesn't help and adds wall time |
-| **Variable-length / mixed amplicon** | ~0% | ❌ Skip — diversity defeats minimizer clustering |
+| **ATAC-seq (paired)** | ~50% | ✅ **Strong yes**: Tn5 insertion bias creates very high fragment redundancy |
+| **Ribo-seq (paired)** | ~45% | ✅ **Strong yes**: short ribosome-protected fragments are highly clustered |
+| **MiSeq amplicon / CRISPR / sgRNA** | 30–37% | ✅ **Strong yes**: explicit amplification produces lots of duplicates |
+| **Bisulfite-seq / RRBS (paired)** | ~25–35% | ✅ **Yes**: restriction-enzyme + bisulfite produces a redundant read fingerprint |
+| **ChIP-seq (single-end)** | ~24% | ✅ **Yes**: peaks generate clustered reads |
+| **RNA-seq (paired)** | 16–30% | ✅ **Yes**: highly-expressed transcripts create dense clusters; bigger savings at higher gzip levels |
+| **WES / WGS (paired)** | 6–22% | 🟡 **Modest**: diverse coverage gives less clustering |
+| **scRNA-seq (10x Chromium)** | negative — output grows | ❌ **No**: R1 (cell barcode + UMI) reorders cleanly, but R2 (cDNA) follows R1's order to preserve pair lockstep and ends up scrambled vs the natural flowcell-cluster order. R2 disruption beats the R1 win. Use `--compression 6` without `--clumpify` for ~17% saving |
+| **Long-read (ONT, PacBio)** | ~0% | ❌ **No**: long reads are mostly unique fragments; clumpify doesn't help and adds wall time |
+| **Variable-length / mixed amplicon** | ~0% | ❌ **Skip**: diversity defeats minimizer clustering |
 
 ## How to use it
 
@@ -248,14 +248,14 @@ Plots show compression savings (how much smaller the resulting FastQ files are v
 
 Datasets covered:
 
-- **MiSeq amplicon (CRISPR)** — 4.4M SE, 500 MB plain output
-- **ChIP-seq (Illumina SE)** — 28.6M SE, 1.5 GB
-- **WES (Illumina SE)** — 105M SE, 9.2 GB
-- **Long-read (ONT/PacBio)** — 100K SE, 558 MB
-- **ATAC-seq (Illumina PE)** — 31.5M PE, 2.9 GB
-- **Ribo-seq (Illumina PE)** — ~30M PE, 4.0 GB
-- **RNA-seq (Illumina PE)** — 93M PE, 17.0 GB
-- **scRNA-seq 10x Chromium (PE)** — 392M PE, 39.6 GB
+- **MiSeq amplicon (CRISPR)**: 4.4M SE, 500 MB plain output — [`ERR16944282`](https://www.ncbi.nlm.nih.gov/sra/?term=ERR16944282)
+- **ChIP-seq (Illumina SE)**: 28.6M SE, 1.5 GB — [`SRX747791`](https://www.ncbi.nlm.nih.gov/sra/?term=SRX747791)
+- **WES (Illumina SE)**: 105M SE, 9.2 GB — [`SRR7890918`](https://www.ncbi.nlm.nih.gov/sra/?term=SRR7890918)
+- **Long-read (ONT)**: 100K SE, 558 MB — [`SRR37915503`](https://www.ncbi.nlm.nih.gov/sra/?term=SRR37915503)
+- **ATAC-seq (Illumina PE)**: 31.5M PE, 2.9 GB — [`SRX2717909`](https://www.ncbi.nlm.nih.gov/sra/?term=SRX2717909)
+- **Ribo-seq (Illumina PE)**: ~30M PE, 4.0 GB — [`SRX11780879`](https://www.ncbi.nlm.nih.gov/sra/?term=SRX11780879) ([`SRR15480782`](https://www.ncbi.nlm.nih.gov/sra/?term=SRR15480782))
+- **RNA-seq (Illumina PE)**: 93M PE, 17.0 GB — [`SRX1603629`](https://www.ncbi.nlm.nih.gov/sra/?term=SRX1603629)
+- **scRNA-seq 10x Chromium (PE)**: 392M PE, 39.6 GB — [`pbmc8k_v2`](https://www.10xgenomics.com/datasets/8-k-pbm-cs-from-a-healthy-donor-2-standard-2-1-0) (10x Genomics public dataset)
 
 ## Comparison with other tools
 
