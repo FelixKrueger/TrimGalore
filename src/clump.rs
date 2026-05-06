@@ -141,15 +141,48 @@ pub struct ClumpLayout {
     pub bin_byte_budget: usize,
 }
 
+impl ClumpLayout {
+    /// Predicted peak RSS in bytes for a run with this layout and `cores`
+    /// workers. Inverse of the formula in `resolve_layout`; calling this from
+    /// `main.rs` keeps the startup banner honest with what the layout was sized
+    /// against.
+    pub fn predicted_peak_bytes(&self, cores: usize) -> u64 {
+        let dyn_bytes =
+            self.bin_byte_budget as u64 * (5 * self.n_bins as u64 + 7 * cores as u64) / 4;
+        STATIC_OVERHEAD_BYTES + dyn_bytes
+    }
+}
+
+/// Fixed memory overhead (FastQC histograms, allocator retention, Rust runtime,
+/// gzip decoder state, IO buffers) reserved out of `--memory` before sizing the
+/// bin pool. Calibrated empirically against macOS `/usr/bin/time -l` "peak
+/// memory footprint" on 31.5 M-record ATAC-seq runs (May 2026); Linux RSS
+/// bookkeeping is leaner, so the constant is conservative there too.
+const STATIC_OVERHEAD_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Compute `(n_bins, bin_byte_budget)` from a memory budget and core count.
 ///
-/// Strategy: maximise `bin_byte_budget` (= per-gzip-member size, where the
-/// compression gain lives) by keeping the bin count small enough that
-/// `n_bins ≈ 4 × cores` workers always have something to grab without leaving
-/// memory unused on extra bins.
+/// The goal is **peak RSS ≤ memory_budget**. Three big chunks consume RAM
+/// during a clumpy run, plus a roughly fixed overhead:
+///
+/// 1. Reader's resident bins: `n_bins × bin_byte_budget` of FASTQ text +
+///    `Vec<FastqRecord>` spine entries (72 bytes per record on top of ~350 byte
+///    text records ≈ 25% extra).
+/// 2. Worker input batches in flight: up to `cores × bin_byte_budget` of text
+///    + matching spine.
+/// 3. Worker output Vecs growing during gzip-encode: roughly `0.5 ×` input
+///    size at L1 (smaller at higher gzip levels, but use L1 as the upper bound).
+///
+/// Combine: peak ≈ STATIC + B × [(n_bins + cores) × 1.25 + cores × 0.5]
+///                = STATIC + B × (5 × n_bins + 7 × cores) / 4
+///
+/// Solving for B given the user's budget gives the formula below. The 1.25 ×
+/// spine factor is the doubling-free post-pre-size value; the 0.5 × output
+/// factor is the L1 worst case.
 ///
 ///   n_bins          = max(16, 4 × cores)
-///   bin_byte_budget = memory_budget / (n_bins + cores)
+///   usable          = memory_budget − STATIC_OVERHEAD_BYTES
+///   bin_byte_budget = 4 × usable / (5 × n_bins + 7 × cores)
 ///
 /// If the derived budget falls below `MIN_BIN_BYTES`, bails — better to fail
 /// loudly than silently produce a degraded output.
@@ -158,16 +191,19 @@ pub fn resolve_layout(memory_budget_bytes: u64, cores: usize) -> Result<ClumpLay
         bail!("clumpy layout requires at least one worker core");
     }
     let n_bins = (16_usize).max(4 * cores);
-    let denom = (n_bins + cores) as u64;
-    let bin_byte_budget = memory_budget_bytes / denom;
+    let usable = memory_budget_bytes.saturating_sub(STATIC_OVERHEAD_BYTES);
+    let denom = 5 * (n_bins as u64) + 7 * (cores as u64);
+    let bin_byte_budget = (usable.saturating_mul(4)) / denom;
     if bin_byte_budget < MIN_BIN_BYTES {
         bail!(
-            "--memory budget too small for --cores {}: derived {} bins × {} bytes \
-             is below the {}-byte per-bin floor. Increase --memory or decrease --cores.",
-            cores,
-            n_bins,
+            "--memory budget too small for --cores {cores}: after reserving {} MiB \
+             for static overhead (FastQC, allocator, gzip state), the derived bin \
+             budget is {} bytes — below the {}-byte per-bin floor. Increase --memory \
+             (try ≥ {} MiB) or decrease --cores.",
+            STATIC_OVERHEAD_BYTES / (1024 * 1024),
             bin_byte_budget,
             MIN_BIN_BYTES,
+            (STATIC_OVERHEAD_BYTES + (MIN_BIN_BYTES * denom).div_ceil(4)) / (1024 * 1024),
         );
     }
     Ok(ClumpLayout {
@@ -400,27 +436,57 @@ mod tests {
 
     #[test]
     fn resolve_layout_default() {
-        // 512 MiB + 2 cores: n_bins=16, denom=18, budget≈28 MiB.
-        let layout = resolve_layout(512 * 1024 * 1024, 2).unwrap();
+        // 4 GiB + 2 cores: usable=3.5 GiB, n_bins=16, denom=5×16+7×2=94,
+        // bin_byte_budget = 4×3584 MiB / 94 ≈ 152 MiB.
+        let layout = resolve_layout(4 * 1024 * 1024 * 1024, 2).unwrap();
         assert_eq!(layout.n_bins, 16);
-        assert!(layout.bin_byte_budget >= 28 * 1024 * 1024);
-        assert!(layout.bin_byte_budget < 30 * 1024 * 1024);
+        assert!(layout.bin_byte_budget >= 150 * 1024 * 1024);
+        assert!(layout.bin_byte_budget < 156 * 1024 * 1024);
     }
 
     #[test]
     fn resolve_layout_scales_with_cores() {
-        // 512 MiB + 8 cores: n_bins=32, denom=40, budget≈12.8 MiB.
-        let layout = resolve_layout(512 * 1024 * 1024, 8).unwrap();
+        // 4 GiB + 8 cores: usable=3.5 GiB, n_bins=32, denom=5×32+7×8=216,
+        // bin_byte_budget = 4×3584 MiB / 216 ≈ 66 MiB.
+        let layout = resolve_layout(4 * 1024 * 1024 * 1024, 8).unwrap();
         assert_eq!(layout.n_bins, 32);
-        assert!(layout.bin_byte_budget >= 12 * 1024 * 1024);
-        assert!(layout.bin_byte_budget < 14 * 1024 * 1024);
+        assert!(layout.bin_byte_budget >= 65 * 1024 * 1024);
+        assert!(layout.bin_byte_budget < 70 * 1024 * 1024);
+    }
+
+    #[test]
+    fn resolve_layout_predicted_peak_fits_budget() {
+        // The whole point of the formula: predicted peak ≤ user-supplied --memory.
+        for (mem_gib, cores) in [(2u64, 4), (4, 8), (8, 8), (16, 16)] {
+            let budget = mem_gib * 1024 * 1024 * 1024;
+            let layout = resolve_layout(budget, cores).unwrap();
+            let predicted_peak = layout.predicted_peak_bytes(cores);
+            assert!(
+                predicted_peak <= budget,
+                "predicted peak {} > budget {} for {} GiB / {} cores",
+                predicted_peak,
+                budget,
+                mem_gib,
+                cores
+            );
+        }
     }
 
     #[test]
     fn resolve_layout_bails_when_too_small() {
-        // 64 MiB / (max(16,64) + 16) = 64 MiB / 80 ≈ 800 KiB < 1 MiB floor.
-        let res = resolve_layout(64 * 1024 * 1024, 16);
+        // 560 MiB - 512 MiB STATIC = 48 MiB usable. With 8 cores: denom=216,
+        // bin_byte_budget = 4 × 48 MiB / 216 ≈ 0.89 MiB < 1 MiB floor.
+        let res = resolve_layout(560 * 1024 * 1024, 8);
         assert!(res.is_err(), "expected bail, got {res:?}");
+        let msg = format!("{}", res.unwrap_err());
+        assert!(msg.contains("--memory"));
+        assert!(msg.contains("static overhead"));
+    }
+
+    #[test]
+    fn resolve_layout_bails_below_static_overhead() {
+        // Below 512 MiB STATIC, usable saturates to 0 → budget is 0 → fails.
+        let res = resolve_layout(256 * 1024 * 1024, 4);
         let msg = format!("{}", res.unwrap_err());
         assert!(msg.contains("--memory"));
     }

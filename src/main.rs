@@ -31,13 +31,11 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     let memory_bytes =
         clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
     let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
-    let total_mib =
-        (layout.n_bins + cli.cores) as u64 * layout.bin_byte_budget as u64 / (1024 * 1024);
     eprintln!(
-        "clumpy: {} bins × {} MB ≈ {} MB peak buffer (gzip level {})",
+        "clumpy: {} bins × {} MB; predicted peak ≈ {} MB (gzip level {})",
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
-        total_mib,
+        layout.predicted_peak_bytes(cli.cores) / (1024 * 1024),
         cli.clumpy.unwrap(),
     );
     Ok(Some(layout))
