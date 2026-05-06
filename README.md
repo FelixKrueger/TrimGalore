@@ -118,20 +118,29 @@ trim_galore --help
 
 Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. By default, gzip output is written at compression level 1 (fastest); pass `--compression <N>` (1–9) to override — decompressed content is byte-identical regardless of level, but level-1 `.fq.gz` files are roughly 75% larger than level-9 in exchange for substantially faster trimming.
 
-Pass `--clumpify` to reorder reads inside each gzip member by canonical 16-mer minimizer so reads sharing similar sequence land adjacent on disk, letting gzip's 32 KB dictionary find longer back-references. Combine with `--compression <N>` to pick your speed/size trade-off; typical saving: 15–55% of output size on short-read FASTQ depending on data type and gzip level.
+Pass `--clumpify` to reorder reads inside each gzip member by canonical 16-mer minimizer so reads sharing similar sequence land adjacent on disk, letting gzip's 32 KB dictionary find longer back-references. The right configuration depends on what the trimmed FASTQ is used for:
 
 ```bash
-trim_galore --clumpify <input>                          # reorder, gzip L1 (fastest)
-trim_galore --clumpify --compression 6 <input>          # reorder, balanced gzip
-trim_galore --clumpify --compression 9 <input>          # reorder, max compression
-trim_galore --compression 6 <input>                     # smaller output, no reorder
+# Pipeline intermediates (deleted after the run): reorder is essentially free
+# and shrinks the file 15–35% on most data — net I/O win for the next step.
+trim_galore --clumpify <input>
+
+# Long-term storage / disk-constrained workdirs: add gzip L6 for 15–50% saving
+# at 4–6× plain wall.
+trim_galore --clumpify --compression 6 <input>
+
+# Archival use, max compression
+trim_galore --clumpify --compression 9 <input>
+
+# Smaller output without the reorder cost (e.g. for 10x scRNA-seq, see docs)
+trim_galore --compression 6 <input>
 ```
 
 No information loss — only the on-disk order of records changes. Output records are byte-identical to the unsorted output and trimming reports are unaffected. `--clumpify` requires `--cores >= 2`.
 
 Memory budget is controlled by the global `--memory` flag (default `1G`); bigger budgets give bigger per-gzip-member sort runs and better compression up to roughly the uncompressed input size, with sharply diminishing returns above ~2 GB. With enough memory, `--clumpify --compression 9` gets you within 1–2 percentage points of `bbmap clumpify` and `stevekm/squish` on the same data.
 
-Intended for short reads (Illumina, AVITI). Long-read inputs (Oxford Nanopore, PacBio) typically see no size change at non-trivial wall-time cost.
+Intended for short reads (Illumina, AVITI). Long-read inputs (Oxford Nanopore, PacBio) and 10x scRNA-seq typically see no benefit or a small negative result; see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for per-data-type recommendations.
 
 The JSON report contains the same statistics as the text report in a structured format (schema v1), designed for native parsing by MultiQC.
 
