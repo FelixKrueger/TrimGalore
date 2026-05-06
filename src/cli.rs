@@ -234,8 +234,8 @@ pub struct Cli {
 
     /// Number of worker threads for parallel processing (default: 1).
     /// Values > 1 run trimming and gzip compression across multiple threads.
-    /// Near-linear speedup through at least 16 cores; diminishing returns beyond ~20
-    /// (typically I/O-bound at that point, not algorithmic).
+    /// Scaling is near-linear up to ~8 cores; beyond that returns diminish
+    /// (the run typically becomes I/O-bound rather than CPU-bound).
     #[clap(short = 'j', long = "cores", default_value = "1")]
     pub cores: usize,
 
@@ -590,12 +590,6 @@ impl Cli {
     /// Otherwise uses the standard `--quality` value.
     pub fn effective_quality_cutoff(&self) -> u8 {
         self.nextseq.unwrap_or(self.quality)
-    }
-
-    /// Resolve the gzip compression level for output FASTQ. Always
-    /// `--compression`; defaults to `DEFAULT_GZIP_LEVEL` (1).
-    pub fn gzip_level(&self) -> u32 {
-        self.compression
     }
 }
 
@@ -1063,14 +1057,12 @@ mod tests {
     fn test_compression_defaults_to_one() {
         let cli = Cli::parse_from(["trim_galore", R1]);
         assert_eq!(cli.compression, 1);
-        assert_eq!(cli.gzip_level(), 1);
     }
 
     #[test]
     fn test_compression_explicit_level() {
         let cli = Cli::parse_from(["trim_galore", "--compression", "9", R1]);
         assert_eq!(cli.compression, 9);
-        assert_eq!(cli.gzip_level(), 9);
     }
 
     #[test]

@@ -70,7 +70,7 @@ So with `--cores 8 --memory 1G` you get **32 bins × 12 MB**; with `--cores 8 --
 
 #### Diminishing returns
 
-From an ATAC-seq paired-end benchmark (31 M pairs, `--clumpify --compression 1`, `--cores 6`):
+From an ATAC-seq paired-end benchmark (31 M pairs, `--clumpify --compression 1`, `--cores 6`, 16 GiB MacBook Pro):
 
 | `--memory` | Bin size | Wall vs plain | Saving |
 |---|---|---|---|
@@ -79,7 +79,9 @@ From an ATAC-seq paired-end benchmark (31 M pairs, `--clumpify --compression 1`,
 | 4G | ~88 MB | ~5–6× | 38.0% |
 | 8G | ~190 MB | ~35× (memory-pressure thrash on 16 GiB host) | 38.9% |
 
-Going from 1G to 8G adds only **4 percentage points** of saving while wall time grows by an order of magnitude on memory-tight hosts. The default `1G` is fine for most short-read inputs. Bump to `2G` if you have the headroom and want the last couple of percentage points; only push higher when storage cost truly dominates and you're on a host with comfortable headroom.
+The 4G and 8G wall-time blow-ups reflect OS-level memory pressure on this particular 16 GiB host — half of physical RAM going to one process leaves the page cache thrashing. On a server with comfortable headroom you'd see the 4G / 8G rows scale closer to the 1G / 2G rows.
+
+Going from 1G to 8G adds only **4 percentage points** of saving regardless of how much wall time you pay for it. The default `1G` is fine for most short-read inputs. Bump to `2G` if you have the headroom and want the last couple of percentage points; only push higher when storage cost truly dominates and you're on a host with comfortable headroom.
 
 #### Below-floor behaviour
 

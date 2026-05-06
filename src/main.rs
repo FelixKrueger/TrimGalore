@@ -101,7 +101,7 @@ fn main() -> Result<()> {
                 output_dir,
                 cli.rename,
                 cli.cores,
-                cli.gzip_level(),
+                cli.compression,
             )?;
         }
         return Ok(());
@@ -115,7 +115,7 @@ fn main() -> Result<()> {
                 output_dir,
                 cli.rename,
                 cli.cores,
-                cli.gzip_level(),
+                cli.compression,
             )?;
         }
         return Ok(());
@@ -130,7 +130,7 @@ fn main() -> Result<()> {
                     specialty::clock_output_name(r2, "R2", output_dir, gzip),
                 )
             },
-            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.gzip_level()),
+            |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.compression),
         )?;
         return Ok(());
     }
@@ -152,7 +152,7 @@ fn main() -> Result<()> {
                     gzip,
                     output_dir,
                     cli.cores,
-                    cli.gzip_level(),
+                    cli.compression,
                 )
             },
         )?;
@@ -437,7 +437,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         poly_a: cli.poly_a,
         poly_g: poly_g_enabled,
         discard_untrimmed: cli.discard_untrimmed,
-        gzip_level: cli.gzip_level(),
+        gzip_level: cli.compression,
     };
 
     Ok((adapter_label, adapters_r1, adapters_r2, config))
@@ -531,6 +531,8 @@ fn run_single_file(
     eprintln!("Output:   {}", output_path.display());
 
     let stats = if cli.cores > 1 || cli.clumpify {
+        // Worker-pool parallel path: N workers each handle trim + compress.
+        // `--clumpify` always routes here (validation enforces cores >= 2).
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_single_end_parallel(
             input,
@@ -691,7 +693,7 @@ fn run_single_file(
             gzip,
             output_dir,
             cli.cores,
-            cli.gzip_level(),
+            cli.compression,
         )?;
     }
 
@@ -732,7 +734,7 @@ fn run_paired(
 
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
-        // `--clumpy` always routes here (validation enforces cores >= 2).
+        // `--clumpify` always routes here (validation enforces cores >= 2).
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_paired_end_parallel(
             input_r1,

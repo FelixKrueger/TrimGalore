@@ -18,88 +18,13 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
 use crate::clump::{self, ClumpLayout, MinimizerKey, canonical_minimizer, estimated_record_bytes};
 use crate::fastq::{FastqReader, FastqRecord};
 use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
 use crate::report::{PairValidationStats, TrimStats};
 use crate::trimmer::{self, TrimConfig, update_adapter_stats};
-
-/// Pipeline timing + memory counters, shared across reader/workers/main via
-/// `Arc<...>`. Updated with `Relaxed` ordering — these are diagnostic
-/// summaries, not control-flow — and printed at the end of the run when
-/// `TG_PROFILE=1` is set in the environment, so default output is unchanged.
-///
-/// Per-record `Instant::now()` would add ~50 ns/record × 100M records ≈ 5 s
-/// of pure overhead, so all timings are measured at coarse boundaries
-/// (per-batch in the worker pool, per-`flush_bin` in the dispatcher) — except
-/// the per-record minimizer scan in the reader, which is gated on
-/// `profile_enabled()` to avoid the always-on cost when not profiling.
-#[derive(Default, Debug)]
-struct PipelineCounters {
-    worker_active_ns: AtomicU64,
-    worker_idle_ns: AtomicU64,
-    reader_total_ns: AtomicU64,
-    reader_minimizer_ns: AtomicU64,
-    reader_dispatch_ns: AtomicU64,
-    main_idle_ns: AtomicU64,
-    batches_processed: AtomicU64,
-    bin_flushes: AtomicU64,
-    peak_pending_bytes: AtomicUsize,
-}
-
-/// Cached `TG_PROFILE=1` check. Read once per pipeline thread (not per record)
-/// so the env-var lookup is cheap and the inner loop sees a plain `bool`.
-fn profile_enabled() -> bool {
-    std::env::var("TG_PROFILE").as_deref() == Ok("1")
-}
-
-impl PipelineCounters {
-    fn print_summary(&self, label: &str, wall: Duration, n_workers: usize) {
-        if !profile_enabled() {
-            return;
-        }
-        let wall_ns = wall.as_nanos() as u64;
-        let active = self.worker_active_ns.load(Ordering::Relaxed);
-        let idle = self.worker_idle_ns.load(Ordering::Relaxed);
-        let reader_total = self.reader_total_ns.load(Ordering::Relaxed);
-        let reader_min = self.reader_minimizer_ns.load(Ordering::Relaxed);
-        let reader_disp = self.reader_dispatch_ns.load(Ordering::Relaxed);
-        let main_idle = self.main_idle_ns.load(Ordering::Relaxed);
-        let theoretical_max = wall_ns.saturating_mul(n_workers as u64);
-        eprintln!();
-        eprintln!("=== {label} profile (TG_PROFILE=1) ===");
-        eprintln!("Wall: {:.2}s   workers: {}", wall.as_secs_f64(), n_workers);
-        eprintln!(
-            "Workers active: {:.2}s ({:.0}% of {} × wall)   idle: {:.2}s",
-            active as f64 / 1e9,
-            100.0 * active as f64 / theoretical_max as f64,
-            n_workers,
-            idle as f64 / 1e9,
-        );
-        eprintln!(
-            "Reader total:   {:.2}s   minimizer: {:.2}s   dispatch (channel send): {:.2}s",
-            reader_total as f64 / 1e9,
-            reader_min as f64 / 1e9,
-            reader_disp as f64 / 1e9,
-        );
-        eprintln!(
-            "Main idle (waiting for workers): {:.2}s ({:.0}% of wall)",
-            main_idle as f64 / 1e9,
-            100.0 * main_idle as f64 / wall_ns as f64,
-        );
-        eprintln!(
-            "Batches: {}   bin flushes: {}   peak pending compressed bytes: {:.1} MB",
-            self.batches_processed.load(Ordering::Relaxed),
-            self.bin_flushes.load(Ordering::Relaxed),
-            self.peak_pending_bytes.load(Ordering::Relaxed) as f64 / 1e6,
-        );
-    }
-}
 
 /// Number of read pairs per batch sent to each worker.
 /// 4096 records × ~300 bytes ≈ 1.2 MB per batch — large enough to amortize
@@ -152,8 +77,6 @@ pub fn run_paired_end_parallel(
     clump_layout: Option<ClumpLayout>,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
     let retain_unpaired = unpaired_r1_path.is_some();
-    let counters = Arc::new(PipelineCounters::default());
-    let wall_start = Instant::now();
 
     // Per-worker channels (round-robin distribution — no MPMC dependency needed)
     let mut work_txs: Vec<mpsc::SyncSender<PairedWork>> = Vec::with_capacity(cores);
@@ -167,162 +90,107 @@ pub fn run_paired_end_parallel(
     // Result channel: workers → main thread
     let (result_tx, result_rx) = mpsc::sync_channel::<PairedBatchResult>(cores * 2);
 
-    let stats_paired =
-        std::thread::scope(|s| -> Result<(TrimStats, TrimStats, PairValidationStats)> {
-            // ── Worker threads ──────────────────────────────────────────────
-            // Each worker owns its receiver (mpsc::Receiver is !Sync, so we
-            // move them rather than borrow).
-            for rx in work_rxs.drain(..) {
-                let rtx = result_tx.clone();
-                let counters = counters.clone();
-                s.spawn(move || {
-                    let mut active = Duration::ZERO;
-                    let mut idle = Duration::ZERO;
-                    let mut batches = 0u64;
-                    let mut wait_start = Instant::now();
-                    while let Ok(Some((seq, mut r1s, mut r2s))) = rx.recv() {
-                        idle += wait_start.elapsed();
-                        let work_start = Instant::now();
-                        let result = process_paired_batch(
-                            seq,
-                            &mut r1s,
-                            &mut r2s,
-                            config,
-                            gzip,
-                            retain_unpaired,
-                            unpaired,
-                        );
-                        active += work_start.elapsed();
-                        batches += 1;
-                        match result {
-                            Ok(result) => {
-                                if rtx.send(result).is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Worker error: {}", e);
+    std::thread::scope(|s| -> Result<(TrimStats, TrimStats, PairValidationStats)> {
+        // ── Worker threads ──────────────────────────────────────────────
+        // Each worker owns its receiver (mpsc::Receiver is !Sync, so we
+        // move them rather than borrow).
+        for rx in work_rxs.drain(..) {
+            let rtx = result_tx.clone();
+            s.spawn(move || {
+                while let Ok(Some((seq, mut r1s, mut r2s))) = rx.recv() {
+                    let result = process_paired_batch(
+                        seq,
+                        &mut r1s,
+                        &mut r2s,
+                        config,
+                        gzip,
+                        retain_unpaired,
+                        unpaired,
+                    );
+                    match result {
+                        Ok(result) => {
+                            if rtx.send(result).is_err() {
                                 break;
                             }
                         }
-                        wait_start = Instant::now();
+                        Err(e) => {
+                            eprintln!("Worker error: {}", e);
+                            break;
+                        }
                     }
-                    idle += wait_start.elapsed();
-                    counters
-                        .worker_active_ns
-                        .fetch_add(active.as_nanos() as u64, Ordering::Relaxed);
-                    counters
-                        .worker_idle_ns
-                        .fetch_add(idle.as_nanos() as u64, Ordering::Relaxed);
-                    counters
-                        .batches_processed
-                        .fetch_add(batches, Ordering::Relaxed);
-                });
-            }
-            // Drop main thread's sender so result_rx closes when all workers finish
-            drop(result_tx);
-
-            // ── Reader thread ───────────────────────────────────────────────
-            // Uses open_threaded for both files: decompression runs on 2
-            // background threads, this thread just batches the records.
-            // Two routing modes:
-            //   • Default: round-robin batches of BATCH_SIZE records to
-            //     workers (input order).
-            //   • Clumpy: bin records by canonical minimizer of R1; flush a
-            //     bin when it fills to bin_byte_budget, sort it by minimizer
-            //     key, then round-robin to a worker. Output ordering is
-            //     bin-flush order, which makes each gzip member a sorted
-            //     run of similar reads.
-            let txs = std::mem::take(&mut work_txs);
-            let reader_counters = counters.clone();
-            let reader_handle = s.spawn(move || -> Result<()> {
-                let reader_start = Instant::now();
-                let mut reader_r1 = FastqReader::open_threaded(input_r1)?;
-                let mut reader_r2 = FastqReader::open_threaded(input_r2)?;
-                let result = if let Some(layout) = clump_layout {
-                    read_pairs_clumpy(
-                        &mut reader_r1,
-                        &mut reader_r2,
-                        &txs,
-                        layout,
-                        &reader_counters,
-                    )
-                } else {
-                    read_pairs_round_robin(&mut reader_r1, &mut reader_r2, &txs, &reader_counters)
-                };
-                reader_counters
-                    .reader_total_ns
-                    .fetch_add(reader_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                result
-            });
-
-            // ── Main thread: ordered collection + file writing ──────────────
-            let mut out_r1 = File::create(output_r1)?;
-            let mut out_r2 = File::create(output_r2)?;
-            let mut out_up_r1 = unpaired_r1_path.map(File::create).transpose()?;
-            let mut out_up_r2 = unpaired_r2_path.map(File::create).transpose()?;
-
-            let mut expected: u64 = 0;
-            let mut pending: BTreeMap<u64, PairedBatchResult> = BTreeMap::new();
-            let mut pending_bytes: usize = 0;
-            let mut total_r1 = TrimStats::with_adapter_count(config.adapters.len());
-            let mut total_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
-            let mut total_pair = PairValidationStats::default();
-            let mut main_idle = Duration::ZERO;
-
-            loop {
-                let recv_start = Instant::now();
-                let Ok(result) = result_rx.recv() else { break };
-                main_idle += recv_start.elapsed();
-                pending_bytes += result.compressed_r1.len()
-                    + result.compressed_r2.len()
-                    + result.compressed_unpaired_r1.len()
-                    + result.compressed_unpaired_r2.len();
-                counters
-                    .peak_pending_bytes
-                    .fetch_max(pending_bytes, Ordering::Relaxed);
-                pending.insert(result.seq, result);
-
-                // Flush as many in-order blocks as possible
-                while let Some(r) = pending.remove(&expected) {
-                    pending_bytes -= r.compressed_r1.len()
-                        + r.compressed_r2.len()
-                        + r.compressed_unpaired_r1.len()
-                        + r.compressed_unpaired_r2.len();
-                    out_r1.write_all(&r.compressed_r1)?;
-                    out_r2.write_all(&r.compressed_r2)?;
-                    if let Some(ref mut f) = out_up_r1
-                        && !r.compressed_unpaired_r1.is_empty()
-                    {
-                        f.write_all(&r.compressed_unpaired_r1)?;
-                    }
-                    if let Some(ref mut f) = out_up_r2
-                        && !r.compressed_unpaired_r2.is_empty()
-                    {
-                        f.write_all(&r.compressed_unpaired_r2)?;
-                    }
-                    total_r1.merge(&r.stats_r1);
-                    total_r2.merge(&r.stats_r2);
-                    total_pair.merge(&r.pair_stats);
-                    expected += 1;
                 }
+            });
+        }
+        // Drop main thread's sender so result_rx closes when all workers finish
+        drop(result_tx);
+
+        // ── Reader thread ───────────────────────────────────────────────
+        // Uses open_threaded for both files: decompression runs on 2
+        // background threads, this thread just batches the records.
+        // Two routing modes:
+        //   • Default: round-robin batches of BATCH_SIZE records to
+        //     workers (input order).
+        //   • Clumpy: bin records by canonical minimizer of R1; flush a
+        //     bin when it fills to bin_byte_budget, sort it by minimizer
+        //     key, then round-robin to a worker. Output ordering is
+        //     bin-flush order, which makes each gzip member a sorted
+        //     run of similar reads.
+        let txs = std::mem::take(&mut work_txs);
+        let reader_handle = s.spawn(move || -> Result<()> {
+            let mut reader_r1 = FastqReader::open_threaded(input_r1)?;
+            let mut reader_r2 = FastqReader::open_threaded(input_r2)?;
+            if let Some(layout) = clump_layout {
+                read_pairs_clumpy(&mut reader_r1, &mut reader_r2, &txs, layout)
+            } else {
+                read_pairs_round_robin(&mut reader_r1, &mut reader_r2, &txs)
             }
-            counters
-                .main_idle_ns
-                .fetch_add(main_idle.as_nanos() as u64, Ordering::Relaxed);
+        });
 
-            // Propagate reader errors
-            match reader_handle.join() {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(_) => bail!("Reader thread panicked"),
+        // ── Main thread: ordered collection + file writing ──────────────
+        let mut out_r1 = File::create(output_r1)?;
+        let mut out_r2 = File::create(output_r2)?;
+        let mut out_up_r1 = unpaired_r1_path.map(File::create).transpose()?;
+        let mut out_up_r2 = unpaired_r2_path.map(File::create).transpose()?;
+
+        let mut expected: u64 = 0;
+        let mut pending: BTreeMap<u64, PairedBatchResult> = BTreeMap::new();
+        let mut total_r1 = TrimStats::with_adapter_count(config.adapters.len());
+        let mut total_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
+        let mut total_pair = PairValidationStats::default();
+
+        while let Ok(result) = result_rx.recv() {
+            pending.insert(result.seq, result);
+
+            // Flush as many in-order blocks as possible
+            while let Some(r) = pending.remove(&expected) {
+                out_r1.write_all(&r.compressed_r1)?;
+                out_r2.write_all(&r.compressed_r2)?;
+                if let Some(ref mut f) = out_up_r1
+                    && !r.compressed_unpaired_r1.is_empty()
+                {
+                    f.write_all(&r.compressed_unpaired_r1)?;
+                }
+                if let Some(ref mut f) = out_up_r2
+                    && !r.compressed_unpaired_r2.is_empty()
+                {
+                    f.write_all(&r.compressed_unpaired_r2)?;
+                }
+                total_r1.merge(&r.stats_r1);
+                total_r2.merge(&r.stats_r2);
+                total_pair.merge(&r.pair_stats);
+                expected += 1;
             }
+        }
 
-            Ok((total_r1, total_r2, total_pair))
-        })?;
+        // Propagate reader errors
+        match reader_handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => bail!("Reader thread panicked"),
+        }
 
-    counters.print_summary("paired-end", wall_start.elapsed(), cores);
-    Ok(stats_paired)
+        Ok((total_r1, total_r2, total_pair))
+    })
 }
 fn process_paired_batch(
     batch_seq: u64,
@@ -594,12 +462,10 @@ fn read_pairs_round_robin(
     reader_r1: &mut FastqReader,
     reader_r2: &mut FastqReader,
     txs: &[mpsc::SyncSender<PairedWork>],
-    counters: &PipelineCounters,
 ) -> Result<()> {
     let mut seq: u64 = 0;
     let mut batch_r1 = Vec::with_capacity(BATCH_SIZE);
     let mut batch_r2 = Vec::with_capacity(BATCH_SIZE);
-    let mut dispatch_dur = Duration::ZERO;
 
     loop {
         let rec1 = reader_r1.next_record()?;
@@ -612,11 +478,9 @@ fn read_pairs_round_robin(
                     let br1 = std::mem::replace(&mut batch_r1, Vec::with_capacity(BATCH_SIZE));
                     let br2 = std::mem::replace(&mut batch_r2, Vec::with_capacity(BATCH_SIZE));
                     let idx = (seq as usize) % txs.len();
-                    let send_start = Instant::now();
                     if txs[idx].send(Some((seq, br1, br2))).is_err() {
                         break;
                     }
-                    dispatch_dur += send_start.elapsed();
                     seq += 1;
                 }
             }
@@ -640,9 +504,6 @@ fn read_pairs_round_robin(
             ),
         }
     }
-    counters
-        .reader_dispatch_ns
-        .fetch_add(dispatch_dur.as_nanos() as u64, Ordering::Relaxed);
     Ok(())
 }
 
@@ -655,32 +516,20 @@ fn read_pairs_clumpy(
     reader_r2: &mut FastqReader,
     txs: &[mpsc::SyncSender<PairedWork>],
     layout: ClumpLayout,
-    counters: &PipelineCounters,
 ) -> Result<()> {
     let mut bins: Vec<PairedBin> = (0..layout.n_bins)
         .map(|_| PairedBin::with_budget(layout.bin_byte_budget))
         .collect();
     let mut seq: u64 = 0;
     let mut next_worker: usize = 0;
-    let profile = profile_enabled();
-    let mut minimizer_dur = Duration::ZERO;
-    let mut dispatch_dur = Duration::ZERO;
 
-    let flush_bin = |bin: &mut PairedBin,
-                     seq: &mut u64,
-                     next_worker: &mut usize,
-                     dispatch_dur: &mut Duration|
-     -> Result<bool> {
+    let flush_bin = |bin: &mut PairedBin, seq: &mut u64, next_worker: &mut usize| -> Result<bool> {
         let (mut r1s, mut r2s, mut keys) = bin.take();
         clump::sort_paired_by_key(&mut r1s, &mut r2s, &mut keys);
         let idx = *next_worker;
-        let send_start = Instant::now();
-        let send_result = txs[idx].send(Some((*seq, r1s, r2s)));
-        *dispatch_dur += send_start.elapsed();
-        if send_result.is_err() {
+        if txs[idx].send(Some((*seq, r1s, r2s))).is_err() {
             return Ok(false);
         }
-        counters.bin_flushes.fetch_add(1, Ordering::Relaxed);
         *seq += 1;
         *next_worker = (*next_worker + 1) % txs.len();
         Ok(true)
@@ -691,29 +540,18 @@ fn read_pairs_clumpy(
         let rec2 = reader_r2.next_record()?;
         match (rec1, rec2) {
             (Some(r1), Some(r2)) => {
-                let mz_start = profile.then(Instant::now);
                 let key = canonical_minimizer(r1.seq.as_bytes());
                 let bin_idx = clump::bin_for(key, layout.n_bins);
-                if let Some(s) = mz_start {
-                    minimizer_dur += s.elapsed();
-                }
                 bins[bin_idx].push(r1, r2, key);
                 if bins[bin_idx].raw_bytes >= layout.bin_byte_budget
-                    && !flush_bin(
-                        &mut bins[bin_idx],
-                        &mut seq,
-                        &mut next_worker,
-                        &mut dispatch_dur,
-                    )?
+                    && !flush_bin(&mut bins[bin_idx], &mut seq, &mut next_worker)?
                 {
                     break;
                 }
             }
             (None, None) => {
                 for bin in bins.iter_mut() {
-                    if !bin.is_empty()
-                        && !flush_bin(bin, &mut seq, &mut next_worker, &mut dispatch_dur)?
-                    {
+                    if !bin.is_empty() && !flush_bin(bin, &mut seq, &mut next_worker)? {
                         break;
                     }
                 }
@@ -732,12 +570,6 @@ fn read_pairs_clumpy(
             ),
         }
     }
-    counters
-        .reader_minimizer_ns
-        .fetch_add(minimizer_dur.as_nanos() as u64, Ordering::Relaxed);
-    counters
-        .reader_dispatch_ns
-        .fetch_add(dispatch_dur.as_nanos() as u64, Ordering::Relaxed);
     Ok(())
 }
 
@@ -812,8 +644,6 @@ pub fn run_single_end_parallel(
     gzip: bool,
     clump_layout: Option<ClumpLayout>,
 ) -> Result<TrimStats> {
-    let counters = Arc::new(PipelineCounters::default());
-    let wall_start = Instant::now();
     let mut work_txs: Vec<mpsc::SyncSender<SingleWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<SingleWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
@@ -824,23 +654,13 @@ pub fn run_single_end_parallel(
 
     let (result_tx, result_rx) = mpsc::sync_channel::<SingleBatchResult>(cores * 2);
 
-    let total = std::thread::scope(|s| -> Result<TrimStats> {
+    std::thread::scope(|s| -> Result<TrimStats> {
         // ── Worker threads ──────────────────────────────────────────────
         for rx in work_rxs.drain(..) {
             let rtx = result_tx.clone();
-            let counters = counters.clone();
             s.spawn(move || {
-                let mut active = Duration::ZERO;
-                let mut idle = Duration::ZERO;
-                let mut batches = 0u64;
-                let mut wait_start = Instant::now();
                 while let Ok(Some((seq, mut reads))) = rx.recv() {
-                    idle += wait_start.elapsed();
-                    let work_start = Instant::now();
-                    let result = process_single_batch(seq, &mut reads, config, gzip);
-                    active += work_start.elapsed();
-                    batches += 1;
-                    match result {
+                    match process_single_batch(seq, &mut reads, config, gzip) {
                         Ok(result) => {
                             if rtx.send(result).is_err() {
                                 break;
@@ -851,18 +671,7 @@ pub fn run_single_end_parallel(
                             break;
                         }
                     }
-                    wait_start = Instant::now();
                 }
-                idle += wait_start.elapsed();
-                counters
-                    .worker_active_ns
-                    .fetch_add(active.as_nanos() as u64, Ordering::Relaxed);
-                counters
-                    .worker_idle_ns
-                    .fetch_add(idle.as_nanos() as u64, Ordering::Relaxed);
-                counters
-                    .batches_processed
-                    .fetch_add(batches, Ordering::Relaxed);
             });
         }
         drop(result_tx);
@@ -871,48 +680,29 @@ pub fn run_single_end_parallel(
         // Clumpy mode replaces round-robin with a bin dispatcher; see
         // `read_pairs_clumpy` for the paired-end shape of the same idea.
         let txs = std::mem::take(&mut work_txs);
-        let reader_counters = counters.clone();
         let reader_handle = s.spawn(move || -> Result<()> {
-            let reader_start = Instant::now();
             let mut reader = FastqReader::open_threaded(input)?;
-            let result = if let Some(layout) = clump_layout {
-                read_single_clumpy(&mut reader, &txs, layout, &reader_counters)
+            if let Some(layout) = clump_layout {
+                read_single_clumpy(&mut reader, &txs, layout)
             } else {
-                read_single_round_robin(&mut reader, &txs, &reader_counters)
-            };
-            reader_counters
-                .reader_total_ns
-                .fetch_add(reader_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            result
+                read_single_round_robin(&mut reader, &txs)
+            }
         });
 
         // ── Main thread: ordered collection + file writing ──────────────
         let mut out = File::create(output)?;
         let mut expected: u64 = 0;
         let mut pending: BTreeMap<u64, SingleBatchResult> = BTreeMap::new();
-        let mut pending_bytes: usize = 0;
         let mut total = TrimStats::with_adapter_count(config.adapters.len());
-        let mut main_idle = Duration::ZERO;
 
-        loop {
-            let recv_start = Instant::now();
-            let Ok(result) = result_rx.recv() else { break };
-            main_idle += recv_start.elapsed();
-            pending_bytes += result.compressed.len();
-            counters
-                .peak_pending_bytes
-                .fetch_max(pending_bytes, Ordering::Relaxed);
+        while let Ok(result) = result_rx.recv() {
             pending.insert(result.seq, result);
             while let Some(r) = pending.remove(&expected) {
-                pending_bytes -= r.compressed.len();
                 out.write_all(&r.compressed)?;
                 total.merge(&r.stats);
                 expected += 1;
             }
         }
-        counters
-            .main_idle_ns
-            .fetch_add(main_idle.as_nanos() as u64, Ordering::Relaxed);
 
         match reader_handle.join() {
             Ok(Ok(())) => {}
@@ -921,10 +711,7 @@ pub fn run_single_end_parallel(
         }
 
         Ok(total)
-    })?;
-
-    counters.print_summary("single-end", wall_start.elapsed(), cores);
-    Ok(total)
+    })
 }
 
 /// Process a batch of single-end reads: trim, filter, compress.
@@ -1047,22 +834,18 @@ fn process_reads<W: Write>(
 fn read_single_round_robin(
     reader: &mut FastqReader,
     txs: &[mpsc::SyncSender<SingleWork>],
-    counters: &PipelineCounters,
 ) -> Result<()> {
     let mut seq: u64 = 0;
     let mut batch = Vec::with_capacity(BATCH_SIZE);
-    let mut dispatch_dur = Duration::ZERO;
 
     while let Some(record) = reader.next_record()? {
         batch.push(record);
         if batch.len() >= BATCH_SIZE {
             let full = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
             let idx = (seq as usize) % txs.len();
-            let send_start = Instant::now();
             if txs[idx].send(Some((seq, full))).is_err() {
                 break;
             }
-            dispatch_dur += send_start.elapsed();
             seq += 1;
         }
     }
@@ -1074,9 +857,6 @@ fn read_single_round_robin(
     for tx in txs {
         let _ = tx.send(None);
     }
-    counters
-        .reader_dispatch_ns
-        .fetch_add(dispatch_dur.as_nanos() as u64, Ordering::Relaxed);
     Ok(())
 }
 
@@ -1087,71 +867,44 @@ fn read_single_clumpy(
     reader: &mut FastqReader,
     txs: &[mpsc::SyncSender<SingleWork>],
     layout: ClumpLayout,
-    counters: &PipelineCounters,
 ) -> Result<()> {
     let mut bins: Vec<SingleBin> = (0..layout.n_bins)
         .map(|_| SingleBin::with_budget(layout.bin_byte_budget))
         .collect();
     let mut seq: u64 = 0;
     let mut next_worker: usize = 0;
-    let profile = profile_enabled();
-    let mut minimizer_dur = Duration::ZERO;
-    let mut dispatch_dur = Duration::ZERO;
 
-    let flush_bin = |bin: &mut SingleBin,
-                     seq: &mut u64,
-                     next_worker: &mut usize,
-                     dispatch_dur: &mut Duration|
-     -> Result<bool> {
+    let flush_bin = |bin: &mut SingleBin, seq: &mut u64, next_worker: &mut usize| -> Result<bool> {
         let (mut records, mut keys) = bin.take();
         clump::sort_single_by_key(&mut records, &mut keys);
         let idx = *next_worker;
-        let send_start = Instant::now();
-        let send_result = txs[idx].send(Some((*seq, records)));
-        *dispatch_dur += send_start.elapsed();
-        if send_result.is_err() {
+        if txs[idx].send(Some((*seq, records))).is_err() {
             return Ok(false);
         }
-        counters.bin_flushes.fetch_add(1, Ordering::Relaxed);
         *seq += 1;
         *next_worker = (*next_worker + 1) % txs.len();
         Ok(true)
     };
 
     while let Some(record) = reader.next_record()? {
-        let mz_start = profile.then(Instant::now);
         let key = canonical_minimizer(record.seq.as_bytes());
         let bin_idx = clump::bin_for(key, layout.n_bins);
-        if let Some(s) = mz_start {
-            minimizer_dur += s.elapsed();
-        }
         bins[bin_idx].push(record, key);
         if bins[bin_idx].raw_bytes >= layout.bin_byte_budget
-            && !flush_bin(
-                &mut bins[bin_idx],
-                &mut seq,
-                &mut next_worker,
-                &mut dispatch_dur,
-            )?
+            && !flush_bin(&mut bins[bin_idx], &mut seq, &mut next_worker)?
         {
             break;
         }
     }
 
     for bin in bins.iter_mut() {
-        if !bin.is_empty() && !flush_bin(bin, &mut seq, &mut next_worker, &mut dispatch_dur)? {
+        if !bin.is_empty() && !flush_bin(bin, &mut seq, &mut next_worker)? {
             break;
         }
     }
     for tx in txs {
         let _ = tx.send(None);
     }
-    counters
-        .reader_minimizer_ns
-        .fetch_add(minimizer_dur.as_nanos() as u64, Ordering::Relaxed);
-    counters
-        .reader_dispatch_ns
-        .fetch_add(dispatch_dur.as_nanos() as u64, Ordering::Relaxed);
     Ok(())
 }
 
@@ -1480,7 +1233,7 @@ mod tests {
         Ok(())
     }
 
-    // ── --clumpy integration tests ───────────────────────────────────────
+    // ── --clumpify integration tests ─────────────────────────────────────
 
     use crate::clump::ClumpLayout;
 

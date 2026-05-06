@@ -1,6 +1,6 @@
-//! Optional read reordering for tighter gzip compression (`--clumpy`).
+//! Optional read reordering for tighter gzip compression (`--clumpify`).
 //!
-//! When `--clumpy` is enabled, the reader thread routes reads to N in-memory
+//! When `--clumpify` is enabled, the reader thread routes reads to N in-memory
 //! bin buffers keyed by a canonical k-mer minimizer. When a bin's accumulated
 //! raw bytes exceed the per-bin byte budget, the bin is sorted by minimizer
 //! key (so reads sharing the same minimizer land adjacent inside the gzip
@@ -9,12 +9,10 @@
 //! runs of similar sequences within the sorted bin, shaving roughly 20–35%
 //! off output size on typical Illumina FASTQ.
 //!
-//! The routing model is the streaming N-bin dispatcher recommended in the
-//! plan at `~/.claude/plans/i-m-curious-if-we-clever-codd.md`. Bin assignment
-//! is FNV-1a hash of the minimizer mod N (load-balancing); the compression
-//! win comes from the **in-bin sort**, not from cross-bin adjacency, so
-//! locality-preserving prefix bucketing is unnecessary (matches stevekm/squish
-//! `dev2`'s clump bucket strategy).
+//! Bin assignment is FNV-1a hash of the minimizer mod N (load-balancing); the
+//! compression win comes from the **in-bin sort**, not from cross-bin
+//! adjacency, so locality-preserving prefix bucketing is unnecessary (matches
+//! stevekm/squish `dev2`'s clump bucket strategy).
 
 use anyhow::{Result, bail};
 
@@ -24,7 +22,7 @@ use crate::fastq::FastqRecord;
 /// Fixed at 16 so the encoded form fits exactly into a `u32` (16 bases × 2
 /// bits each), letting canonicalisation and sliding-window updates run as
 /// single-cycle integer ops.
-pub const KMER_LEN: usize = 16;
+const KMER_LEN: usize = 16;
 
 /// Canonical minimizer key — the lexicographically smallest canonical
 /// (forward-or-reverse-complement) k-mer over a read, encoded as 2-bit
@@ -37,7 +35,7 @@ pub type MinimizerKey = u32;
 /// starts to erode the compression win and we'd rather fail fast than ship a
 /// degraded output. The dispatcher's `resolve_layout` bails when the derived
 /// budget falls below this floor.
-pub const MIN_BIN_BYTES: u64 = 1024 * 1024;
+const MIN_BIN_BYTES: u64 = 1024 * 1024;
 
 /// Map a sequence base to its 2-bit code. Anything that isn't ACGT
 /// (including `N`, lowercase noise, ambiguous IUPAC codes) folds to A.
@@ -172,7 +170,7 @@ const STATIC_OVERHEAD_BYTES: u64 = 512 * 1024 * 1024;
 /// Compute `(n_bins, bin_byte_budget)` from a memory budget and core count.
 ///
 /// The goal is **peak RSS ≤ memory_budget**. Three big chunks consume RAM
-/// during a clumpy run, plus a roughly fixed overhead:
+/// during a clumpify run, plus a roughly fixed overhead:
 ///
 /// 1. Reader's resident bins: `n_bins × bin_byte_budget` of FASTQ text +
 ///    `Vec<FastqRecord>` spine entries (72 bytes per record on top of ~350 byte
@@ -197,7 +195,7 @@ const STATIC_OVERHEAD_BYTES: u64 = 512 * 1024 * 1024;
 /// loudly than silently produce a degraded output.
 pub fn resolve_layout(memory_budget_bytes: u64, cores: usize) -> Result<ClumpLayout> {
     if cores == 0 {
-        bail!("clumpy layout requires at least one worker core");
+        bail!("clumpify layout requires at least one worker core");
     }
     let n_bins = (16_usize).max(4 * cores);
     let usable = memory_budget_bytes.saturating_sub(STATIC_OVERHEAD_BYTES);
@@ -559,7 +557,7 @@ mod tests {
         sort_paired_by_key(&mut r1, &mut r2, &mut keys);
 
         // For each i, R1[i].id and R2[i].id must still be mates ("@x/1"
-        // ↔ "@x/2"). This is the invariant clumpy must never break.
+        // ↔ "@x/2"). This is the invariant clumpify must never break.
         for (a, b) in r1.iter().zip(r2.iter()) {
             let a_stem = a.id.trim_end_matches("/1");
             let b_stem = b.id.trim_end_matches("/2");

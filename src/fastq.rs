@@ -16,8 +16,8 @@ use std::path::Path;
 /// Buffer size for gzip I/O — 64KB for throughput (flate2 default of 8KB is too small).
 const BUF_SIZE: usize = 64 * 1024;
 
-/// Default output gzip compression level for the regular (non-clumpy)
-/// path. Set to 1 (fastest) — at Buckberry-scale (84M reads, 38%
+/// Default output gzip compression level. Set to 1 (fastest) — at
+/// Buckberry-scale (84M reads, 38%
 /// adapter rate, cores=8) the compression CPU dominated wall time on
 /// saturated workers; lowering from level 6 to 1 measured ~−23% wall
 /// and ~−43% user-CPU at byte-identity of the decompressed output

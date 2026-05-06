@@ -39,8 +39,8 @@ pub struct TrimConfig {
     pub poly_g: bool,
     pub discard_untrimmed: bool,
     /// Gzip compression level for output FASTQ. Defaults to
-    /// `fastq::DEFAULT_GZIP_LEVEL` (1, fastest); `--clumpy [LEVEL]` sets
-    /// it to a higher value (default 6 when no explicit level given).
+    /// `fastq::DEFAULT_GZIP_LEVEL` (1, fastest); set via `--compression <N>`
+    /// (1–9). Independent of `--clumpify`.
     pub gzip_level: u32,
 }
 
