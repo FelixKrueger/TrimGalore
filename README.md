@@ -116,19 +116,20 @@ trim_galore --help
 | Paired-end | `*_val_1.fq.gz` / `*_val_2.fq.gz` | per-read text + JSON reports |
 | Unpaired (with `--retain_unpaired`) | `*_unpaired_1.fq.gz` / `*_unpaired_2.fq.gz` | |
 
-Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. By default, gzip output is written at compression level 1 (fastest) — decompressed content is byte-identical regardless of level, but level-1 `.fq.gz` files are roughly 75% larger than level-9 in exchange for substantially faster trimming.
+Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. By default, gzip output is written at compression level 1 (fastest); pass `--compression <N>` (1–9) to override — decompressed content is byte-identical regardless of level, but level-1 `.fq.gz` files are roughly 75% larger than level-9 in exchange for substantially faster trimming.
 
-Pass `--clumpy` to reorder reads inside each gzip member by canonical 16-mer minimizer so reads sharing similar sequence land adjacent on disk, letting gzip's 32 KB dictionary find longer back-references. The optional argument is the gzip compression level (1–9, default 6 when no value given): higher = smaller output, slower trimming. Typical saving: 16–37% of output size on short-read FASTQ depending on data type and gzip level.
+Pass `--clumpify` to reorder reads inside each gzip member by canonical 16-mer minimizer so reads sharing similar sequence land adjacent on disk, letting gzip's 32 KB dictionary find longer back-references. Combine with `--compression <N>` to pick your speed/size trade-off; typical saving: 15–55% of output size on short-read FASTQ depending on data type and gzip level.
 
 ```bash
-trim_galore --clumpy <input>           # reorder + gzip L6 (default)
-trim_galore --clumpy=9 <input>         # reorder + max compression
-trim_galore --clumpy=1 <input>         # reorder + fastest gzip (smallest wall-time hit)
+trim_galore --clumpify <input>                          # reorder, gzip L1 (fastest)
+trim_galore --clumpify --compression 6 <input>          # reorder, balanced gzip
+trim_galore --clumpify --compression 9 <input>          # reorder, max compression
+trim_galore --compression 6 <input>                     # smaller output, no reorder
 ```
 
-No information loss — only the on-disk order of records changes. Output records are byte-identical to the unsorted output and trimming reports are unaffected. Requires `--cores >= 2`.
+No information loss — only the on-disk order of records changes. Output records are byte-identical to the unsorted output and trimming reports are unaffected. `--clumpify` requires `--cores >= 2`.
 
-Memory budget is controlled by the global `--memory` flag (default `4G`); bigger budgets give bigger per-gzip-member sort runs and better compression up to roughly the uncompressed input size. With enough memory, `--clumpy=9` gets you within 1–2 percentage points of `bbmap clumpify` and `stevekm/squish` on the same data.
+Memory budget is controlled by the global `--memory` flag (default `4G`); bigger budgets give bigger per-gzip-member sort runs and better compression up to roughly the uncompressed input size. The bin layout formula keeps predicted peak RSS within 1% of `--memory`. With enough memory, `--clumpify --compression 9` gets you within 1–2 percentage points of `bbmap clumpify` and `stevekm/squish` on the same data.
 
 Intended for short reads (Illumina, AVITI). Long-read inputs (Oxford Nanopore, PacBio) typically see no size change at non-trivial wall-time cost.
 

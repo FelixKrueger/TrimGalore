@@ -22,21 +22,21 @@ type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig
 type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
 
 /// Resolve `--memory` into a `(n_bins, bin_byte_budget)` layout when
-/// `--clumpy` is set, and emit a one-line startup notice with the
-/// resolved values. Returns `None` if clumpy is off.
+/// `--clumpify` is set, and emit a one-line startup notice with the
+/// resolved values. Returns `None` if clumpify is off.
 fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
-    if cli.clumpy.is_none() {
+    if !cli.clumpify {
         return Ok(None);
     }
     let memory_bytes =
         clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
     let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
     eprintln!(
-        "clumpy: {} bins × {} MB; predicted peak ≈ {} MB (gzip level {})",
+        "clumpify: {} bins × {} MB; predicted peak ≈ {} MB (gzip level {})",
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
         layout.predicted_peak_bytes(cli.cores) / (1024 * 1024),
-        cli.clumpy.unwrap(),
+        cli.compression,
     );
     Ok(Some(layout))
 }
@@ -511,7 +511,7 @@ fn run_single_file(
     eprintln!("Trimming: {}", input.display());
     eprintln!("Output:   {}", output_path.display());
 
-    let stats = if cli.cores > 1 || cli.clumpy.is_some() {
+    let stats = if cli.cores > 1 || cli.clumpify {
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_single_end_parallel(
             input,
@@ -711,7 +711,7 @@ fn run_paired(
         (None, None)
     };
 
-    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpy.is_some() {
+    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpy` always routes here (validation enforces cores >= 2).
         let clump_layout = resolve_clump_layout(cli)?;

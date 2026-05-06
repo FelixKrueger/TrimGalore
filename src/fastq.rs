@@ -23,16 +23,9 @@ const BUF_SIZE: usize = 64 * 1024;
 /// and ~−43% user-CPU at byte-identity of the decompressed output
 /// (gzip framing differs but `gzip -dc` yields the same bytes). Trade:
 /// output `.fq.gz` files are ~75% larger. Users who care about storage
-/// pass `--clumpy [LEVEL]` (default level 6) to get reordering plus a
-/// higher gzip level.
+/// pass `--compression 6` (or `--compression 9`) — and stack
+/// `--clumpify` on top for reordering plus a higher gzip level.
 pub const DEFAULT_GZIP_LEVEL: u32 = 1;
-
-/// Default gzip compression level for `--clumpy` when the flag is
-/// passed without an explicit value. Matches `flate2::Compression::default()`
-/// and gzip(1)'s default — the balanced point on the size/speed curve.
-/// Users wanting maximum compression pass `--clumpy 9`; users in a
-/// hurry pass `--clumpy 1`.
-pub const DEFAULT_CLUMPY_GZIP_LEVEL: u32 = 6;
 
 /// A single FASTQ record with owned data.
 #[derive(Debug, Clone)]
@@ -454,9 +447,8 @@ impl FastqWriter {
     /// Create a new FASTQ writer. Gzip-compresses if `gzip` is true.
     /// When `cores` > 1 and gzip is enabled, uses parallel gzip compression.
     /// `gzip_level` is the deflate level (1 = fastest/largest, 6 = balanced,
-    /// 9 = smallest/slowest). Defaults: `DEFAULT_GZIP_LEVEL` (1) for the
-    /// regular pipeline, `DEFAULT_CLUMPY_GZIP_LEVEL` (6) when `--clumpy`
-    /// is passed without an explicit level.
+    /// 9 = smallest/slowest). Default: `DEFAULT_GZIP_LEVEL` (1); the user
+    /// overrides via `--compression`.
     pub fn create<P: AsRef<Path>>(
         path: P,
         gzip: bool,
