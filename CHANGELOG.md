@@ -1,7 +1,13 @@
 # Trim Galore Changelog
 
 
-### Unreleased (clumpy branch)
+### Version 2.2.0 (Release on 7 May 2026)
+
+**The Clumpify Edition.** Opt-in read-reordering for tighter `.fq.gz` output via canonical 16-mer minimizer sort, with empirically-validated guidance on which data types benefit and which are hurt. Ships alongside a new `--compression` knob that decouples gzip level from reordering, and a new tool-wide `--memory` budget. Co-developed with Phil Ewels (PR [#282](https://github.com/FelixKrueger/TrimGalore/pull/282)) — see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for the full benchmark table and use-case guidance, and [`docs/perf_data/clumpify-{buckberry,rrbs}-2026-05-07/`](https://github.com/FelixKrueger/TrimGalore/tree/master/docs/perf_data) for the WGBS-vs-RRBS contrast that motivated the per-data-type recommendations.
+
+The headline rule of thumb (in `clumpy.md`'s When-to-use section): clumpify helps on **low-complexity** paired-end data where biology produces fragment-level clustering (ATAC, Ribo, RRBS, RNA-seq, WES, MiSeq amplicons — savings ~15–55%), and **hurts** on high-complexity coverage-diverse paired-end data (WGBS PE, scRNA-seq R2 — output grows because R2 follows R1's minimizer order and loses its natural flowcell-cluster locality). The split is driven by the same R2-disruption mechanism that affects 10x scRNA-seq.
+
+#### New flags
 
 - **`--clumpify` opt-in compression mode.** Boolean flag that reorders reads
   inside each gzip member of the trimmed output by canonical 16-mer
@@ -34,9 +40,15 @@
 - **`--high_compression` removed.** Subsumed by the new `--compression <N>`
   flag. Users who previously passed `--high_compression` for level-6
   archival output should switch to `--compression 6` (or
-  `--clumpify --compression 6` to also benefit from reordering). Both
-  flags landed in pre-release development; `--high_compression` was never
-  on a stable release line.
+  `--clumpify --compression 6` to also benefit from reordering).
+  `--high_compression` shipped in v2.1.0 GA — this is a real removal,
+  not a pre-release shim. Existing pipelines that pass it will need to
+  swap; the rewrite is a one-line CLI change.
+
+#### Other changes
+
+- **Integer-arithmetic `max_errors` in adapter alignment** ([#287](https://github.com/FelixKrueger/TrimGalore/pull/287), [#262 Item A](https://github.com/FelixKrueger/TrimGalore/issues/262)). Replaced four call sites of `(max_error_rate * len as f64).floor() as usize` in `find_3prime_adapter` and `myers_proves_no_match` with integer math, eliminating a per-read libm `floor()` call that pprof attributed at 0.21% leaf self-time on the Buckberry fixture. Byte-identical to the float form for any non-negative integer length; determinism is *better* (no f64 rounding-mode dependency). Win: ~0.2% wall — small but it's free, and the parity matrix confirms byte-identity across all 19 flag paths.
+- **Memory & I/O reference data added to the [Threading model](https://www.trimgalore.com/performance/threading/) docs page** ([#287](https://github.com/FelixKrueger/TrimGalore/pull/287)). Memory profile section now contextualises TG v2's <100 MB peak vs Cutadapt 100–300 MB / fastp 100+ MB / BBDuk 1–4 GB, plus a new "I/O and cache behaviour" subsection covering disk-bandwidth-comfortable I/O and the L3-cache-pressure mechanism behind the `--cores ≥ 16` diminishing-returns plateau. Audit-trail data captured by [@an-altosian](https://github.com/an-altosian)'s [#263](https://github.com/FelixKrueger/TrimGalore/issues/263) and [#264](https://github.com/FelixKrueger/TrimGalore/issues/264) characterization reports.
 
 
 ### Version 2.1.0 (Release on 4 May 2026)
