@@ -142,13 +142,40 @@ pub struct Cli {
     #[clap(long = "dont_gzip")]
     pub dont_gzip: bool,
 
-    /// Use gzip compression level 6 (smaller output, slower trimming) instead
-    /// of the default level 1 (faster trimming, ~75% larger output bytes).
-    /// Useful when storage cost or transfer bandwidth matters more than
-    /// runtime — e.g. archival workflows or shared object stores. Decompressed
-    /// output is byte-identical regardless of level.
-    #[clap(long = "high_compression", alias = "high-compression")]
-    pub high_compression: bool,
+    /// Reorder reads in the gzip output so reads sharing a canonical 16-mer
+    /// minimizer land adjacent, letting gzip's dictionary find longer
+    /// redundant runs. Typical saving: 16–55% on short-read FASTQ. Records
+    /// are byte-identical — only their order on disk changes. Pair lockstep
+    /// is preserved.
+    ///
+    /// Requires `--cores >= 2` and gzip output. Intended for short-read
+    /// FASTQ; long-read inputs (ONT, PacBio) are unlikely to compress
+    /// better. Combine with `--compression <N>` to trade speed against
+    /// output size, and `--memory <N>` to grow the per-gzip-member sort
+    /// run.
+    #[clap(long = "clumpify")]
+    pub clumpify: bool,
+
+    /// Gzip compression level for output FASTQ (1–9). Default: 1 (fast,
+    /// 75% larger files). Pass `--compression 6` for the gzip(1) default
+    /// or `--compression 9` for archival use. Most useful in combination
+    /// with `--clumpify`, where reordering plus a higher level
+    /// compounds for substantially smaller output.
+    #[clap(
+        long = "compression",
+        default_value_t = crate::fastq::DEFAULT_GZIP_LEVEL,
+        value_parser = clap::value_parser!(u32).range(1..=9),
+    )]
+    pub compression: u32,
+
+    /// Total memory budget for Trim Galore (e.g. `1G`, `512M`, `8G`).
+    /// Currently used only by `--clumpify` for bin buffer sizing — bigger
+    /// budget → bigger gzip members → better compression, up to a limit
+    /// roughly equal to the uncompressed input size. Default: `1G`.
+    /// Resolved bin layout and predicted peak RSS are printed at startup
+    /// when `--clumpify` is set.
+    #[clap(long = "memory", default_value = "1G")]
+    pub memory: String,
 
     /// Suppress the trimming report.
     #[clap(long = "no_report_file")]
@@ -456,6 +483,40 @@ impl Cli {
 
         if self.cores == 0 {
             anyhow::bail!("--cores must be at least 1");
+        }
+
+        if self.clumpify {
+            if self.cores < 2 {
+                anyhow::bail!(
+                    "--clumpify requires --cores >= 2 (the bin dispatcher feeds parallel workers)"
+                );
+            }
+            if self.dont_gzip {
+                anyhow::bail!(
+                    "--clumpify and --dont_gzip are mutually exclusive (clumping plain text is pointless)"
+                );
+            }
+            if self.clock {
+                anyhow::bail!("--clumpify is not yet supported with --clock");
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!("--clumpify is not yet supported with --implicon");
+            }
+            if self.hardtrim5.is_some() {
+                anyhow::bail!("--clumpify is not yet supported with --hardtrim5");
+            }
+            if self.hardtrim3.is_some() {
+                anyhow::bail!("--clumpify is not yet supported with --hardtrim3");
+            }
+            if self.demux.is_some() {
+                anyhow::bail!("--clumpify is not yet supported with --demux");
+            }
+            // Validate --memory format up front. Whether the resolved bin
+            // pool is *large enough* for clumpify to actually run is decided
+            // later in main.rs::resolve_clump_layout, which warns and falls
+            // back to plain mode if the budget is below the floor.
+            crate::clump::parse_memory_size(&self.memory)
+                .map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
         }
 
         if let Some(n) = self.hardtrim5
@@ -873,5 +934,160 @@ mod tests {
         assert_eq!(cli.clip_r2, Some(2));
         assert_eq!(cli.three_prime_clip_r1, Some(3));
         assert_eq!(cli.three_prime_clip_r2, Some(4));
+    }
+
+    // ── --clumpify / --compression validation ────────────────────────────
+
+    #[test]
+    fn test_clumpify_requires_cores_at_least_two() {
+        let cli = Cli::parse_from(["trim_galore", "--clumpify", "--cores", "1", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--clumpify requires --cores >= 2"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_clumpify_rejects_dont_gzip() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "2",
+            "--dont_gzip",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--dont_gzip"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpify_rejects_clock() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "2",
+            "--clock",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clock"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpify_rejects_implicon() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "2",
+            "--implicon=8",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--implicon"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpify_rejects_hardtrim5() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "2",
+            "--hardtrim5",
+            "30",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--hardtrim5"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpify_accepts_paired() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "4",
+            "--paired",
+            R1,
+            R2,
+        ]);
+        cli.validate()
+            .expect("clumpify + paired + cores=4 should validate");
+    }
+
+    #[test]
+    fn test_clumpify_rejects_garbage_memory() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "2",
+            "--memory",
+            "garbage",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--memory"), "got: {err}");
+    }
+
+    #[test]
+    fn test_clumpify_too_small_memory_passes_validation() {
+        // Validation now accepts a too-small --memory; main.rs resolves the
+        // layout at runtime and either succeeds, or warns + falls back to
+        // plain mode. This avoids hard-failing a job over a configuration
+        // detail the program can recover from.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--cores",
+            "16",
+            "--memory",
+            "64M",
+            R1,
+        ]);
+        cli.validate()
+            .expect("validation should pass; runtime warns and falls back to plain");
+    }
+
+    #[test]
+    fn test_compression_defaults_to_one() {
+        let cli = Cli::parse_from(["trim_galore", R1]);
+        assert_eq!(cli.compression, 1);
+    }
+
+    #[test]
+    fn test_compression_explicit_level() {
+        let cli = Cli::parse_from(["trim_galore", "--compression", "9", R1]);
+        assert_eq!(cli.compression, 9);
+    }
+
+    #[test]
+    fn test_compression_rejects_out_of_range() {
+        let result = Cli::try_parse_from(["trim_galore", "--compression", "10", R1]);
+        assert!(result.is_err(), "level 10 should be rejected by clap");
+    }
+
+    #[test]
+    fn test_clumpify_with_compression_six() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clumpify",
+            "--compression",
+            "6",
+            "--cores",
+            "2",
+            R1,
+        ]);
+        cli.validate()
+            .expect("clumpify --compression 6 should validate");
+        assert!(cli.clumpify);
+        assert_eq!(cli.compression, 6);
     }
 }
