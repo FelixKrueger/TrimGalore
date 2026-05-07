@@ -8,6 +8,8 @@ page-thrash as the explanation. The R2-disruption mechanism Phil isolated
 for 10x scRNA-seq generalises here: paired-end data where R1 isn't tightly
 peak-clustered hurts R2 by forcing pair-lockstep ordering.
 
+> **See also: [RRBS sister benchmark](../clumpify-rrbs-2026-05-07/)** — same matrix on MspI-digested RRBS, opposite outcome (clumpify *wins* at every level). The WGBS-vs-RRBS contrast is the cleanest mechanism evidence we have for clumpify's fragment-clustering dependency.
+
 ## Setup
 
 - **Host:** dockyard-oxy-0 (AL2023 x86_64, 128 cores, 991 GB RAM)
