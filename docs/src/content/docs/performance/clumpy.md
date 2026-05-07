@@ -120,6 +120,22 @@ Memory usage without `--clumpify` is typically significantly lower, around the 1
 - Multi-member gzip is RFC 1952 valid; `zcat`, `seqkit`, `samtools fastq`, and `MultiGzDecoder` all handle it transparently.
 - Pair lockstep is preserved: R1[i] and R2[i] are still mates after clumpify reorders them.
 
+### Downstream BAM compression
+
+The read-clustering effect carries through into downstream **unsorted** BAM files at essentially full strength.
+
+Because aligners typically stream output reads out in the same order that they come in with, and BAM files useg gzip compression internally, the same clumping improvements hold true through alignment.
+
+Here's an example using ATAC-seq data (31 M paired-end reads), aligning to a minimal index (chr22 only):
+
+| BAM stage | Saving (clumpify vs plain) |
+|---|---|
+| Trimmed FASTQ (gzip level 1) | −34.8% |
+| `samtools import` → uBAM (no alignment) | −36.4% |
+| STAR 2.7.11b chr22 alignment → unsorted, aligned BAM | −34.2% |
+
+Note that only unsorted BAMs benefit. If your pipeline coordinate-sorts the BAM immediately after alignment (e.g. `samtools sort` or `STAR --outSAMtype BAM SortedByCoordinate`), the read order is rearranged by genomic position and the input-order signal is erased. A coordinate-sorted BAM's size is determined by genomic distribution of reads, not by clumpify's clustering.
+
 ## Benchmark results
 
 Real-world numbers from a benchmark using a MacBook Pro (Apple Silicon, 16 GiB RAM, `--cores 6 --memory 1G`, all defaults). Each dataset has 3 bars:
