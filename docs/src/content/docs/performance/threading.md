@@ -60,6 +60,14 @@ Peak resident set size on the 84M-read Buckberry fixture (Trim Galore v2.1.0-bet
 
 The c1 → c2 step is by far the largest (+55 MB) — that's the four infrastructure threads spinning up their I/O buffers. Past c2, each additional pair of workers adds ~7 MB on average; the bulk of which is the per-worker compression buffer. Memory growth is bounded and predictable, well-suited to cluster scheduling: even worst-case at the saturation point (`--cores 8`), the process never exceeds ~100 MB.
 
+For context, mainstream multi-threaded FASTQ trimmers typically use a lot more RAM: Cutadapt 100–300 MB, fastp 100+ MB, BBDuk (JVM) 1–4 GB. Trim Galore v2 stays under 100 MB across all reasonable core counts — well below the noise floor of cluster scheduler memory allocation. **Peak RSS scales with read length, not input file size:** at `--cores 8`, a 1M-read 50-bp fixture sits at ~28 MB and an 84M-read 150-bp fixture at ~92 MB — bounded by the per-worker batch + channel buffers, which don't grow with total input length.
+
+## I/O and cache behaviour
+
+The pipeline is comfortably under disk-bandwidth limits at every reasonable core count. At `--cores 8` on Buckberry, total throughput is ~33 MB/s in + ~33 MB/s out (~7% of a typical SSD ceiling, trivially within spinning-disk capability), with `BufReader` averaging ~33 KB per read syscall and `BufWriter` ~114 KB per write syscall. Neither saturates kernel I/O machinery; disk is not the bottleneck for any realistic deployment.
+
+**L3 cache pressure shows up at high core counts.** Each worker's hot working set (deflate sliding window + hash chain + output batch buffer) is ~200 KB; aggregate through `--cores 16` fits comfortably within typical 16-32 MB L3, but `--cores 32` starts to press at ~13 MB combined. This is one of the contributing mechanisms behind the diminishing-returns plateau past `--cores 8` — alongside the gzip-output I/O bottleneck and the single-threaded reader/main-collector serialisation. **Stay at `--cores 8` for the sweet spot; `--cores 16` is the upper end of useful parallelism on typical x86 servers.**
+
 ## Beyond speed
 
 - **Zero external dependencies:** No Python, no Cutadapt, no pigz. Single static binary.

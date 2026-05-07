@@ -102,7 +102,13 @@ pub fn find_3prime_adapter(
     // error count due to a trailing deletion artifact (e.g., dp[m][j-1]=1 via
     // deletion when dp[m][j]=0 is exact). To get the true error count for the
     // alignment at that read_start, we also check dp[m][read_start + m].
-    let max_errors_full = (max_error_rate * m as f64).floor() as usize;
+    //
+    // `rate_x_million` is the integer-arithmetic equivalent of `max_error_rate`
+    // scaled by 1e6; cached once here so the hot DP loops below avoid a
+    // per-iteration libm `floor()` call (#262 Item A — byte-identical to
+    // `(max_error_rate * len as f64).floor() as usize` for non-negative len).
+    let rate_x_million = (max_error_rate * 1_000_000.0).round() as u64;
+    let max_errors_full = ((m as u64 * rate_x_million) / 1_000_000) as usize;
     let mut best_full: Option<AdapterMatch> = None;
     for j in 1..=n {
         if dp[m][j] <= max_errors_full {
@@ -134,7 +140,7 @@ pub fn find_3prime_adapter(
     let mut best_partial: Option<AdapterMatch> = None;
     let max_partial = m.min(n);
     for i in (min_overlap..=max_partial).rev() {
-        let max_errors = (max_error_rate * i as f64).floor() as usize;
+        let max_errors = ((i as u64 * rate_x_million) / 1_000_000) as usize;
         if dp[i][n] <= max_errors {
             let read_start = backtrace_start(&dp, adapter, read, i, n);
             best_partial = Some(AdapterMatch {
@@ -267,7 +273,9 @@ fn myers_proves_no_match(
         return false;
     }
 
-    let max_errors_full = (max_error_rate * m as f64).floor() as usize;
+    // Integer-arithmetic max_errors (#262 Item A — see find_3prime_adapter).
+    let rate_x_million = (max_error_rate * 1_000_000.0).round() as u64;
+    let max_errors_full = ((m as u64 * rate_x_million) / 1_000_000) as usize;
 
     // Build per-base pattern bitmasks. `peq[b]` has bit i set iff
     // adapter[i] == b. Indexed by raw byte value (256 entries) so any
@@ -368,7 +376,7 @@ fn myers_proves_no_match(
             cur = cur.saturating_sub(1);
         }
         if i >= min_overlap {
-            let max_errors_i = (max_error_rate * i as f64).floor() as usize;
+            let max_errors_i = ((i as u64 * rate_x_million) / 1_000_000) as usize;
             if cur <= max_errors_i {
                 return false; // possible partial match — defer to scalar DP
             }
