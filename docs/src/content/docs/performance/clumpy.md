@@ -35,7 +35,8 @@ Whether to push up `--compression` level or not depends on what the trimmed FAST
 | **ATAC-seq (paired)** | ~50% | ✅ **Strong yes**: Tn5 insertion bias creates very high fragment redundancy |
 | **Ribo-seq (paired)** | ~45% | ✅ **Strong yes**: short ribosome-protected fragments are highly clustered |
 | **MiSeq amplicon / CRISPR / sgRNA** | 30–37% | ✅ **Strong yes**: explicit amplification produces lots of duplicates |
-| **Bisulfite-seq / RRBS (paired)** | ~25–35% | ✅ **Yes**: restriction-enzyme + bisulfite produces a redundant read fingerprint |
+| **RRBS (paired)** | ~24% at default `--memory 1G`; up to ~31% at `--memory 4G+` | ✅ **Yes**: MspI cut sites concentrate reads at fragment ends; minimizer co-clusters them. Bigger `--memory` budget gives substantial extra saving — atypical for paired-end data (most types saturate at default memory). |
+| **WGBS (paired)** | +9% — but plain `--compression 6` alone gets +19% | ❌ **No**: coverage-diverse reads, no fragment-level clustering. R2 disruption beats the R1 win at every gzip level — same mechanism as 10x scRNA-seq. Use `--compression 6` without `--clumpify` for ~19% saving |
 | **ChIP-seq (single-end)** | ~24% | ✅ **Yes**: peaks generate clustered reads |
 | **RNA-seq (paired)** | 16–30% | ✅ **Yes**: highly-expressed transcripts create dense clusters; bigger savings at higher gzip levels |
 | **WES / WGS (paired)** | 6–22% | 🟡 **Modest**: diverse coverage gives less clustering |
