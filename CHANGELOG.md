@@ -1,6 +1,44 @@
 # Trim Galore Changelog
 
 
+### Unreleased (clumpy branch)
+
+- **`--clumpify` opt-in compression mode.** Boolean flag that reorders reads
+  inside each gzip member of the trimmed output by canonical 16-mer
+  minimizer so reads sharing similar sequence land adjacent on disk;
+  gzip's 32 KB dictionary then finds long redundant runs and shrinks the
+  `.fq.gz` by 15–55% depending on data type (see
+  [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for
+  the full benchmark table). No information loss — only the on-disk order
+  of records changes; trimming reports are byte-identical.
+- **`--compression <N>` (1–9, default 1).** New flag that controls the
+  output gzip level independently of `--clumpify`. Use `--compression 6` or
+  `--compression 9` for smaller files at higher CPU cost; combine with
+  `--clumpify` for maximum compression. Replaces the earlier
+  `--clumpy=<LEVEL>` optional-value form, which conflated reordering with
+  level selection.
+- **`--memory <SIZE>` global memory budget** (default `1G`). Currently used
+  only by `--clumpify` for bin buffer sizing. The layout formula now
+  targets predicted peak RSS ≤ `--memory` (bin pool + worker batches +
+  static overhead all accounted), so the budget is honest rather than
+  notional — measured peak matches predicted peak within 1% on
+  31 M-record paired-end runs. A fixed 512 MiB is reserved up front for
+  FastQC + allocator + runtime; the rest funds the bin pool and worker
+  batches. Bigger budgets give bigger per-gzip-member sort runs and
+  better compression. Diminishing returns are sharp — going from 1G to 8G
+  adds only ~4 percentage points of saving on typical short-read data.
+  If `--memory` is below the floor (~552 MiB at `--cores 6`), Trim Galore
+  prints a loud warning and **falls back to plain mode** rather than
+  refusing the job. Replaces the `--clumpy_memory` flag from earlier
+  development branches.
+- **`--high_compression` removed.** Subsumed by the new `--compression <N>`
+  flag. Users who previously passed `--high_compression` for level-6
+  archival output should switch to `--compression 6` (or
+  `--clumpify --compression 6` to also benefit from reordering). Both
+  flags landed in pre-release development; `--high_compression` was never
+  on a stable release line.
+
+
 ### Version 2.1.0 (Release on 4 May 2026)
 
 **First stable release of the Oxidized Edition** — a complete Rust rewrite
