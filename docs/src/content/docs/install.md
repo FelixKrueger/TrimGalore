@@ -52,8 +52,8 @@ FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fast
 
 | Tag | Updates |
 | --- | --- |
-| `:latest` | latest stable release (currently v2.1.0) |
-| `:v2.1.0` | pinned to a specific release |
+| `:latest` | latest stable release (currently v2.2.0) |
+| `:v2.2.0` | pinned to a specific release |
 | `:beta` | latest prerelease — only set during an active beta cycle |
 | `:dev` | every push to the `dev` development branch |
 

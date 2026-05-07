@@ -28,6 +28,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **NextSeq / 2-colour quality trim** — `--nextseq N` / `--2colour N` applies 2-colour-aware quality trimming (opt-in; replaces `-q`)
 - **Poly-A trimming** — built-in removal of poly-A tails without external tools; recommended for mRNA-seq / poly-A-selected RNA-seq libraries
 - **Parallel processing** — `--cores N` runs trimming and gzip compression in worker threads under an N+4 thread model (N workers + 2 decompressors + 1 batcher + 1 writer); near-linear speedup up to `--cores 8` for paired-end runs, then gzip-output I/O typically becomes binding
+- **Clumpify compression (v2.2+)** — opt-in `--clumpify` reorders reads by canonical 16-mer minimizer so similar reads share gzip dictionary windows; combined with `--compression 1–9` it shrinks output 15–55% on fragment-clustered data (ATAC, Ribo, RRBS, RNA-seq, MiSeq amplicons). Coverage-diverse data (WGBS PE, scRNA-seq R2) regress — see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for the per-data-type guidance
 - **FastQC integration** — optional post-trimming quality reports built in via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library; produces FastQC 0.12.1-compatible HTML + ZIP outputs without requiring Java or an external `fastqc` on `$PATH`
 - **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
 - **Demultiplexing** — 3' inline barcode demultiplexing
@@ -75,7 +76,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:latest trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.1.0`), `:v2.1.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.2.0`), `:v2.2.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
 
 ### Prebuilt binaries
 
@@ -91,7 +92,7 @@ trim_galore input.fastq.gz
 trim_galore --paired file_R1.fastq.gz file_R2.fastq.gz
 
 # Parallel processing (recommended for large files)
-# Near-linear speedup up to ~8 cores on v2.1.0-beta.8; beyond that the
+# Near-linear speedup up to ~8 cores on v2.2.0; beyond that the
 # gzip-output I/O on the storage layer typically becomes binding.
 trim_galore --cores 8 --paired file_R1.fastq.gz file_R2.fastq.gz
 
