@@ -50,12 +50,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    # Only the stable trunk publishes to www.trimgalore.com. Pushes to `dev`
-    # still run the `build` job above (validation safety net) but skip this
-    # step — preventing in-progress dev work from silently overwriting the
-    # live docs site. Master pushes deploy as normal. workflow_dispatch
-    # also dispatches a deploy regardless of ref, by design.
-    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    # `dev` is the canonical live-content source — every push that touches
+    # docs/** ships to www.trimgalore.com immediately. `master` is a release
+    # pin only (updated by FF from dev just before a release cut), and any
+    # push to it still re-deploys defensively in case dev was bypassed.
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
