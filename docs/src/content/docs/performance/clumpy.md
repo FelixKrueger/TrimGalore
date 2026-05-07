@@ -11,8 +11,8 @@ description: Reorder reads in the trimmed FASTQ output to make .fq.gz files sign
 
 ### Clumpify
 
-- ✅ Low complexity data: yes (ATAC-seq, ChIP-seq, Ribo-Seq, RNA-Seq, high sequencing depth WES)
-- ❌ High complexity data: no (whole-genome sequencing) - has no effect
+- ✅ Low complexity data: yes (ATAC-seq, ChIP-seq, Ribo-Seq, RNA-Seq, RRBS, high sequencing depth WES)
+- ❌ High complexity data: no (whole-genome sequencing, WGBS) - may have detrimental impact (flowcell ordering wins)
 - ❌ Long reads: no (Oxford Nanopore) - has no effect
 - ❌ Unusual paired-end formats: no - can have deleterious effect
 
