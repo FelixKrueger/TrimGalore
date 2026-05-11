@@ -13,7 +13,7 @@ authors:
   - family-names: Krueger
     given-names: Felix
     affiliation: Altos Labs
-    # orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: fill in
+    orcid: "https://orcid.org/0000-0002-5513-3324"
 version: 2.2.0
 date-released: 2026-05-07
 license: GPL-3.0-only
