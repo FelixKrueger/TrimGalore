@@ -1,6 +1,6 @@
 ---
 title: Threading model
-description: Why the Oxidized Edition is faster. Single-pass paired-end, worker-pool parallelism, and a fixed +4 thread infrastructure cost.
+description: Why the Rust rewrite is faster. Single-pass paired-end, worker-pool parallelism, and a fixed +4 thread infrastructure cost.
 ---
 
 ## Why the speedup is larger than "Rust is faster"
@@ -11,7 +11,7 @@ The real wins come from **architectural differences**.
 
 ## 1. Single-pass vs three-pass
 
-Trim Galore runs Cutadapt on R1, then R2, then pair-validates: reading and recompressing the data three separate times. The Oxidized Edition does everything in one pass.
+Trim Galore runs Cutadapt on R1, then R2, then pair-validates: reading and recompressing the data three separate times. v2.x does everything in one pass.
 
 ## 2. Worker-pool parallelism
 
@@ -19,10 +19,10 @@ Each worker independently handles trimming **and** gzip compression for its batc
 
 ## 3. Fewer threads, more work per thread
 
-The Oxidized Edition uses a single process with a fixed infrastructure cost of +4 threads:
+v2.x uses a single process with a fixed infrastructure cost of +4 threads:
 
 ```
-Oxidized Edition --cores N thread breakdown:
+--cores N thread breakdown:
   N worker threads (each: trim + gzip compress -> independent gzip block)
   2 decompression threads (one per input file)
   1 batcher thread (creates numbered batches of 4096 reads)
@@ -36,14 +36,14 @@ At `--cores 1`, the worker-pool is bypassed entirely: a single thread does every
 
 For reference, the contrast against the legacy Perl 0.6.x model at the same `-j N` / `--cores N` setting:
 
-| Cores | Perl 0.6.x threads (~3N+3) | Oxidized threads (N+4) |
+| Cores | Perl 0.6.x threads (~3N+3) | v2.x threads (N+4) |
 |------:|---------------------------:|-----------------------:|
 | 1 | up to ~6 | 1 |
 | 4 | up to ~15 | 8 |
 | 8 | up to ~27 | 12 |
 | 16 | not measured | 20 |
 
-At Perl `-j 8` vs Oxidized `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
+At Perl `-j 8` vs v2.x `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
 
 Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34% (cores=16) → 22% (cores=24). Scaling is near-linear up to `--cores 8`; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so adding cores helps progressively less. **`--cores 8` is the sweet spot for nf-core / Snakemake / CWL workflows** — also the saturation point.
 
@@ -80,9 +80,9 @@ The pipeline is comfortably under disk-bandwidth limits at every reasonable core
 
 ## What this means for nf-core / Nextflow
 
-The Oxidized Edition can use the **full CPU allocation directly**: no need to subtract cores for subprocess overhead, since everything runs in a single process. If a Nextflow process has 12 CPUs, just pass `--cores 12`.
+Trim Galore v2.x can use the **full CPU allocation directly**: no need to subtract cores for subprocess overhead, since everything runs in a single process. If a Nextflow process has 12 CPUs, just pass `--cores 12`.
 
-For the historical nf-core pattern of `task.cpus - 4`, the equivalent Oxidized invocation is `--cores task.cpus`, with the fixed `+4` thread cost matching the existing CPU budget without manual subtraction.
+For the historical nf-core pattern of `task.cpus - 4`, the equivalent v2.x invocation is `--cores task.cpus`, with the fixed `+4` thread cost matching the existing CPU budget without manual subtraction.
 
 ## Reproducibility
 

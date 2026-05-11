@@ -17,7 +17,7 @@ minimizer-driven sort co-locates reads sharing the same end, and gzip's
 ## Setup
 
 - **Host:** dockyard-oxy-0 (AL2023 x86_64, 128 cores, 991 GB RAM)
-- **TG version:** 2.1.0 (Oxidized Edition), commit `3fd0454` (Phil's clumpify branch)
+- **TG version:** 2.1.0, commit `3fd0454` (Phil's clumpify branch)
 - **Fixture:** RRBS SRR24766842 (GSM7433400, *Mus musculus* colon, MspI-digested)
   - 102.3 M PE reads (51 bp each, vs Buckberry WGBS's 84 M at ~100-150 bp)
   - 4.4 GiB gzipped input

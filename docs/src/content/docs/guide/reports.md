@@ -20,7 +20,7 @@ SUMMARISING RUN PARAMETERS
 ==========================
 Input filename: SLX_R1.fastq.gz
 Trimming mode: paired-end
-Trim Galore version: 2.1.0 (Oxidized Edition)
+Trim Galore version: 2.1.0
 Quality Phred score cutoff: 20
 Quality encoding type selected: ASCII+33
 Using Illumina adapter for trimming (count: 18772). Second best hit was smallRNA (count: 0)
@@ -35,10 +35,10 @@ The parameter summary in v2.x is slightly slimmer than the v0.6.x equivalent: en
 
 ## 2. Cutadapt-compatible trimming summary
 
-After the parameter block, Trim Galore emits a MultiQC-compatible summary that downstream parsers familiar with the Perl/Cutadapt output recognise unchanged. The block starts with two header lines that identify the edition:
+After the parameter block, Trim Galore emits a MultiQC-compatible summary that downstream parsers familiar with the Perl/Cutadapt output recognise unchanged. The block starts with two header lines that identify the trimmer:
 
 ```
-Trim Galore 2.1.0 (Oxidized Edition) — adapter trimming built in
+Trim Galore 2.1.0 — adapter trimming built in
 This is cutadapt 4.0 (compatible; for MultiQC backwards compatibility)
 Command line parameters: -j 1 -e 0.1 -q 20 -O 1 -a AGATCGGAAGAGC SLX_R1.fastq.gz
 Processing reads on 1 core in single-end mode ...

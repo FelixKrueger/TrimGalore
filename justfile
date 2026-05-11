@@ -64,20 +64,20 @@ reproduce:
 # target to spot-check a single comparison locally if those tools are
 # already installed.
 validate-paired-end:
-    rm -rf /tmp/tg_validate /tmp/op_validate
-    mkdir -p /tmp/tg_validate /tmp/op_validate
+    rm -rf /tmp/tg_validate /tmp/rust_validate
+    mkdir -p /tmp/tg_validate /tmp/rust_validate
     trim_galore_perl --paired -o /tmp/tg_validate \
         test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
     cargo build --release
-    ./target/release/trim_galore --paired -o /tmp/op_validate \
+    ./target/release/trim_galore --paired -o /tmp/rust_validate \
         test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
     @for f in BS-seq_10K_R1_val_1.fq.gz BS-seq_10K_R2_val_2.fq.gz; do \
         TG_MD5=$(gzip -dc /tmp/tg_validate/$f | md5sum | cut -d' ' -f1); \
-        OP_MD5=$(gzip -dc /tmp/op_validate/$f | md5sum | cut -d' ' -f1); \
-        if [ "$TG_MD5" = "$OP_MD5" ]; then \
+        RUST_MD5=$(gzip -dc /tmp/rust_validate/$f | md5sum | cut -d' ' -f1); \
+        if [ "$TG_MD5" = "$RUST_MD5" ]; then \
             echo "✓ $f matches"; \
         else \
-            echo "✗ $f DIFFERS (Perl=$TG_MD5 Rust=$OP_MD5)"; exit 1; \
+            echo "✗ $f DIFFERS (Perl=$TG_MD5 Rust=$RUST_MD5)"; exit 1; \
         fi; \
     done
 

@@ -5,8 +5,7 @@ on:
     branches: [master, dev]
   pull_request:
     # Trigger on PRs targeting either trunk — `dev` is the active development
-    # branch (renamed from `optimus_prime` post-v2.1.0 GA); `master` is the
-    # stable trunk and the GA-release source.
+    # branch; `master` is the stable trunk and the GA-release source.
     branches: [master, dev]
   # Weekly cron so the `audit` job surfaces new RustSec advisories even during
   # quiet weeks (no pushes / PRs).  Non-audit jobs skip on schedule via the
@@ -269,63 +268,63 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build Oxidized Edition
+      - name: Build release binary
         run: cargo build --release
 
       - name: Validate single-end output
         run: |
-          mkdir -p /tmp/tg /tmp/op
+          mkdir -p /tmp/tg /tmp/rust
           conda run -n perl_tg trim_galore_perl -o /tmp/tg test_files/illumina_10K.fastq.gz
-          ./target/release/trim_galore -o /tmp/op test_files/illumina_10K.fastq.gz
+          ./target/release/trim_galore -o /tmp/rust test_files/illumina_10K.fastq.gz
           TG_MD5=$(gzip -dc /tmp/tg/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
-          OP_MD5=$(gzip -dc /tmp/op/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
+          RUST_MD5=$(gzip -dc /tmp/rust/illumina_10K_trimmed.fq.gz | md5sum | cut -d' ' -f1)
           echo "TrimGalore: $TG_MD5"
-          echo "Oxidized:   $OP_MD5"
-          [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: single-end output differs!"; exit 1; }
+          echo "Rust:       $RUST_MD5"
+          [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: single-end output differs!"; exit 1; }
 
       - name: Validate paired-end output
         run: |
-          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          rm -rf /tmp/tg /tmp/rust; mkdir -p /tmp/tg /tmp/rust
           conda run -n perl_tg trim_galore_perl --paired -o /tmp/tg test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
-          ./target/release/trim_galore --paired -o /tmp/op test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          ./target/release/trim_galore --paired -o /tmp/rust test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
           for f in BS-seq_10K_R1_val_1.fq.gz BS-seq_10K_R2_val_2.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
-            OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
-            echo "$f: TG=$TG_MD5 OP=$OP_MD5"
-            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
+            RUST_MD5=$(gzip -dc /tmp/rust/$f | md5sum | cut -d' ' -f1)
+            echo "$f: TG=$TG_MD5 RUST=$RUST_MD5"
+            [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
           done
 
       - name: Validate multi-pair paired-end (regression guard — beta-1 reporter scenario)
         run: |
-          rm -rf /tmp/op_multi; mkdir -p /tmp/op_multi
+          rm -rf /tmp/rust_multi; mkdir -p /tmp/rust_multi
           # 3 pairs = 6 files, the scenario that triggered the beta-1 bug.
           for sample in A B C; do
-            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi/${sample}_R1.fastq.gz
-            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_multi/${sample}_R2.fastq.gz
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_multi/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_multi/${sample}_R2.fastq.gz
           done
-          ./target/release/trim_galore --paired -j 4 -o /tmp/op_multi \
-            /tmp/op_multi/A_R1.fastq.gz /tmp/op_multi/A_R2.fastq.gz \
-            /tmp/op_multi/B_R1.fastq.gz /tmp/op_multi/B_R2.fastq.gz \
-            /tmp/op_multi/C_R1.fastq.gz /tmp/op_multi/C_R2.fastq.gz
+          ./target/release/trim_galore --paired -j 4 -o /tmp/rust_multi \
+            /tmp/rust_multi/A_R1.fastq.gz /tmp/rust_multi/A_R2.fastq.gz \
+            /tmp/rust_multi/B_R1.fastq.gz /tmp/rust_multi/B_R2.fastq.gz \
+            /tmp/rust_multi/C_R1.fastq.gz /tmp/rust_multi/C_R2.fastq.gz
           for sample in A B C; do
-            test -f /tmp/op_multi/${sample}_R1_val_1.fq.gz
-            test -f /tmp/op_multi/${sample}_R2_val_2.fq.gz
-            test -f /tmp/op_multi/${sample}_R1.fastq.gz_trimming_report.txt
-            test -f /tmp/op_multi/${sample}_R2.fastq.gz_trimming_report.txt
-            test -f /tmp/op_multi/${sample}_R1.fastq.gz_trimming_report.json
-            test -f /tmp/op_multi/${sample}_R2.fastq.gz_trimming_report.json
+            test -f /tmp/rust_multi/${sample}_R1_val_1.fq.gz
+            test -f /tmp/rust_multi/${sample}_R2_val_2.fq.gz
+            test -f /tmp/rust_multi/${sample}_R1.fastq.gz_trimming_report.txt
+            test -f /tmp/rust_multi/${sample}_R2.fastq.gz_trimming_report.txt
+            test -f /tmp/rust_multi/${sample}_R1.fastq.gz_trimming_report.json
+            test -f /tmp/rust_multi/${sample}_R2.fastq.gz_trimming_report.json
           done
           # Adapter auto-detection runs PER PAIR (intentional deviation from
           # Perl v0.6.x for safer handling of mixed library types across a
           # shell-glob invocation). 2 pairs → 2 detection log lines.
-          rm -rf /tmp/op_multi2; mkdir -p /tmp/op_multi2
+          rm -rf /tmp/rust_multi2; mkdir -p /tmp/rust_multi2
           for sample in A B; do
-            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi2/${sample}_R1.fastq.gz
-            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_multi2/${sample}_R2.fastq.gz
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_multi2/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_multi2/${sample}_R2.fastq.gz
           done
-          ./target/release/trim_galore --paired -o /tmp/op_multi2 \
-            /tmp/op_multi2/A_R1.fastq.gz /tmp/op_multi2/A_R2.fastq.gz \
-            /tmp/op_multi2/B_R1.fastq.gz /tmp/op_multi2/B_R2.fastq.gz 2>&1 | tee /tmp/detect.log
+          ./target/release/trim_galore --paired -o /tmp/rust_multi2 \
+            /tmp/rust_multi2/A_R1.fastq.gz /tmp/rust_multi2/A_R2.fastq.gz \
+            /tmp/rust_multi2/B_R1.fastq.gz /tmp/rust_multi2/B_R2.fastq.gz 2>&1 | tee /tmp/detect.log
           test "$(grep -c 'Auto-detecting adapter type' /tmp/detect.log)" = "2"
 
       - name: Validate paired-end rejects odd-count input
@@ -432,31 +431,31 @@ jobs:
           #      (the dtolnay/rust-toolchain base image doesn't ship it),
           #      so a green run here proves the bundled library is doing
           #      the work — not an accidental shell-out.
-          rm -rf /tmp/op_fastqc; mkdir -p /tmp/op_fastqc
+          rm -rf /tmp/rust_fastqc; mkdir -p /tmp/rust_fastqc
           ! command -v fastqc  # confirm no external fastqc on PATH
-          ./target/release/trim_galore --fastqc -o /tmp/op_fastqc \
+          ./target/release/trim_galore --fastqc -o /tmp/rust_fastqc \
             test_files/illumina_10K.fastq.gz
-          test -f /tmp/op_fastqc/illumina_10K_trimmed_fastqc.html
-          test -f /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip
-          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q summary.txt
-          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q fastqc_data.txt
-          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q 'Images/'
-          unzip -l /tmp/op_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q 'Icons/'
+          test -f /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.html
+          test -f /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.zip
+          unzip -l /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q summary.txt
+          unzip -l /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q fastqc_data.txt
+          unzip -l /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q 'Images/'
+          unzip -l /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.zip | grep -q 'Icons/'
 
       - name: Validate paired-end output-path collision pre-flight
         run: |
           # Two pairs with the same R1/R2 filename but different source dirs +
           # `-o /shared` would produce colliding outputs. Expect fail-fast
           # before any output files are written.
-          rm -rf /tmp/op_coll; mkdir -p /tmp/op_coll/sub1 /tmp/op_coll/sub2 /tmp/op_coll/out
-          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_coll/sub1/sample_R1.fastq.gz
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_coll/sub1/sample_R2.fastq.gz
-          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_coll/sub2/sample_R1.fastq.gz
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_coll/sub2/sample_R2.fastq.gz
+          rm -rf /tmp/rust_coll; mkdir -p /tmp/rust_coll/sub1 /tmp/rust_coll/sub2 /tmp/rust_coll/out
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_coll/sub1/sample_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_coll/sub1/sample_R2.fastq.gz
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_coll/sub2/sample_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_coll/sub2/sample_R2.fastq.gz
           set +e
-          ./target/release/trim_galore --paired -o /tmp/op_coll/out \
-            /tmp/op_coll/sub1/sample_R1.fastq.gz /tmp/op_coll/sub1/sample_R2.fastq.gz \
-            /tmp/op_coll/sub2/sample_R1.fastq.gz /tmp/op_coll/sub2/sample_R2.fastq.gz 2>&1 | tee /tmp/coll.log
+          ./target/release/trim_galore --paired -o /tmp/rust_coll/out \
+            /tmp/rust_coll/sub1/sample_R1.fastq.gz /tmp/rust_coll/sub1/sample_R2.fastq.gz \
+            /tmp/rust_coll/sub2/sample_R1.fastq.gz /tmp/rust_coll/sub2/sample_R2.fastq.gz 2>&1 | tee /tmp/coll.log
           rc=${PIPESTATUS[0]}
           set -e
           test $rc -ne 0
@@ -465,22 +464,22 @@ jobs:
           # reports (*.txt, *.json) and FastQC output too, not just *.fq.gz.
           # Drops the glob so a future report-naming change can't silently
           # mask a regression here.
-          test -z "$(ls -A /tmp/op_coll/out 2>/dev/null)"
+          test -z "$(ls -A /tmp/rust_coll/out 2>/dev/null)"
 
       - name: Validate paired-end collision pre-flight catches case-only aliases (issue #216)
         run: |
           # Two pairs whose R1/R2 filenames differ ONLY in letter-case would
           # alias the same physical file on APFS/NTFS and silently overwrite.
           # The ASCII-case-folded hash key must catch this on any filesystem.
-          rm -rf /tmp/op_case; mkdir -p /tmp/op_case/out
-          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_case/Sample_R1.fastq.gz
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_case/Sample_R2.fastq.gz
-          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_case/SAMPLE_R1.fastq.gz
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_case/SAMPLE_R2.fastq.gz
+          rm -rf /tmp/rust_case; mkdir -p /tmp/rust_case/out
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_case/Sample_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_case/Sample_R2.fastq.gz
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_case/SAMPLE_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_case/SAMPLE_R2.fastq.gz
           set +e
-          ./target/release/trim_galore --paired -o /tmp/op_case/out \
-            /tmp/op_case/Sample_R1.fastq.gz /tmp/op_case/Sample_R2.fastq.gz \
-            /tmp/op_case/SAMPLE_R1.fastq.gz /tmp/op_case/SAMPLE_R2.fastq.gz 2>&1 | tee /tmp/case.log
+          ./target/release/trim_galore --paired -o /tmp/rust_case/out \
+            /tmp/rust_case/Sample_R1.fastq.gz /tmp/rust_case/Sample_R2.fastq.gz \
+            /tmp/rust_case/SAMPLE_R1.fastq.gz /tmp/rust_case/SAMPLE_R2.fastq.gz 2>&1 | tee /tmp/case.log
           rc=${PIPESTATUS[0]}
           set -e
           test $rc -ne 0
@@ -490,20 +489,20 @@ jobs:
           # error to name both colliding paths. Tighten grep to the new form.
           grep -q "case-insensitive, for APFS/NTFS safety" /tmp/case.log
           # Fail-fast sanity: NOTHING should be written — covers reports too.
-          test -z "$(ls -A /tmp/op_case/out 2>/dev/null)"
+          test -z "$(ls -A /tmp/rust_case/out 2>/dev/null)"
 
       - name: Validate multi-pair with --cores 1 (sequential path)
         run: |
-          rm -rf /tmp/op_multi_seq; mkdir -p /tmp/op_multi_seq
+          rm -rf /tmp/rust_multi_seq; mkdir -p /tmp/rust_multi_seq
           for sample in A B; do
-            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_multi_seq/${sample}_R1.fastq.gz
-            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_multi_seq/${sample}_R2.fastq.gz
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_multi_seq/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_multi_seq/${sample}_R2.fastq.gz
           done
-          ./target/release/trim_galore --paired --cores 1 -o /tmp/op_multi_seq \
-            /tmp/op_multi_seq/A_R1.fastq.gz /tmp/op_multi_seq/A_R2.fastq.gz \
-            /tmp/op_multi_seq/B_R1.fastq.gz /tmp/op_multi_seq/B_R2.fastq.gz
-          test -f /tmp/op_multi_seq/A_R1_val_1.fq.gz
-          test -f /tmp/op_multi_seq/B_R2_val_2.fq.gz
+          ./target/release/trim_galore --paired --cores 1 -o /tmp/rust_multi_seq \
+            /tmp/rust_multi_seq/A_R1.fastq.gz /tmp/rust_multi_seq/A_R2.fastq.gz \
+            /tmp/rust_multi_seq/B_R1.fastq.gz /tmp/rust_multi_seq/B_R2.fastq.gz
+          test -f /tmp/rust_multi_seq/A_R1_val_1.fq.gz
+          test -f /tmp/rust_multi_seq/B_R2_val_2.fq.gz
 
       - name: Validate --retain_unpaired × multi-pair produces per-pair unpaired files
         run: |
@@ -511,22 +510,22 @@ jobs:
           # (src/main.rs:101–111) plus per-pair unpaired naming. Uses
           # `--length 80` so the trimming threshold is strict enough to
           # force some reads into the unpaired bucket on BS-seq 10K fixtures.
-          rm -rf /tmp/op_retain; mkdir -p /tmp/op_retain
+          rm -rf /tmp/rust_retain; mkdir -p /tmp/rust_retain
           for sample in A B; do
-            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_retain/${sample}_R1.fastq.gz
-            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_retain/${sample}_R2.fastq.gz
+            cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_retain/${sample}_R1.fastq.gz
+            cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_retain/${sample}_R2.fastq.gz
           done
           ./target/release/trim_galore --paired --retain_unpaired --length 80 \
-            -o /tmp/op_retain \
-            /tmp/op_retain/A_R1.fastq.gz /tmp/op_retain/A_R2.fastq.gz \
-            /tmp/op_retain/B_R1.fastq.gz /tmp/op_retain/B_R2.fastq.gz
+            -o /tmp/rust_retain \
+            /tmp/rust_retain/A_R1.fastq.gz /tmp/rust_retain/A_R2.fastq.gz \
+            /tmp/rust_retain/B_R1.fastq.gz /tmp/rust_retain/B_R2.fastq.gz
           # Each pair must produce its own val_1 / val_2 AND its own
           # unpaired_1 / unpaired_2 file — no sharing, no overwrites.
           for sample in A B; do
-            test -f /tmp/op_retain/${sample}_R1_val_1.fq.gz
-            test -f /tmp/op_retain/${sample}_R2_val_2.fq.gz
-            test -f /tmp/op_retain/${sample}_R1_unpaired_1.fq.gz
-            test -f /tmp/op_retain/${sample}_R2_unpaired_2.fq.gz
+            test -f /tmp/rust_retain/${sample}_R1_val_1.fq.gz
+            test -f /tmp/rust_retain/${sample}_R2_val_2.fq.gz
+            test -f /tmp/rust_retain/${sample}_R1_unpaired_1.fq.gz
+            test -f /tmp/rust_retain/${sample}_R2_unpaired_2.fq.gz
           done
 
       - name: Validate missing input mid-list fails fast
@@ -534,63 +533,63 @@ jobs:
           # If input N in a multi-pair list does not exist, `Cli::validate()`
           # must fail before any pair starts processing — no partial outputs.
           # Here pair B's R1 is intentionally not created.
-          rm -rf /tmp/op_missing; mkdir -p /tmp/op_missing
-          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_missing/A_R1.fastq.gz
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_missing/A_R2.fastq.gz
+          rm -rf /tmp/rust_missing; mkdir -p /tmp/rust_missing
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_missing/A_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_missing/A_R2.fastq.gz
           # B_R1 deliberately absent
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_missing/B_R2.fastq.gz
-          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/op_missing/C_R1.fastq.gz
-          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/op_missing/C_R2.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_missing/B_R2.fastq.gz
+          cp test_files/BS-seq_10K_R1.fastq.gz /tmp/rust_missing/C_R1.fastq.gz
+          cp test_files/BS-seq_10K_R2.fastq.gz /tmp/rust_missing/C_R2.fastq.gz
           set +e
-          ./target/release/trim_galore --paired -o /tmp/op_missing \
-            /tmp/op_missing/A_R1.fastq.gz /tmp/op_missing/A_R2.fastq.gz \
-            /tmp/op_missing/B_R1.fastq.gz /tmp/op_missing/B_R2.fastq.gz \
-            /tmp/op_missing/C_R1.fastq.gz /tmp/op_missing/C_R2.fastq.gz 2>&1 | tee /tmp/missing.log
+          ./target/release/trim_galore --paired -o /tmp/rust_missing \
+            /tmp/rust_missing/A_R1.fastq.gz /tmp/rust_missing/A_R2.fastq.gz \
+            /tmp/rust_missing/B_R1.fastq.gz /tmp/rust_missing/B_R2.fastq.gz \
+            /tmp/rust_missing/C_R1.fastq.gz /tmp/rust_missing/C_R2.fastq.gz 2>&1 | tee /tmp/missing.log
           rc=${PIPESTATUS[0]}
           set -e
           test $rc -ne 0
           grep -q "Input file not found" /tmp/missing.log
           # Critical fail-fast assertion: pair A must NOT have been processed
           # before validation caught the missing B_R1.
-          test ! -f /tmp/op_missing/A_R1_val_1.fq.gz
-          test ! -f /tmp/op_missing/A_R2_val_2.fq.gz
-          test ! -f /tmp/op_missing/C_R1_val_1.fq.gz
+          test ! -f /tmp/rust_missing/A_R1_val_1.fq.gz
+          test ! -f /tmp/rust_missing/A_R2_val_2.fq.gz
+          test ! -f /tmp/rust_missing/C_R1_val_1.fq.gz
 
       - name: Validate hardtrim5
         run: |
-          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          rm -rf /tmp/tg /tmp/rust; mkdir -p /tmp/tg /tmp/rust
           conda run -n perl_tg trim_galore_perl --hardtrim5 30 -o /tmp/tg test_files/illumina_10K.fastq.gz
-          ./target/release/trim_galore --hardtrim5 30 -o /tmp/op test_files/illumina_10K.fastq.gz
+          ./target/release/trim_galore --hardtrim5 30 -o /tmp/rust test_files/illumina_10K.fastq.gz
           TG_MD5=$(gzip -dc /tmp/tg/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
-          OP_MD5=$(gzip -dc /tmp/op/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
-          [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: hardtrim5 differs!"; exit 1; }
+          RUST_MD5=$(gzip -dc /tmp/rust/illumina_10K.30bp_5prime.fq.gz | md5sum | cut -d' ' -f1)
+          [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: hardtrim5 differs!"; exit 1; }
 
       - name: Validate clock mode
         run: |
-          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          rm -rf /tmp/tg /tmp/rust; mkdir -p /tmp/tg /tmp/rust
           conda run -n perl_tg trim_galore_perl --clock --paired -o /tmp/tg test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
-          ./target/release/trim_galore --clock -o /tmp/op test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
+          ./target/release/trim_galore --clock -o /tmp/rust test_files/clock_10K_R1.fastq.gz test_files/clock_10K_R2.fastq.gz
           for f in clock_10K_R1.clock_UMI.R1.fq.gz clock_10K_R2.clock_UMI.R2.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
-            OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
-            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: clock $f differs!"; exit 1; }
+            RUST_MD5=$(gzip -dc /tmp/rust/$f | md5sum | cut -d' ' -f1)
+            [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: clock $f differs!"; exit 1; }
           done
 
       - name: Validate demux
         run: |
-          rm -rf /tmp/tg /tmp/op; mkdir -p /tmp/tg /tmp/op
+          rm -rf /tmp/tg /tmp/rust; mkdir -p /tmp/tg /tmp/rust
           conda run -n perl_tg trim_galore_perl --demux test_files/demux_test_samplesheet.txt -o /tmp/tg test_files/demux_test.fastq.gz
           # --no_poly_g: disable v2.0 auto poly-G detection so output matches Perl v0.6.11
-          ./target/release/trim_galore --no_poly_g --demux test_files/demux_test_samplesheet.txt -o /tmp/op test_files/demux_test.fastq.gz
+          ./target/release/trim_galore --no_poly_g --demux test_files/demux_test_samplesheet.txt -o /tmp/rust test_files/demux_test.fastq.gz
           for f in demux_test_trimmed_sample1.fq.gz demux_test_trimmed_sample2.fq.gz demux_test_trimmed_sample3.fq.gz demux_test_trimmed_NoCode.fq.gz; do
             TG_MD5=$(gzip -dc /tmp/tg/$f | md5sum | cut -d' ' -f1)
-            OP_MD5=$(gzip -dc /tmp/op/$f | md5sum | cut -d' ' -f1)
-            echo "$f: TG=$TG_MD5 OP=$OP_MD5"
-            [ "$TG_MD5" = "$OP_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
+            RUST_MD5=$(gzip -dc /tmp/rust/$f | md5sum | cut -d' ' -f1)
+            echo "$f: TG=$TG_MD5 RUST=$RUST_MD5"
+            [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
           done
 
       - name: All validations passed
-        run: echo "All Oxidized Edition outputs are byte-identical to Perl TrimGalore 0.6.11"
+        run: echo "All Rust outputs are byte-identical to Perl TrimGalore 0.6.11"
 
       # #247 item 1: when any md5 oracle step above fails, the /tmp
       # outputs that triggered the mismatch are otherwise lost — the
@@ -607,12 +606,12 @@ jobs:
           name: validation-outputs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /tmp/tg/
-            /tmp/op/
-            /tmp/op_multi/
-            /tmp/op_multi2/
-            /tmp/op_multi_seq/
-            /tmp/op_retain/
-            /tmp/op_case/
+            /tmp/rust/
+            /tmp/rust_multi/
+            /tmp/rust_multi2/
+            /tmp/rust_multi_seq/
+            /tmp/rust_retain/
+            /tmp/rust_case/
             /tmp/*.log
           if-no-files-found: warn
           retention-days: 7

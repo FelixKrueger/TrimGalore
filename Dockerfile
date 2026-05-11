@@ -17,7 +17,7 @@ RUN cargo build --release --locked
 FROM debian:bookworm-slim
 
 LABEL org.opencontainers.image.source="https://github.com/FelixKrueger/TrimGalore"
-LABEL org.opencontainers.image.description="Trim Galore — adapter/quality trimming (Oxidized Edition)"
+LABEL org.opencontainers.image.description="Trim Galore — adapter/quality trimming"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 
 # FastQC is now built into the trim_galore binary itself via the bundled

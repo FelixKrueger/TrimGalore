@@ -3,7 +3,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-/// Trim Galore - Oxidized Edition: A fast, single-pass NGS adapter and quality trimmer.
+/// Trim Galore: A fast, single-pass NGS adapter and quality trimmer.
 ///
 /// Drop-in replacement for Trim Galore, rewritten in Rust. Matches v0.6.x outputs
 /// for the core feature set and extends it with poly-G / generic poly-A auto-trimming
@@ -11,9 +11,9 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[clap(
     name = "trim_galore",
-    version = concat!(env!("CARGO_PKG_VERSION"), " (Oxidized Edition)"),
+    version = env!("CARGO_PKG_VERSION"),
     long_version = concat!(
-        env!("CARGO_PKG_VERSION"), " (Oxidized Edition)\n",
+        env!("CARGO_PKG_VERSION"), "\n",
         env!("VERSION_BODY")
     ),
     about
