@@ -176,11 +176,7 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
             "single-end"
         }
     )?;
-    writeln!(
-        w,
-        "Trim Galore version: {} (Oxidized Edition)",
-        config.version
-    )?;
+    writeln!(w, "Trim Galore version: {}", config.version)?;
     if config.nextseq {
         writeln!(
             w,
@@ -460,7 +456,7 @@ pub fn write_cutadapt_compatible_section<W: Write>(
     // Native identifier for MultiQC with Trim Galore v2.0 support
     writeln!(
         w,
-        "Trim Galore {} (Oxidized Edition) — adapter trimming built in",
+        "Trim Galore {} — adapter trimming built in",
         config.version
     )?;
     // Backwards compatibility: older MultiQC discovers reports via "This is cutadapt"

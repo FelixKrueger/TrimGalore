@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Trim Galore — Oxidized Edition — is a Rust rewrite of the original Perl Trim Galore (the v0.6.x script lives upstream and is no longer in this repo). It is a single-binary, single-pass adapter and quality trimmer for NGS FASTQ data. There are no external runtime dependencies: adapter detection, alignment, quality trimming, filtering, gzip compression, **and** FastQC reporting (via the bundled `fastqc-rust` library) all run in-process. No Java, no Python, no Cutadapt, no external `fastqc`.
+Trim Galore is a Rust rewrite of the original Perl Trim Galore (the v0.6.x script lives upstream and is no longer in this repo). It is a single-binary, single-pass adapter and quality trimmer for NGS FASTQ data. There are no external runtime dependencies: adapter detection, alignment, quality trimming, filtering, gzip compression, **and** FastQC reporting (via the bundled `fastqc-rust` library) all run in-process. No Java, no Python, no Cutadapt, no external `fastqc`.
 
-`master` is the stable trunk (v2.1.0 GA and onwards); `dev` is the active development branch where prereleases are cut from. (Pre-v2.1.0 GA the layout was inverted — `optimus_prime` was the dev trunk and `master` held the legacy Perl release line; PR #214 collapsed that on 2026-05-04 by merging the Rust trunk into `master` and renaming `optimus_prime` to `dev`. The legacy Perl 0.6.11 source remains accessible via the `0.6.11` git tag.) The CI workflow `validation` job md5-compares Oxidized output against Perl Trim Galore 0.6.11 (installed from raw GitHub) for several core flag combinations — preserving byte-identity to v0.6.11 is a hard invariant for those flag paths.
+`master` is the stable trunk (v2.1.0 GA and onwards); `dev` is the active development branch where prereleases are cut from. The legacy Perl 0.6.11 source remains accessible via the `0.6.11` git tag. The CI workflow `validation` job md5-compares Trim Galore output against Perl Trim Galore 0.6.11 (installed from raw GitHub) for several core flag combinations — preserving byte-identity to v0.6.11 is a hard invariant for those flag paths.
 
 ## Build, lint, test
 
@@ -68,6 +68,6 @@ Single binary (`src/main.rs` is the only `[[bin]]`); the rest is a library crate
 
 - **No external runtime deps.** Anything that would shell out to `cutadapt`, `pigz`, `fastqc`, or `java` is a regression — the v2.x story is "single static binary".
 - **CI is `-D warnings`.** New clippy warnings will fail CI; fix them rather than `#[allow]`-ing without justification.
-- **Validation matrix is load-bearing.** The CI `validation` job md5-checks Oxidized output against Perl 0.6.11 for SE, PE, hardtrim5, clock, and demux. If you change any of those code paths, expect to either preserve byte-identity or update the validation job with an explicit reason.
+- **Validation matrix is load-bearing.** The CI `validation` job md5-checks Trim Galore output against Perl 0.6.11 for SE, PE, hardtrim5, clock, and demux. If you change any of those code paths, expect to either preserve byte-identity or update the validation job with an explicit reason.
 - **Output-collision pre-flight.** Don't bypass it — it catches issue #216 (case-only aliases on APFS/NTFS silently overwriting).
 - **Em-dashes in user-facing strings.** `--version` provenance uses literal em-dashes; CI grep is content-targeted on that character.

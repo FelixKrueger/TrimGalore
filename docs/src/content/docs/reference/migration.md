@@ -1,6 +1,6 @@
 ---
 title: Migrating from v0.6.x
-description: What changed between the Perl Trim Galore (v0.6.x) and the Rust Oxidized Edition (v2).
+description: What changed between the Perl Trim Galore (v0.6.x) and the Rust rewrite (v2).
 ---
 
 Trim Galore v2 is a Rust rewrite of the Perl wrapper, built as a drop-in replacement for v0.6.x. Outputs match the Perl original for the core flag set, verified end-to-end via the nf-core/rnaseq integration matrix. The rewrite adds capabilities the Perl version did not have.

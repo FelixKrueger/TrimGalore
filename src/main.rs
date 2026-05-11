@@ -68,10 +68,7 @@ fn main() -> Result<()> {
     cli.validate()?;
 
     // Input sanity check on first file
-    eprintln!(
-        "\nTrim Galore - Oxidized Edition v{}",
-        env!("CARGO_PKG_VERSION")
-    );
+    eprintln!("\nTrim Galore v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("{}", env!("VERSION_BODY"));
     eprintln!("==================================================\n");
 

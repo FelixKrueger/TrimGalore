@@ -74,7 +74,7 @@ trim_galore --version
 Should print:
 
 ```
-trim_galore 2.1.0 (Oxidized Edition)
+trim_galore 2.1.0
 <git-hash> — <os>/<arch> — built <ISO-8601-UTC>
 ```
 

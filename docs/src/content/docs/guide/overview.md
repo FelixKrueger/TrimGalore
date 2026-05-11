@@ -10,7 +10,7 @@ Trim Galore reads FASTQ, applies quality and adapter trimming in a single pass, 
 Trim Galore handles quality trimming, adapter detection, adapter removal, length filtering, and specialty modes in a single pass over the data, with optional post-trimming quality reporting via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library (FastQC 0.12.1-compatible HTML + ZIP, no Java required). Originally a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/en/stable/) and an external [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) install, v2.x is a faithful Rust rewrite that consolidates those passes while preserving the CLI and output filename conventions.
 
 :::note
-The Oxidized Edition (v2.x) is a faithful Rust rewrite designed as a drop-in replacement for v0.6.x. All of the trimming steps below happen in a single pass over the data rather than as sequential Cutadapt invocations. Outputs match v0.6.x for the core feature set; newer capabilities (e.g. `--poly_g` auto-detection, a generic `--poly_a` trimmer) extend beyond the Perl version.
+Trim Galore v2.x is a faithful Rust rewrite designed as a drop-in replacement for v0.6.x. All of the trimming steps below happen in a single pass over the data rather than as sequential Cutadapt invocations. Outputs match v0.6.x for the core feature set; newer capabilities (e.g. `--poly_g` auto-detection, a generic `--poly_a` trimmer) extend beyond the Perl version.
 :::
 
 The pipeline runs in this order:

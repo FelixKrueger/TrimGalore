@@ -7,13 +7,13 @@ description: Project history, maintenance, and license.
 
 Trim Galore was developed at [Babraham Bioinformatics](https://www.bioinformatics.babraham.ac.uk/) by [Felix Krueger](https://github.com/FelixKrueger) (now part of [Altos Labs](https://altoslabs.com/)). For roughly a decade it shipped as a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/) and was the de-facto standard for adapter trimming in many bisulfite sequencing pipelines.
 
-In 2026, Trim Galore was rewritten in Rust as a single static binary, the **Oxidized Edition** (v2.x). It is a drop-in replacement for v0.6.x with extra capabilities: poly-G auto-detection, a generic poly-A trimmer, per-pair adapter detection, cleaner multi-adapter syntax, and a structured JSON report. See [Migrating from v0.6.x](/reference/migration/) for the changes.
+In 2026, Trim Galore was rewritten in Rust as a single static binary (v2.x). It is a drop-in replacement for v0.6.x with extra capabilities: poly-G auto-detection, a generic poly-A trimmer, per-pair adapter detection, cleaner multi-adapter syntax, and a structured JSON report. See [Migrating from v0.6.x](/reference/migration/) for the changes.
 
 Current development is at [github.com/FelixKrueger/TrimGalore](https://github.com/FelixKrueger/TrimGalore).
 
 ## Contributors
 
-Trim Galore is maintained by [Felix Krueger](https://github.com/FelixKrueger). The Oxidized Edition has benefitted from contributions and design input from a number of people; the [GitHub contributors page](https://github.com/FelixKrueger/TrimGalore/graphs/contributors) tracks the full list. Notable recent contributions:
+Trim Galore is maintained by [Felix Krueger](https://github.com/FelixKrueger). The Rust rewrite has benefitted from contributions and design input from a number of people; the [GitHub contributors page](https://github.com/FelixKrueger/TrimGalore/graphs/contributors) tracks the full list. Notable recent contributions:
 
 - **[Phil Ewels](https://github.com/ewels)** — bundled FastQC integration via [`fastqc-rust`](https://crates.io/crates/fastqc-rust), docs site infrastructure (Astro/Starlight), GitHub Actions hardening, hero animation polish.
 - **[Dongze He](https://github.com/an-altosian) (`@an-altosian`)** — Phase-1B Perl-parity hunt and Buckberry-scale performance audit. Reported and prototyped the lowercase clip-flag fix (#242), \--max\_n fraction-mode UX, the gzip-extension and \--retain\_unpaired Perl-parity fixes (#245), the \--clock/\--implicon convenience widening (#245-D), the test-coverage gap inventory (#246), CI hardening recommendations (#247), and the Buckberry-scale performance audit (#248) including the gzip-level and single-buffered-write wins landed in v2.1.0-beta.6.

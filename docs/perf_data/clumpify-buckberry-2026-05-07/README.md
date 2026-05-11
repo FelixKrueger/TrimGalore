@@ -13,7 +13,7 @@ peak-clustered hurts R2 by forcing pair-lockstep ordering.
 ## Setup
 
 - **Host:** dockyard-oxy-0 (AL2023 x86_64, 128 cores, 991 GB RAM)
-- **TG version:** 2.1.0 (Oxidized Edition), commit `3fd0454` (Phil's clumpify branch)
+- **TG version:** 2.1.0, commit `3fd0454` (Phil's clumpify branch)
 - **Fixture:** Buckberry SRR24827373 WGBS, ~84M PE reads, 4.6 GiB gzipped
 - **Methodology:** `hyperfine --warmup 1 --runs 1` per cell, `/usr/bin/time -v` for peak RSS
 - **Fixed:** `--cores 8`, paired-end
