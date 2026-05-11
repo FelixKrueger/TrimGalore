@@ -26,7 +26,14 @@ If you use Trim Galore in published work, cite the project repository:
 
 > Krueger, F. *Trim Galore!* Consistent adapter and quality trimming for FASTQ files. <https://github.com/FelixKrueger/TrimGalore>
 
-Trim Galore has a Zenodo DOI for archival citation. Pick the version-specific DOI from the [release page](https://github.com/FelixKrueger/TrimGalore/releases) for the version you used.
+The repository ships a [`CITATION.cff`](https://github.com/FelixKrueger/TrimGalore/blob/master/CITATION.cff) file — GitHub's "Cite this repository" button on the repo sidebar generates BibTeX / APA from it.
+
+Trim Galore is archived on Zenodo:
+
+- **Concept DOI (always latest):** [`10.5281/zenodo.5127898`](https://doi.org/10.5281/zenodo.5127898)
+- **v2.2.0:** [`10.5281/zenodo.20127893`](https://doi.org/10.5281/zenodo.20127893)
+
+For older versions, pick the version-specific DOI from the corresponding entry on the [Zenodo concept page](https://doi.org/10.5281/zenodo.5127898) or from the [GitHub release page](https://github.com/FelixKrueger/TrimGalore/releases).
 
 ## License
 
