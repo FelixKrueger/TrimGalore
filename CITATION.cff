@@ -29,11 +29,9 @@ keywords:
   - RRBS
   - FastQC
 identifiers:
-  # Concept DOI (resolves to the latest version on Zenodo).
-  # TODO: replace with the real concept DOI once the v2.2.0 deposit is minted.
-  # - type: doi
-  #   value: "10.5281/zenodo.XXXXXXX"
-  #   description: "Concept DOI (all versions)"
-  # - type: doi
-  #   value: "10.5281/zenodo.YYYYYYY"
-  #   description: "v2.2.0"
+  - type: doi
+    value: "10.5281/zenodo.5127898"
+    description: "Concept DOI (all versions — resolves to the latest)"
+  - type: doi
+    value: "10.5281/zenodo.20127893"
+    description: "v2.2.0"
