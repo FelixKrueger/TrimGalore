@@ -1,0 +1,36 @@
+{
+  "title": "Trim Galore",
+  "description": "Trim Galore is a single-binary adapter and quality trimmer for FASTQ files, with built-in support for bisulfite sequencing (RRBS, WGBS, EM-seq), poly-G / poly-A trimming, paired-end validation, UMI-aware specialty modes (--clock, --implicon), inline demultiplexing, and an integrated FastQC report. The v2.x line is a Rust rewrite of the original Perl Trim Galore (v0.6.x) and is byte-for-byte compatible with v0.6.11 on the core flag paths covered by CI.",
+  "upload_type": "software",
+  "license": "GPL-3.0-only",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Krueger, Felix",
+      "affiliation": "Altos Labs",
+      "orcid": "0000-0002-5513-3324"
+    }
+  ],
+  "keywords": [
+    "bioinformatics",
+    "NGS",
+    "adapter-trimming",
+    "quality-trimming",
+    "FASTQ",
+    "bisulfite-sequencing",
+    "RRBS",
+    "FastQC"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/FelixKrueger/TrimGalore",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://www.trimgalore.com",
+      "relation": "isDocumentedBy",
+      "scheme": "url"
+    }
+  ]
+}
