@@ -1,8 +1,15 @@
 # Dependabot configuration (v2) — https://docs.github.com/en/code-security/dependabot
 #
-# Tracks two ecosystems:
+# Tracks three ecosystems:
 #   - cargo (direct + transitive dependencies in Cargo.lock)
 #   - github-actions (pinned action versions in .github/workflows/*.yml)
+#   - npm (docs site dependencies in docs/package-lock.json — Astro/Starlight)
+#
+# All updates target the `dev` branch (the work trunk + docs auto-deploy
+# source), not `master` (the release pin). Without an explicit target-branch
+# Dependabot defaults to the repo's default branch (master), which mismatches
+# the workflow model adopted post-PR #285. Routing to dev means dep bumps land
+# on the live docs site automatically and FF to master at release time.
 #
 # Weekly Monday cadence matches a pre-week triage flow.  `open-pull-requests-
 # limit: 5` caps the initial surge when Dependabot first activates; raise if
@@ -13,14 +20,15 @@
 # labels later if we want fine-grained categorisation.
 #
 # Grouping: patch + minor bumps are batched into a single weekly PR per
-# ecosystem (one for cargo, one for github-actions). Major bumps still open
-# as individual PRs so breaking-change reviews stay focused. This collapsed
-# the post-v2.1.0-GA Dependabot inbox from ~9 emails (3 PRs × ~3 events) to
-# 1-2 emails per cycle.
+# ecosystem (one for cargo, one for github-actions, one for npm). Major bumps
+# still open as individual PRs so breaking-change reviews stay focused. This
+# collapsed the post-v2.1.0-GA Dependabot inbox from ~9 emails (3 PRs × ~3
+# events) to 1-2 emails per cycle.
 version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -35,6 +43,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -43,6 +52,21 @@ updates:
       - "FelixKrueger"
     groups:
       github-actions-patch-minor:
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "npm"
+    directory: "/docs"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    assignees:
+      - "FelixKrueger"
+    groups:
+      npm-patch-minor:
         update-types:
           - "patch"
           - "minor"
