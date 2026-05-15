@@ -12,14 +12,14 @@
     "logos": "node scripts/generate-png-logos.mjs"
   },
   "dependencies": {
-    "@astrojs/mdx": "^5.0.4",
-    "@astrojs/starlight": "^0.38.4",
+    "@astrojs/mdx": "^5.0.6",
+    "@astrojs/starlight": "^0.39.2",
     "@fontsource/bricolage-grotesque": "^5.2.10",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@resvg/resvg-js": "^2.6.2",
-    "astro": "^6.1.10",
-    "katex": "^0.16.45",
+    "astro": "^6.3.3",
+    "katex": "^0.16.46",
     "rehype-class-names": "^2.0.0",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
