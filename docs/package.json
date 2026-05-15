@@ -18,7 +18,7 @@
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@resvg/resvg-js": "^2.6.2",
-    "astro": "^6.1.9",
+    "astro": "^6.3.2",
     "katex": "^0.16.45",
     "rehype-class-names": "^2.0.0",
     "rehype-katex": "^7.0.1",
