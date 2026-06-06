@@ -111,7 +111,6 @@ pub fn run_paired_end_parallel(
         input_passthrough.is_some() == output_passthrough.is_some(),
         "run_paired_end_parallel: input_passthrough and output_passthrough must be both Some or both None"
     );
-    let passthrough_active = input_passthrough.is_some();
 
     // Per-worker channels (round-robin distribution — no MPMC dependency needed)
     let mut work_txs: Vec<mpsc::SyncSender<PairedWork>> = Vec::with_capacity(cores);
@@ -306,10 +305,8 @@ pub fn run_paired_end_parallel(
         };
 
         if let Some(e) = reader_join_err.or(first_error) {
-            let _ = passthrough_active;
             return Err(e);
         }
-        let _ = passthrough_active;
 
         Ok((total_r1, total_r2, total_pair))
     })
