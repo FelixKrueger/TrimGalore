@@ -34,7 +34,16 @@ const BATCH_SIZE: usize = 4096;
 
 /// Channel payload from the reader thread to a paired-end worker.
 /// `None` is the poison-pill that tells a worker to exit cleanly.
-type PairedWork = Option<(u64, Vec<FastqRecord>, Vec<FastqRecord>)>;
+///
+/// 4-tuple shape: `(seq, R1 batch, R2 batch, optional passthrough batch)`.
+/// The 4th element is `Some` iff `--passthrough` is active for this run.
+/// (Plan v2 Step 6.)
+type PairedWork = Option<(
+    u64,
+    Vec<FastqRecord>,
+    Vec<FastqRecord>,
+    Option<Vec<FastqRecord>>,
+)>;
 /// Channel payload from the reader thread to a single-end worker.
 type SingleWork = Option<(u64, Vec<FastqRecord>)>;
 
@@ -45,6 +54,11 @@ struct PairedBatchResult {
     seq: u64,
     compressed_r1: Vec<u8>,
     compressed_r2: Vec<u8>,
+    /// Passthrough output bytes (plan v2 Step 7). `None` iff `--passthrough`
+    /// was not active. `Some` even when the batch is empty — the worker
+    /// stamps a valid empty gzip member so the main thread can write
+    /// unconditionally when the output sink is open.
+    compressed_passthrough: Option<Vec<u8>>,
     compressed_unpaired_r1: Vec<u8>,
     compressed_unpaired_r2: Vec<u8>,
     stats_r1: TrimStats,
@@ -55,19 +69,34 @@ struct PairedBatchResult {
 /// Run the paired-end trimming pipeline with N parallel workers.
 ///
 /// Architecture:
-/// - 2 background decompression threads (one per input file, via `open_threaded`)
-/// - 1 reader/batcher thread (pulls decompressed records, creates numbered batches)
+/// - 2 or 3 background decompression threads (one per input file, via `open_threaded`;
+///   third decompressor only when `--passthrough` is active)
+/// - 1 reader/batcher thread (pulls decompressed records, creates numbered batches,
+///   performs the three-way header sync check when `--passthrough` is active)
 /// - N worker threads (each: trim both reads + compress output into gzip block)
 /// - Main thread (collects compressed blocks in order, writes to output files)
 ///
-/// Total threads: N + 4. Each worker independently handles trim + compress,
-/// so the dominant bottleneck (gzip compression) scales linearly with N.
+/// Total threads: N + 4 (or N + 5 with `--passthrough`). Each worker independently
+/// handles trim + compress, so the dominant bottleneck (gzip compression) scales
+/// linearly with N.
+///
+/// `--passthrough` (plan v2 Step 6/6a/7): when `input_passthrough` and
+/// `output_passthrough` are both `Some`, the reader streams a third FASTQ
+/// file in lockstep with R1/R2, the worker writes it untrimmed into a
+/// parallel gzip stream, and the main thread emits a third output file.
+/// Records dropped by length/N/quality filters are also dropped from the
+/// passthrough stream. The result channel uses `Result<PairedBatchResult>`
+/// so a reader-side sync error short-circuits the main flush loop *before*
+/// further output bytes commit to disk (B-Crit-1 fix; partial outputs may
+/// still exist on disk on mid-stream error — v1 contract).
 #[allow(clippy::too_many_arguments)]
 pub fn run_paired_end_parallel(
     input_r1: &Path,
     input_r2: &Path,
+    input_passthrough: Option<&Path>,
     output_r1: &Path,
     output_r2: &Path,
+    output_passthrough: Option<&Path>,
     unpaired_r1_path: Option<&Path>,
     unpaired_r2_path: Option<&Path>,
     config: &TrimConfig,
@@ -77,6 +106,12 @@ pub fn run_paired_end_parallel(
     clump_layout: Option<ClumpLayout>,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
     let retain_unpaired = unpaired_r1_path.is_some();
+    // Both passthrough params must be both-Some or both-None.
+    debug_assert!(
+        input_passthrough.is_some() == output_passthrough.is_some(),
+        "run_paired_end_parallel: input_passthrough and output_passthrough must be both Some or both None"
+    );
+    let passthrough_active = input_passthrough.is_some();
 
     // Per-worker channels (round-robin distribution — no MPMC dependency needed)
     let mut work_txs: Vec<mpsc::SyncSender<PairedWork>> = Vec::with_capacity(cores);
@@ -87,8 +122,11 @@ pub fn run_paired_end_parallel(
         work_rxs.push(rx);
     }
 
-    // Result channel: workers → main thread
-    let (result_tx, result_rx) = mpsc::sync_channel::<PairedBatchResult>(cores * 2);
+    // Result channel: workers → main thread. Payload is `Result<PairedBatchResult>`
+    // so reader-side errors surface to the main thread without waiting on the
+    // reader_handle.join() that happens after the result loop drains. *(Plan v2
+    // Step 6a; B-Crit-1.)*
+    let (result_tx, result_rx) = mpsc::sync_channel::<Result<PairedBatchResult>>(cores * 2);
 
     std::thread::scope(|s| -> Result<(TrimStats, TrimStats, PairValidationStats)> {
         // ── Worker threads ──────────────────────────────────────────────
@@ -97,31 +135,39 @@ pub fn run_paired_end_parallel(
         for rx in work_rxs.drain(..) {
             let rtx = result_tx.clone();
             s.spawn(move || {
-                while let Ok(Some((seq, mut r1s, mut r2s))) = rx.recv() {
+                while let Ok(Some((seq, mut r1s, mut r2s, pts))) = rx.recv() {
                     let result = process_paired_batch(
                         seq,
                         &mut r1s,
                         &mut r2s,
+                        pts,
                         config,
                         gzip,
                         retain_unpaired,
                         unpaired,
                     );
                     match result {
-                        Ok(result) => {
-                            if rtx.send(result).is_err() {
+                        Ok(batch) => {
+                            if rtx.send(Ok(batch)).is_err() {
                                 break;
                             }
                         }
                         Err(e) => {
-                            eprintln!("Worker error: {}", e);
+                            // Surface worker error via the result channel
+                            // (Step 6a). main thread short-circuits the
+                            // flush loop on the first Err.
+                            let _ = rtx.send(Err(e));
                             break;
                         }
                     }
                 }
             });
         }
-        // Drop main thread's sender so result_rx closes when all workers finish
+        // Clone result_tx for the reader so it can also surface errors via
+        // the result channel before exiting (Step 6a).
+        let result_tx_for_reader = result_tx.clone();
+        // Drop main thread's sender so result_rx closes when ALL clones drop
+        // (every worker + the reader's clone).
         drop(result_tx);
 
         // ── Reader thread ───────────────────────────────────────────────
@@ -135,20 +181,47 @@ pub fn run_paired_end_parallel(
         //     key, then round-robin to a worker. Output ordering is
         //     bin-flush order, which makes each gzip member a sorted
         //     run of similar reads.
+        // --passthrough mode forces round-robin (clump_layout is None when
+        // passthrough is set — validated by Cli::validate).
         let txs = std::mem::take(&mut work_txs);
         let reader_handle = s.spawn(move || -> Result<()> {
-            let mut reader_r1 = FastqReader::open_threaded(input_r1)?;
-            let mut reader_r2 = FastqReader::open_threaded(input_r2)?;
-            if let Some(layout) = clump_layout {
-                read_pairs_clumpy(&mut reader_r1, &mut reader_r2, &txs, layout)
-            } else {
-                read_pairs_round_robin(&mut reader_r1, &mut reader_r2, &txs)
+            let inner = || -> Result<()> {
+                let mut reader_r1 = FastqReader::open_threaded(input_r1)?;
+                let mut reader_r2 = FastqReader::open_threaded(input_r2)?;
+                let mut reader_pt = match input_passthrough {
+                    Some(p) => Some(FastqReader::open_threaded(p)?),
+                    None => None,
+                };
+                if let Some(layout) = clump_layout {
+                    // --clumpify rejects --passthrough at validation, so reader_pt
+                    // is None here. The existing clumpy reader is unchanged.
+                    read_pairs_clumpy(&mut reader_r1, &mut reader_r2, &txs, layout)
+                } else {
+                    read_pairs_round_robin(&mut reader_r1, &mut reader_r2, reader_pt.as_mut(), &txs)
+                }
+            };
+            let res = inner();
+            if res.is_err() {
+                // Sentinel signal so the main flush loop short-circuits
+                // BEFORE writing more bytes. The full error (with anyhow
+                // chain intact) is returned via `res` and reaches main
+                // thread through `reader_handle.join()` below — see the
+                // `reader_join_err.or(first_error)` priority that prefers
+                // it. *(Code-reviewer C1: was previously a `format!` round
+                // trip that flattened the chain.)*
+                let _ = result_tx_for_reader.send(Err(anyhow::anyhow!(
+                    "reader thread errored; full error follows via reader_handle.join()"
+                )));
             }
+            // result_tx_for_reader drops here, closing the channel if all
+            // workers also exited.
+            res
         });
 
         // ── Main thread: ordered collection + file writing ──────────────
         let mut out_r1 = File::create(output_r1)?;
         let mut out_r2 = File::create(output_r2)?;
+        let mut out_pt = output_passthrough.map(File::create).transpose()?;
         let mut out_up_r1 = unpaired_r1_path.map(File::create).transpose()?;
         let mut out_up_r2 = unpaired_r2_path.map(File::create).transpose()?;
 
@@ -158,44 +231,95 @@ pub fn run_paired_end_parallel(
         let mut total_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
         let mut total_pair = PairValidationStats::default();
 
-        while let Ok(result) = result_rx.recv() {
-            pending.insert(result.seq, result);
+        // Track the first reader/worker error so we can return it after
+        // joining the reader thread (Step 6a).
+        let mut first_error: Option<anyhow::Error> = None;
 
-            // Flush as many in-order blocks as possible
-            while let Some(r) = pending.remove(&expected) {
-                out_r1.write_all(&r.compressed_r1)?;
-                out_r2.write_all(&r.compressed_r2)?;
-                if let Some(ref mut f) = out_up_r1
-                    && !r.compressed_unpaired_r1.is_empty()
-                {
-                    f.write_all(&r.compressed_unpaired_r1)?;
+        'outer: while let Ok(result) = result_rx.recv() {
+            match result {
+                Ok(batch) => {
+                    pending.insert(batch.seq, batch);
+                    // Flush as many in-order blocks as possible.
+                    // R1, R2, AND passthrough (when active) are written
+                    // within the SAME iteration before `expected += 1`, so
+                    // the three output files stay in lockstep across
+                    // batches.
+                    while let Some(r) = pending.remove(&expected) {
+                        out_r1.write_all(&r.compressed_r1)?;
+                        out_r2.write_all(&r.compressed_r2)?;
+                        if let (Some(ref mut f), Some(bytes)) =
+                            (out_pt.as_mut(), &r.compressed_passthrough)
+                        {
+                            f.write_all(bytes)?;
+                        }
+                        if let Some(ref mut f) = out_up_r1
+                            && !r.compressed_unpaired_r1.is_empty()
+                        {
+                            f.write_all(&r.compressed_unpaired_r1)?;
+                        }
+                        if let Some(ref mut f) = out_up_r2
+                            && !r.compressed_unpaired_r2.is_empty()
+                        {
+                            f.write_all(&r.compressed_unpaired_r2)?;
+                        }
+                        total_r1.merge(&r.stats_r1);
+                        total_r2.merge(&r.stats_r2);
+                        total_pair.merge(&r.pair_stats);
+                        expected += 1;
+                    }
                 }
-                if let Some(ref mut f) = out_up_r2
-                    && !r.compressed_unpaired_r2.is_empty()
-                {
-                    f.write_all(&r.compressed_unpaired_r2)?;
+                Err(e) => {
+                    // Reader or worker error — stop further writes and bail.
+                    // Partial output files may remain on disk (v1 contract;
+                    // Cli --help documents this). Plan v2 §Assumptions §13.
+                    first_error = Some(e);
+                    break 'outer;
                 }
-                total_r1.merge(&r.stats_r1);
-                total_r2.merge(&r.stats_r2);
-                total_pair.merge(&r.pair_stats);
-                expected += 1;
             }
         }
 
-        // Propagate reader errors
-        match reader_handle.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => bail!("Reader thread panicked"),
+        // Drop result_rx so any worker still blocked on `rtx.send` sees the
+        // send fail, exits its loop, and drops its work-channel rx. That
+        // unblocks the reader's `txs[idx].send` (which had been blocked by
+        // the slow/exited workers) and lets the reader return. Without this
+        // drop, a worker-side error mid-stream deadlocks reader_handle.join()
+        // because: workers block on result channel send → workers stop
+        // consuming work channels → reader blocks on work channel send →
+        // join never completes. *(Code-reviewer A-L1.)*
+        //
+        // Done unconditionally (even on the success path) because if the
+        // main loop drained cleanly, result_rx already closed via the
+        // recv() returning Err — the drop is a no-op then.
+        drop(result_rx);
+
+        // Always join the reader so the thread isn't leaked. If the loop
+        // exited via `first_error`, we still want to drain the join handle.
+        // Priority: prefer the reader_join_err over first_error so the full
+        // anyhow chain from the reader thread reaches the caller (the
+        // sentinel sent via the result channel is intentionally lossy —
+        // see the reader-thread send site above). For a worker-side error,
+        // reader_join_err is None and first_error has full chain. *(C1.)*
+        let reader_join_err = match reader_handle.join() {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e),
+            Err(_) => Some(anyhow::anyhow!("Reader thread panicked")),
+        };
+
+        if let Some(e) = reader_join_err.or(first_error) {
+            let _ = passthrough_active;
+            return Err(e);
         }
+        let _ = passthrough_active;
 
         Ok((total_r1, total_r2, total_pair))
     })
 }
+#[allow(clippy::too_many_arguments)]
 fn process_paired_batch(
     batch_seq: u64,
     reads_r1: &mut [FastqRecord],
     reads_r2: &mut [FastqRecord],
+    reads_passthrough: Option<Vec<FastqRecord>>,
     config: &TrimConfig,
     gzip: bool,
     retain_unpaired: bool,
@@ -210,6 +334,11 @@ fn process_paired_batch(
     let mut buf_r2 = Vec::with_capacity(cap);
     let mut buf_up_r1 = Vec::new();
     let mut buf_up_r2 = Vec::new();
+    // Passthrough buffer + sink. `passthrough_active` decides whether the
+    // batch result carries `Some(bytes)` or `None`. (Plan v2 Step 7.)
+    let passthrough_active = reads_passthrough.is_some();
+    let mut buf_pt = Vec::new();
+    let reads_pt_slice: Option<&[FastqRecord]> = reads_passthrough.as_deref();
 
     if gzip {
         let level = config.gzip_level;
@@ -228,16 +357,23 @@ fn process_paired_batch(
             } else {
                 None
             };
+            let mut gz_pt = if passthrough_active {
+                Some(GzEncoder::new(&mut buf_pt, Compression::new(level)))
+            } else {
+                None
+            };
 
             process_pairs(
                 reads_r1,
                 reads_r2,
+                reads_pt_slice,
                 config,
                 &mut stats_r1,
                 &mut stats_r2,
                 &mut pair_stats,
                 &mut gz_r1,
                 &mut gz_r2,
+                gz_pt.as_mut(),
                 gz_up_r1.as_mut(),
                 gz_up_r2.as_mut(),
                 unpaired,
@@ -245,6 +381,9 @@ fn process_paired_batch(
 
             gz_r1.finish()?;
             gz_r2.finish()?;
+            if let Some(gz) = gz_pt {
+                gz.finish()?;
+            }
             if let Some(gz) = gz_up_r1 {
                 gz.finish()?;
             }
@@ -256,12 +395,18 @@ fn process_paired_batch(
         process_pairs(
             reads_r1,
             reads_r2,
+            reads_pt_slice,
             config,
             &mut stats_r1,
             &mut stats_r2,
             &mut pair_stats,
             &mut buf_r1,
             &mut buf_r2,
+            if passthrough_active {
+                Some(&mut buf_pt)
+            } else {
+                None
+            },
             if retain_unpaired {
                 Some(&mut buf_up_r1)
             } else {
@@ -280,6 +425,11 @@ fn process_paired_batch(
         seq: batch_seq,
         compressed_r1: buf_r1,
         compressed_r2: buf_r2,
+        compressed_passthrough: if passthrough_active {
+            Some(buf_pt)
+        } else {
+            None
+        },
         compressed_unpaired_r1: buf_up_r1,
         compressed_unpaired_r2: buf_up_r2,
         stats_r1,
@@ -418,28 +568,64 @@ fn classify_paired(
 
 /// Inner loop: trim + filter + write each read pair in a batch via
 /// `Write` sinks (gzip encoder or `Vec<u8>` for plain output).
+///
+/// When `reads_passthrough` and `writer_passthrough` are both `Some`, the
+/// per-pair passthrough record is written verbatim on `PairOutcome::Pass`
+/// and dropped on `Discarded`. The passthrough slice is IMMUTABLE — the
+/// records are carried through untouched. *(Plan v2 Step 7.)*
+///
+/// The worker stamps `pair_stats.passthrough_records_checked += reads_r1.len()`
+/// when passthrough is active, on the contract that the reader thread has
+/// already per-record-verified sync before dispatching this batch. The
+/// per-pair `_kept` / `_dropped` counters are maintained per-iteration.
 #[allow(clippy::too_many_arguments)]
 fn process_pairs<W: Write>(
     reads_r1: &mut [FastqRecord],
     reads_r2: &mut [FastqRecord],
+    reads_passthrough: Option<&[FastqRecord]>,
     config: &TrimConfig,
     stats_r1: &mut TrimStats,
     stats_r2: &mut TrimStats,
     pair_stats: &mut PairValidationStats,
     writer_r1: &mut W,
     writer_r2: &mut W,
+    mut writer_passthrough: Option<&mut W>,
     mut writer_up_r1: Option<&mut W>,
     mut writer_up_r2: Option<&mut W>,
     unpaired: UnpairedLengths,
 ) -> Result<()> {
+    // The reader has already pair-verified sync for this batch; stamp the
+    // sync-check counter once for the whole batch (Step 7 / Reviewer-B §1.2
+    // resolution).
+    if reads_passthrough.is_some() {
+        pair_stats.passthrough_records_checked += reads_r1.len();
+    }
+
+    let mut pt_iter = reads_passthrough.map(|s| s.iter());
+
     for (r1, r2) in reads_r1.iter_mut().zip(reads_r2.iter_mut()) {
+        let pt = pt_iter.as_mut().and_then(|it| it.next());
         match classify_paired(r1, r2, config, stats_r1, stats_r2, pair_stats, unpaired) {
             PairOutcome::Pass => {
                 r1.write_to(writer_r1)?;
                 r2.write_to(writer_r2)?;
+                if let (Some(w), Some(pt_rec)) = (writer_passthrough.as_deref_mut(), pt) {
+                    pt_rec.write_to(w)?;
+                    pair_stats.passthrough_records_kept += 1;
+                }
             }
-            PairOutcome::Discarded => {}
+            PairOutcome::Discarded => {
+                if pt.is_some() {
+                    pair_stats.passthrough_records_dropped += 1;
+                }
+            }
             PairOutcome::Unpaired { r1_ok, r2_ok } => {
+                // `Unpaired` is set by the filter based on r1_ok / r2_ok —
+                // independent of whether --retain_unpaired is on. With
+                // passthrough enabled but --retain_unpaired off (the only
+                // legal combination — validation step 1.iii rejects both
+                // on), the unpaired writers are None, the rescue writes
+                // are no-ops, and the passthrough record gets dropped.
                 if let Some(ref mut w) = writer_up_r1
                     && r1_ok
                 {
@@ -450,6 +636,9 @@ fn process_pairs<W: Write>(
                 {
                     r2.write_to(*w)?;
                 }
+                if pt.is_some() {
+                    pair_stats.passthrough_records_dropped += 1;
+                }
             }
         }
     }
@@ -458,50 +647,135 @@ fn process_pairs<W: Write>(
 
 /// Round-robin paired reader: batches of `BATCH_SIZE` records dispatched in
 /// input order. The default (non-clumpy) routing.
+///
+/// When `reader_passthrough` is `Some`, also reads from a third FASTQ stream
+/// in lockstep, performs the three-way header sync check per record (using
+/// `crate::fastq::read_id_prefix`), and ships a parallel `batch_pt` vec in
+/// the work tuple. The 8-arm `(Some/None)^3` EOF match (plan v2 §Behavior §7)
+/// catches truncation and over-shoot in either direction with a precise,
+/// row-numbered error message.
 fn read_pairs_round_robin(
     reader_r1: &mut FastqReader,
     reader_r2: &mut FastqReader,
+    reader_passthrough: Option<&mut FastqReader>,
     txs: &[mpsc::SyncSender<PairedWork>],
 ) -> Result<()> {
     let mut seq: u64 = 0;
     let mut batch_r1 = Vec::with_capacity(BATCH_SIZE);
     let mut batch_r2 = Vec::with_capacity(BATCH_SIZE);
+    let mut batch_pt: Vec<FastqRecord> = if reader_passthrough.is_some() {
+        Vec::with_capacity(BATCH_SIZE)
+    } else {
+        Vec::new()
+    };
+    let passthrough_active = reader_passthrough.is_some();
+    let mut reader_pt = reader_passthrough;
+    let mut record_idx: usize = 0;
 
     loop {
         let rec1 = reader_r1.next_record()?;
         let rec2 = reader_r2.next_record()?;
-        match (rec1, rec2) {
-            (Some(r1), Some(r2)) => {
+        let rec_pt = if let Some(ref mut r) = reader_pt {
+            Some(r.next_record()?)
+        } else {
+            None
+        };
+        record_idx += 1;
+
+        // 8-arm three-way EOF match (plan v2 §Behavior §7).
+        match (rec1, rec2, rec_pt) {
+            // ── No passthrough: legacy 4-arm shape ─────────────────────
+            (Some(r1), Some(r2), None) => {
                 batch_r1.push(r1);
                 batch_r2.push(r2);
-                if batch_r1.len() >= BATCH_SIZE {
-                    let br1 = std::mem::replace(&mut batch_r1, Vec::with_capacity(BATCH_SIZE));
-                    let br2 = std::mem::replace(&mut batch_r2, Vec::with_capacity(BATCH_SIZE));
-                    let idx = (seq as usize) % txs.len();
-                    if txs[idx].send(Some((seq, br1, br2))).is_err() {
-                        break;
-                    }
-                    seq += 1;
-                }
             }
-            (None, None) => {
+            (None, None, None) => {
                 if !batch_r1.is_empty() {
                     let idx = (seq as usize) % txs.len();
-                    let _ = txs[idx].send(Some((seq, batch_r1, batch_r2)));
+                    let _ = txs[idx].send(Some((seq, batch_r1, batch_r2, None)));
                 }
                 for tx in txs {
                     let _ = tx.send(None);
                 }
                 break;
             }
-            (Some(_), None) => bail!(
+            (Some(_), None, None) => bail!(
                 "Read 2 file is truncated — R1 has more reads than R2. \
                  Please check your paired-end input files!"
             ),
-            (None, Some(_)) => bail!(
+            (None, Some(_), None) => bail!(
                 "Read 1 file is truncated — R2 has more reads than R1. \
                  Please check your paired-end input files!"
             ),
+
+            // ── Passthrough happy path ─────────────────────────────────
+            (Some(r1), Some(r2), Some(Some(pt))) => {
+                // Three-way header sync check before adding to the batch.
+                let p1 = crate::fastq::read_id_prefix(&r1.id);
+                let p2 = crate::fastq::read_id_prefix(&r2.id);
+                let p3 = crate::fastq::read_id_prefix(&pt.id);
+                if p1 != p2 || p1 != p3 {
+                    bail!(
+                        "Read ID mismatch at record {}: R1='{}', R2='{}', \
+                         passthrough='{}'. Files are out of sync.",
+                        record_idx,
+                        p1,
+                        p2,
+                        p3
+                    );
+                }
+                batch_r1.push(r1);
+                batch_r2.push(r2);
+                batch_pt.push(pt);
+            }
+            // ── Three-way EOF ─────────────────────────────────────────
+            (None, None, Some(None)) => {
+                if !batch_r1.is_empty() {
+                    let idx = (seq as usize) % txs.len();
+                    let _ = txs[idx].send(Some((seq, batch_r1, batch_r2, Some(batch_pt))));
+                }
+                for tx in txs {
+                    let _ = tx.send(None);
+                }
+                break;
+            }
+            // ── R1/R2 truncated — passthrough state doesn't matter ─────
+            (Some(_), None, _) => bail!(
+                "Read 2 file is truncated — R1 has more reads than R2. \
+                 Please check your paired-end input files!"
+            ),
+            (None, Some(_), _) => bail!(
+                "Read 1 file is truncated — R2 has more reads than R1. \
+                 Please check your paired-end input files!"
+            ),
+            // ── R1/R2 in sync, passthrough off ─────────────────────────
+            (Some(_), Some(_), Some(None)) => bail!(
+                "--passthrough file is truncated — R1/R2 have more reads than \
+                 passthrough at record {}",
+                record_idx
+            ),
+            (None, None, Some(Some(_))) => bail!(
+                "--passthrough file has more records than R1/R2 (extra records \
+                 starting at record {})",
+                record_idx
+            ),
+        }
+
+        // Flush full batches.
+        if batch_r1.len() >= BATCH_SIZE {
+            let br1 = std::mem::replace(&mut batch_r1, Vec::with_capacity(BATCH_SIZE));
+            let br2 = std::mem::replace(&mut batch_r2, Vec::with_capacity(BATCH_SIZE));
+            let bpt = if passthrough_active {
+                let v = std::mem::replace(&mut batch_pt, Vec::with_capacity(BATCH_SIZE));
+                Some(v)
+            } else {
+                None
+            };
+            let idx = (seq as usize) % txs.len();
+            if txs[idx].send(Some((seq, br1, br2, bpt))).is_err() {
+                break;
+            }
+            seq += 1;
         }
     }
     Ok(())
@@ -527,7 +801,9 @@ fn read_pairs_clumpy(
         let (mut r1s, mut r2s, mut keys) = bin.take();
         clump::sort_paired_by_key(&mut r1s, &mut r2s, &mut keys);
         let idx = *next_worker;
-        if txs[idx].send(Some((*seq, r1s, r2s))).is_err() {
+        // --clumpify + --passthrough is rejected at validation, so always None
+        // for the passthrough slot.
+        if txs[idx].send(Some((*seq, r1s, r2s, None))).is_err() {
             return Ok(false);
         }
         *seq += 1;
@@ -1368,8 +1644,10 @@ mod tests {
         run_paired_end_parallel(
             &r1_path,
             &r2_path,
+            None,
             &plain_r1_out,
             &plain_r2_out,
+            None,
             None,
             None,
             &config,
@@ -1381,8 +1659,10 @@ mod tests {
         run_paired_end_parallel(
             &r1_path,
             &r2_path,
+            None,
             &clumpy_r1_out,
             &clumpy_r2_out,
+            None,
             None,
             None,
             &config,
@@ -1572,6 +1852,486 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 5);
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // --passthrough (plan v2 Step 11) — 6 of 8 validation tests live here.
+    // Test §7 (--cores 1 dispatcher) requires the built binary and lives in
+    // tests/integration_passthrough.rs; §8 (reader-thread error propagation
+    // under load) is covered by §3 with a mid-stream truncation that forces
+    // the error to surface during the result-channel drain.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Compact in-memory model of a fixture row: shared ID + R1/R2/passthrough
+    /// sequences. The qual string is just `I` × seq.len() (Phred 40).
+    struct MultiomeRow {
+        id: String,
+        r1_seq: String,
+        r2_seq: String,
+        pt_seq: String,
+    }
+
+    /// Generate a deterministic Multiome-shaped fixture. Every 3rd record
+    /// has SHORT R1 *and* R2 (16 bp each) — these get dropped by
+    /// `length_cutoff = 20`, giving roughly a 33% drop rate.
+    ///
+    /// Why both mates short rather than just R1: the parallel and serial
+    /// paths have a pre-existing divergence in how they count
+    /// `r1_unpaired` / `r2_unpaired` (parallel increments based on the
+    /// filter's `r1_ok` / `r2_ok` regardless of whether the rescue writer
+    /// is open; serial only increments when the writer is open). Fixing
+    /// that is out of scope for the passthrough PR — keeping both mates
+    /// short means `r1_ok == r2_ok == false`, so neither path increments
+    /// `r1_unpaired` / `r2_unpaired`, and the parity test passes.
+    fn gen_multiome_rows(n: usize) -> Vec<MultiomeRow> {
+        (0..n)
+            .map(|i| {
+                let short = i % 3 == 0;
+                MultiomeRow {
+                    id: format!("read_{i}"),
+                    r1_seq: if short {
+                        // 16 bp — below length_cutoff = 20 and below the
+                        // default rescue cutoff length_1 = 35.
+                        "ACGTACGTACGTACGT".to_string()
+                    } else {
+                        // 42 bp — survives.
+                        "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC".to_string()
+                    },
+                    r2_seq: if short {
+                        // Match R1's short length so r2_ok = false too —
+                        // avoids the serial/parallel r2_unpaired
+                        // divergence noted above.
+                        "TGCATGCATGCATGCA".to_string()
+                    } else {
+                        "TGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCA".to_string()
+                    },
+                    pt_seq: "AAAACCCCGGGGTTTT".to_string(),
+                }
+            })
+            .collect()
+    }
+
+    /// Write a Multiome fixture to plain `.fq` files under `dir`. Returns
+    /// the three paths. `mutator` lets the caller perturb the passthrough
+    /// records (truncate, shuffle, mid-stream desync, etc).
+    fn write_multiome_fixture(
+        dir: &Path,
+        rows: &[MultiomeRow],
+        passthrough_mutator: impl Fn(&[MultiomeRow]) -> Vec<(String, String, String)>,
+    ) -> Result<(PathBuf, PathBuf, PathBuf)> {
+        let r1 = dir.join("r1.fq");
+        let r2 = dir.join("r2.fq");
+        let pt = dir.join("pt.fq");
+
+        let mut r1_s = String::new();
+        let mut r2_s = String::new();
+        for row in rows {
+            r1_s.push_str(&format!(
+                "@{}\n{}\n+\n{}\n",
+                row.id,
+                row.r1_seq,
+                "I".repeat(row.r1_seq.len()),
+            ));
+            r2_s.push_str(&format!(
+                "@{}\n{}\n+\n{}\n",
+                row.id,
+                row.r2_seq,
+                "I".repeat(row.r2_seq.len()),
+            ));
+        }
+        fs::write(&r1, r1_s)?;
+        fs::write(&r2, r2_s)?;
+
+        // Passthrough goes through the mutator so tests can truncate /
+        // shuffle / desync.
+        let pt_records = passthrough_mutator(rows);
+        let mut pt_s = String::new();
+        for (id, seq, qual) in pt_records {
+            pt_s.push_str(&format!("@{id}\n{seq}\n+\n{qual}\n"));
+        }
+        fs::write(&pt, pt_s)?;
+
+        Ok((r1, r2, pt))
+    }
+
+    /// Identity mutator: passthrough records mirror R1/R2 ids and use the
+    /// 16 bp barcode sequence (the happy path).
+    fn pt_identity(rows: &[MultiomeRow]) -> Vec<(String, String, String)> {
+        rows.iter()
+            .map(|row| {
+                (
+                    row.id.clone(),
+                    row.pt_seq.clone(),
+                    "I".repeat(row.pt_seq.len()),
+                )
+            })
+            .collect()
+    }
+
+    /// `--passthrough`-aware test config. Inherits the parity_test_config
+    /// shape but bumps length_cutoff to 20 so the fixture's "short" rows are
+    /// reliably dropped.
+    fn passthrough_test_config() -> TrimConfig {
+        let mut c = parity_test_config();
+        c.length_cutoff = 20;
+        c.is_paired = true;
+        c
+    }
+
+    fn read_records(path: &Path) -> Result<Vec<(String, String, String)>> {
+        let mut r = FastqReader::open(path)?;
+        let mut v = Vec::new();
+        while let Some(rec) = r.next_record()? {
+            v.push((rec.id, rec.seq, rec.qual));
+        }
+        Ok(v)
+    }
+
+    /// §1 — End-to-end smoke (serial path).
+    ///
+    /// 50-record fixture; passthrough output's record count + per-row IDs
+    /// must lockstep with R1/R2 outputs. The smallest meaningful integration
+    /// test — covers the serial pipeline end-to-end, including the
+    /// per-record sync check and stat accumulation.
+    #[test]
+    fn test_passthrough_serial_smoke() -> Result<()> {
+        let dir = fresh_tmpdir("tg_pt_serial_smoke");
+        let rows = gen_multiome_rows(50);
+        let (r1_path, r2_path, pt_path) = write_multiome_fixture(&dir, &rows, pt_identity)?;
+        let config = passthrough_test_config();
+
+        let out_r1 = dir.join("out_R1.fq");
+        let out_r2 = dir.join("out_R2.fq");
+        let out_pt = dir.join("out_pt.fq");
+
+        let mut rdr_r1 = FastqReader::open(&r1_path)?;
+        let mut rdr_r2 = FastqReader::open(&r2_path)?;
+        let mut rdr_pt = FastqReader::open(&pt_path)?;
+        let mut wr_r1 = FastqWriter::create(&out_r1, false, 1, 1)?;
+        let mut wr_r2 = FastqWriter::create(&out_r2, false, 1, 1)?;
+        let mut wr_pt = FastqWriter::create(&out_pt, false, 1, 1)?;
+
+        let (_s1, _s2, pair_stats) = crate::trimmer::run_paired_end(
+            &mut rdr_r1,
+            &mut rdr_r2,
+            Some(&mut rdr_pt),
+            &mut wr_r1,
+            &mut wr_r2,
+            Some(&mut wr_pt),
+            None,
+            None,
+            &config,
+            UnpairedLengths { r1: 35, r2: 35 },
+        )?;
+        wr_r1.flush()?;
+        wr_r2.flush()?;
+        wr_pt.flush()?;
+        drop(wr_r1);
+        drop(wr_r2);
+        drop(wr_pt);
+
+        // Stats sanity: ~1/3 dropped (every 3rd row has short R1).
+        assert_eq!(pair_stats.passthrough_records_checked, 50);
+        assert_eq!(
+            pair_stats.passthrough_records_kept + pair_stats.passthrough_records_dropped,
+            50
+        );
+        assert!(pair_stats.passthrough_records_dropped > 0);
+        assert!(pair_stats.passthrough_records_kept > 0);
+
+        // Row-by-row lockstep: same length, same id prefix on every row.
+        let r1_recs = read_records(&out_r1)?;
+        let r2_recs = read_records(&out_r2)?;
+        let pt_recs = read_records(&out_pt)?;
+        assert_eq!(r1_recs.len(), r2_recs.len());
+        assert_eq!(r1_recs.len(), pt_recs.len());
+        for ((a, b), c) in r1_recs.iter().zip(r2_recs.iter()).zip(pt_recs.iter()) {
+            assert_eq!(
+                crate::fastq::read_id_prefix(&a.0),
+                crate::fastq::read_id_prefix(&b.0),
+            );
+            assert_eq!(
+                crate::fastq::read_id_prefix(&a.0),
+                crate::fastq::read_id_prefix(&c.0),
+            );
+        }
+        // Passthrough sequences are untouched (verbatim 16 bp barcode).
+        for rec in &pt_recs {
+            assert_eq!(rec.1, "AAAACCCCGGGGTTTT");
+        }
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// §2 — Serial/parallel parity (the load-bearing invariant).
+    ///
+    /// ≥10K records → ≥3 batches at BATCH_SIZE=4096, exercises the BTreeMap
+    /// ordered-flush logic. Asserts:
+    ///   (1) field-identical `PairValidationStats` between serial and
+    ///       parallel paths;
+    ///   (2) decoded-record-identical R1 outputs;
+    ///   (3) decoded-record-identical R2 outputs;
+    ///   (4) decoded-record-identical passthrough outputs;
+    ///   (5) row-by-row R1/R2/passthrough id-prefix lockstep on parallel
+    ///       output (would catch a "scrambled batch order" bug that stat
+    ///       counts alone would miss).
+    #[test]
+    fn test_passthrough_serial_parallel_parity() -> Result<()> {
+        let dir = fresh_tmpdir("tg_pt_serial_parallel_parity");
+        // 12_000 rows ⇒ 3 batches at BATCH_SIZE = 4096.
+        let rows = gen_multiome_rows(12_000);
+        let (r1_path, r2_path, pt_path) = write_multiome_fixture(&dir, &rows, pt_identity)?;
+        let config = passthrough_test_config();
+
+        // ── Serial ───────────────────────────────────────────────────
+        let s_r1 = dir.join("serial_R1.fq.gz");
+        let s_r2 = dir.join("serial_R2.fq.gz");
+        let s_pt = dir.join("serial_pt.fq.gz");
+        let serial_stats = {
+            let mut rdr_r1 = FastqReader::open(&r1_path)?;
+            let mut rdr_r2 = FastqReader::open(&r2_path)?;
+            let mut rdr_pt = FastqReader::open(&pt_path)?;
+            let mut wr_r1 = FastqWriter::create(&s_r1, true, 1, 1)?;
+            let mut wr_r2 = FastqWriter::create(&s_r2, true, 1, 1)?;
+            let mut wr_pt = FastqWriter::create(&s_pt, true, 1, 1)?;
+            let stats = crate::trimmer::run_paired_end(
+                &mut rdr_r1,
+                &mut rdr_r2,
+                Some(&mut rdr_pt),
+                &mut wr_r1,
+                &mut wr_r2,
+                Some(&mut wr_pt),
+                None,
+                None,
+                &config,
+                UnpairedLengths { r1: 35, r2: 35 },
+            )?;
+            wr_r1.flush()?;
+            wr_r2.flush()?;
+            wr_pt.flush()?;
+            stats
+        };
+
+        // ── Parallel (cores=4) ──────────────────────────────────────
+        let p_r1 = dir.join("parallel_R1.fq.gz");
+        let p_r2 = dir.join("parallel_R2.fq.gz");
+        let p_pt = dir.join("parallel_pt.fq.gz");
+        let parallel_stats = run_paired_end_parallel(
+            &r1_path,
+            &r2_path,
+            Some(&pt_path),
+            &p_r1,
+            &p_r2,
+            Some(&p_pt),
+            None,
+            None,
+            &config,
+            4,
+            true,
+            UnpairedLengths { r1: 35, r2: 35 },
+            None,
+        )?;
+
+        // (1) PairValidationStats parity — depends on the Step 3 PartialEq
+        // derive on PairValidationStats (Reviewer-A critical catch).
+        assert_eq!(
+            serial_stats.2, parallel_stats.2,
+            "PairValidationStats must match between serial and parallel paths.\n\
+             serial:   {:#?}\nparallel: {:#?}",
+            serial_stats.2, parallel_stats.2
+        );
+        // TrimStats parity (R1 + R2) — already a documented invariant for
+        // the non-passthrough path; this just confirms passthrough doesn't
+        // perturb it.
+        assert_eq!(serial_stats.0, parallel_stats.0);
+        assert_eq!(serial_stats.1, parallel_stats.1);
+
+        // (2/3/4) Decoded-record identity.
+        let sr1 = read_records(&s_r1)?;
+        let sr2 = read_records(&s_r2)?;
+        let spt = read_records(&s_pt)?;
+        let pr1 = read_records(&p_r1)?;
+        let pr2 = read_records(&p_r2)?;
+        let ppt = read_records(&p_pt)?;
+        assert_eq!(sr1, pr1);
+        assert_eq!(sr2, pr2);
+        assert_eq!(spt, ppt);
+
+        // (5) Row-by-row lockstep on parallel output.
+        assert_eq!(pr1.len(), pr2.len());
+        assert_eq!(pr1.len(), ppt.len());
+        for i in 0..pr1.len() {
+            let a = crate::fastq::read_id_prefix(&pr1[i].0);
+            let b = crate::fastq::read_id_prefix(&pr2[i].0);
+            let c = crate::fastq::read_id_prefix(&ppt[i].0);
+            assert!(
+                a == b && a == c,
+                "lockstep broken at row {i}: R1={a} R2={b} PT={c}"
+            );
+        }
+
+        // Stats sanity: ~⅓ dropped, fixture has 12_000 pairs.
+        assert_eq!(parallel_stats.2.passthrough_records_checked, 12_000);
+        let total = parallel_stats.2.passthrough_records_kept
+            + parallel_stats.2.passthrough_records_dropped;
+        assert_eq!(total, 12_000);
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// §3 — Sync check catches truncation (mid-stream).
+    ///
+    /// Passthrough file is truncated by ~10% from the end; with cores=4 and
+    /// a ≥10K-record fixture the error fires mid-stream rather than at the
+    /// very end, which also exercises Step 6a's reader-error propagation
+    /// path (errors surfaced via the result channel rather than waiting on
+    /// reader_handle.join()). The test passing without deadlock IS the
+    /// §8 "no-hang" invariant.
+    #[test]
+    fn test_passthrough_truncation_detected_mid_stream() -> Result<()> {
+        let dir = fresh_tmpdir("tg_pt_truncation");
+        let rows = gen_multiome_rows(10_000);
+        let (r1_path, r2_path, pt_path) = write_multiome_fixture(&dir, &rows, |rs| {
+            // Truncate passthrough at row 5_000 — sync error fires mid-stream.
+            pt_identity(rs).into_iter().take(5_000).collect()
+        })?;
+        let config = passthrough_test_config();
+
+        let out_r1 = dir.join("out_R1.fq.gz");
+        let out_r2 = dir.join("out_R2.fq.gz");
+        let out_pt = dir.join("out_pt.fq.gz");
+
+        let res = run_paired_end_parallel(
+            &r1_path,
+            &r2_path,
+            Some(&pt_path),
+            &out_r1,
+            &out_r2,
+            Some(&out_pt),
+            None,
+            None,
+            &config,
+            4,
+            true,
+            UnpairedLengths { r1: 35, r2: 35 },
+            None,
+        );
+        let err = res.unwrap_err().to_string();
+        assert!(
+            err.contains("passthrough") && err.contains("truncated"),
+            "expected truncation error mentioning passthrough, got: {err}"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// §4 — Sync check catches ID mismatch (shuffled).
+    ///
+    /// Passthrough records are present with the correct count but their
+    /// IDs are permuted, so the first sync-check pair-wise comparison
+    /// fails. The error message must name the row.
+    #[test]
+    fn test_passthrough_id_mismatch_detected() -> Result<()> {
+        let dir = fresh_tmpdir("tg_pt_id_mismatch");
+        let rows = gen_multiome_rows(200);
+        let (r1_path, r2_path, pt_path) = write_multiome_fixture(&dir, &rows, |rs| {
+            // Reverse the passthrough records so IDs no longer align with R1/R2.
+            let mut v = pt_identity(rs);
+            v.reverse();
+            v
+        })?;
+        let config = passthrough_test_config();
+
+        let out_r1 = dir.join("out_R1.fq.gz");
+        let out_r2 = dir.join("out_R2.fq.gz");
+        let out_pt = dir.join("out_pt.fq.gz");
+
+        let res = run_paired_end_parallel(
+            &r1_path,
+            &r2_path,
+            Some(&pt_path),
+            &out_r1,
+            &out_r2,
+            Some(&out_pt),
+            None,
+            None,
+            &config,
+            4,
+            true,
+            UnpairedLengths { r1: 35, r2: 35 },
+            None,
+        );
+        let err = res.unwrap_err().to_string();
+        assert!(
+            err.contains("Read ID mismatch"),
+            "expected ID-mismatch error, got: {err}"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// §6 — `--dont_gzip` plain-output coverage.
+    ///
+    /// Runs the parity test with `gzip = false` to exercise the plain
+    /// branch of `process_paired_batch` (which uses `Vec<u8>` sinks
+    /// directly instead of GzEncoders). A bug that only lives in the plain
+    /// branch would slip past §2.
+    #[test]
+    fn test_passthrough_dont_gzip_plain_output() -> Result<()> {
+        let dir = fresh_tmpdir("tg_pt_dont_gzip");
+        let rows = gen_multiome_rows(300);
+        let (r1_path, r2_path, pt_path) = write_multiome_fixture(&dir, &rows, pt_identity)?;
+        let config = passthrough_test_config();
+
+        let out_r1 = dir.join("plain_R1.fq");
+        let out_r2 = dir.join("plain_R2.fq");
+        let out_pt = dir.join("plain_pt.fq");
+
+        let stats = run_paired_end_parallel(
+            &r1_path,
+            &r2_path,
+            Some(&pt_path),
+            &out_r1,
+            &out_r2,
+            Some(&out_pt),
+            None,
+            None,
+            &config,
+            2,
+            false, // ← --dont_gzip
+            UnpairedLengths { r1: 35, r2: 35 },
+            None,
+        )?;
+
+        // Same lockstep invariants as the gzip path.
+        let r1_recs = read_records(&out_r1)?;
+        let r2_recs = read_records(&out_r2)?;
+        let pt_recs = read_records(&out_pt)?;
+        assert_eq!(r1_recs.len(), r2_recs.len());
+        assert_eq!(r1_recs.len(), pt_recs.len());
+        assert_eq!(stats.2.passthrough_records_checked, 300);
+        assert_eq!(
+            r1_recs.len(),
+            stats.2.passthrough_records_kept,
+            "kept count matches surviving record count"
+        );
+        for ((a, b), c) in r1_recs.iter().zip(r2_recs.iter()).zip(pt_recs.iter()) {
+            assert_eq!(
+                crate::fastq::read_id_prefix(&a.0),
+                crate::fastq::read_id_prefix(&b.0),
+            );
+            assert_eq!(
+                crate::fastq::read_id_prefix(&a.0),
+                crate::fastq::read_id_prefix(&c.0),
+            );
+        }
 
         fs::remove_dir_all(&dir).ok();
         Ok(())

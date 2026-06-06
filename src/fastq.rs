@@ -144,6 +144,39 @@ impl FastqRecord {
     }
 }
 
+/// Extract the ID prefix used for paired-end / `--passthrough` sync checks.
+///
+/// Steps:
+///   1. Strip a leading `@` if present (`FastqRecord::id` stores it).
+///   2. Take everything before the first ASCII whitespace.
+///   3. Strip a trailing `/1`, `/2`, or `/3` (legacy Illumina ID style — still
+///      common in SRA / ENA archived data).
+///
+/// Examples:
+///   `"@read1"`                → `"read1"`
+///   `"@read1 1:N:0:CGATCG"`   → `"read1"`
+///   `"@read1/1"`              → `"read1"`
+///   `"@read1/2"`              → `"read1"`
+///   `"@read1/3"`              → `"read1"`
+///   `"@read1/1 1:N:0:CGATCG"` → `"read1"`
+///   `"@read1/4"`              → `"read1/4"`  (only `/1` `/2` `/3` strip)
+///
+/// Used by both the serial paired-end pipeline (`trimmer::run_paired_end`)
+/// and the parallel reader thread (`parallel::read_pairs_round_robin`) to
+/// verify that R1, R2, and the optional `--passthrough` records share the
+/// same template across all three streams. Per plan v2 §AB2 the trailing
+/// `/[123]` strip is in v1 (not deferred) — covers the legacy
+/// `@read/1` / `@read/2` / `@read/3` convention without false-positive risk
+/// (legitimate read IDs never end in a literal `/1` `/2` `/3` token).
+pub fn read_id_prefix(id: &str) -> &str {
+    let stripped = id.strip_prefix('@').unwrap_or(id);
+    let head = stripped.split_ascii_whitespace().next().unwrap_or("");
+    head.rsplit_once('/')
+        .filter(|(_, suf)| matches!(*suf, "1" | "2" | "3"))
+        .map(|(p, _)| p)
+        .unwrap_or(head)
+}
+
 /// Number of records per batch sent through the threaded reader channel.
 /// Larger batches reduce channel overhead; 4096 records ≈ 1.5MB.
 const READER_BATCH_SIZE: usize = 4096;
@@ -705,5 +738,88 @@ mod tests {
 
         std::fs::remove_file(&path)?;
         Ok(())
+    }
+
+    // ── read_id_prefix (plan v2 Step 4) ──────────────────────────────────
+
+    #[test]
+    fn test_read_id_prefix_bare() {
+        assert_eq!(read_id_prefix("@read1"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_with_description() {
+        // Modern Illumina (post-CASAVA-1.8): "@HEADER 1:N:0:CGATCG"
+        assert_eq!(read_id_prefix("@read1 1:N:0:CGATCG"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_strips_slash_one() {
+        // Legacy SRA/ENA: "@read/1" for R1
+        assert_eq!(read_id_prefix("@read1/1"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_strips_slash_two() {
+        assert_eq!(read_id_prefix("@read1/2"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_strips_slash_three() {
+        // 10X Multiome / scATAC: I1 read tagged "@read/3" in some pipelines.
+        assert_eq!(read_id_prefix("@read1/3"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_strips_slash_one_with_description() {
+        // Combination: legacy slash + modern description.
+        assert_eq!(read_id_prefix("@read1/1 1:N:0:CGATCG"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_no_strip_slash_four() {
+        // Only /1, /2, /3 are stripped. /4 (and any other suffix) is preserved.
+        assert_eq!(read_id_prefix("@read1/4"), "read1/4");
+    }
+
+    #[test]
+    fn test_read_id_prefix_empty() {
+        assert_eq!(read_id_prefix(""), "");
+    }
+
+    #[test]
+    fn test_read_id_prefix_at_only() {
+        // Pathological but well-defined: bare '@' means an empty ID.
+        assert_eq!(read_id_prefix("@"), "");
+    }
+
+    #[test]
+    fn test_read_id_prefix_no_at_sign() {
+        // Some callers may pass an already-stripped ID — should still work.
+        assert_eq!(read_id_prefix("read1"), "read1");
+        assert_eq!(read_id_prefix("read1/1"), "read1");
+    }
+
+    #[test]
+    fn test_read_id_prefix_paired_three_way_sync() {
+        // The load-bearing use case: R1, R2, passthrough share a prefix.
+        // This is what the sync check across the three FASTQ streams hashes.
+        assert_eq!(
+            read_id_prefix("@SRR12345.1 1:N:0:ATCG"),
+            read_id_prefix("@SRR12345.1 2:N:0:ATCG"),
+        );
+        assert_eq!(
+            read_id_prefix("@SRR12345.1 1:N:0:ATCG"),
+            read_id_prefix("@SRR12345.1 3:N:0:ATCG"),
+        );
+        // Legacy form, same template across three streams.
+        assert_eq!(
+            read_id_prefix("@SRR12345.1/1"),
+            read_id_prefix("@SRR12345.1/2"),
+        );
+        assert_eq!(
+            read_id_prefix("@SRR12345.1/1"),
+            read_id_prefix("@SRR12345.1/3"),
+        );
     }
 }

@@ -370,27 +370,105 @@ pub fn run_single_end(
 ///
 /// Reads R1 and R2 in lockstep, trims both, applies pair-aware filtering.
 /// This is the key architectural improvement over TrimGalore's 3-pass approach.
+///
+/// When `reader_passthrough` and `writer_passthrough` are both `Some`,
+/// reads a third FASTQ file in lockstep (`--passthrough` mode):
+/// records are carried through untrimmed but dropped 1:1 when the pair
+/// is dropped. Both parameters must be both-`Some` or both-`None` —
+/// mismatched is a programming error caught by `debug_assert!`. See plan
+/// v2 §Behavior §7 for the 8-arm three-way EOF match enumeration.
 #[allow(clippy::too_many_arguments)]
 pub fn run_paired_end(
     reader_r1: &mut FastqReader,
     reader_r2: &mut FastqReader,
+    reader_passthrough: Option<&mut FastqReader>,
     writer_r1: &mut FastqWriter,
     writer_r2: &mut FastqWriter,
+    mut writer_passthrough: Option<&mut FastqWriter>,
     mut unpaired_r1: Option<&mut FastqWriter>,
     mut unpaired_r2: Option<&mut FastqWriter>,
     config: &TrimConfig,
     unpaired: crate::filters::UnpairedLengths,
 ) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
+    // Both passthrough params must be both-Some or both-None.
+    debug_assert!(
+        reader_passthrough.is_some() == writer_passthrough.is_some(),
+        "run_paired_end: reader_passthrough and writer_passthrough must be both Some or both None"
+    );
+
     let mut stats_r1 = TrimStats::with_adapter_count(config.adapters.len());
     let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
     let mut pair_stats = PairValidationStats::default();
+    let mut record_idx: usize = 0;
+    // Move passthrough_reader into a local so we can call next_record on it
+    // without conflicting with the writer's `&mut` borrow at call sites below.
+    let mut reader_pt = reader_passthrough;
 
     loop {
         let rec1 = reader_r1.next_record()?;
         let rec2 = reader_r2.next_record()?;
+        let rec_pt = if let Some(ref mut r) = reader_pt {
+            Some(r.next_record()?)
+        } else {
+            None
+        };
+        record_idx += 1;
 
-        match (rec1, rec2) {
+        // 8-arm three-way EOF match when passthrough is active (plan v2 §Behavior §7);
+        // 4-arm 2-tuple match otherwise. The two branches share the trimming-loop body
+        // via `r1` / `r2` / `pt_record` locals (Option<FastqRecord> for the latter).
+        let (r1_opt, r2_opt, pt_record): (
+            Option<FastqRecord>,
+            Option<FastqRecord>,
+            Option<FastqRecord>,
+        ) = match (rec1, rec2, rec_pt) {
+            // ── No passthrough (legacy 4-arm shape) ─────────────────────
+            (r1, r2, None) => (r1, r2, None),
+            // ── (Some, Some, Some): proceed normally ─────────────────────
+            (Some(r1), Some(r2), Some(Some(pt))) => (Some(r1), Some(r2), Some(pt)),
+            // ── (None, None, None): clean three-way EOF ──────────────────
+            (None, None, Some(None)) => (None, None, None),
+            // ── R1/R2 truncation takes precedence over passthrough mismatch ─
+            (Some(_), None, _) => anyhow::bail!(
+                "Read 2 file is truncated — R1 has more reads than R2. \
+                 Please check your paired-end input files!"
+            ),
+            (None, Some(_), _) => anyhow::bail!(
+                "Read 1 file is truncated — R2 has more reads than R1. \
+                 Please check your paired-end input files!"
+            ),
+            // ── R1/R2 in sync, passthrough out of sync ───────────────────
+            (Some(_), Some(_), Some(None)) => anyhow::bail!(
+                "--passthrough file is truncated — R1/R2 have more reads than passthrough \
+                 at record {}",
+                record_idx
+            ),
+            (None, None, Some(Some(_))) => anyhow::bail!(
+                "--passthrough file has more records than R1/R2 (extra records starting \
+                 at record {})",
+                record_idx
+            ),
+        };
+
+        match (r1_opt, r2_opt) {
             (Some(mut r1), Some(mut r2)) => {
+                // Three-way header sync check (only when passthrough is active).
+                if let Some(ref pt) = pt_record {
+                    let p1 = crate::fastq::read_id_prefix(&r1.id);
+                    let p2 = crate::fastq::read_id_prefix(&r2.id);
+                    let p3 = crate::fastq::read_id_prefix(&pt.id);
+                    if p1 != p2 || p1 != p3 {
+                        anyhow::bail!(
+                            "Read ID mismatch at record {}: R1='{}', R2='{}', \
+                             passthrough='{}'. Files are out of sync.",
+                            record_idx,
+                            p1,
+                            p2,
+                            p3
+                        );
+                    }
+                    pair_stats.passthrough_records_checked += 1;
+                }
                 stats_r1.total_reads += 1;
                 stats_r2.total_reads += 1;
                 stats_r1.total_bp_processed += r1.seq.len();
@@ -442,6 +520,9 @@ pub fn run_paired_end(
                     stats_r1.discarded_untrimmed += 1;
                     stats_r2.discarded_untrimmed += 1;
                     pair_stats.pairs_removed += 1;
+                    if pt_record.is_some() {
+                        pair_stats.passthrough_records_dropped += 1;
+                    }
                     continue;
                 }
 
@@ -467,6 +548,14 @@ pub fn run_paired_end(
                         writer_r2.write_record(&r2)?;
                         stats_r1.reads_written += 1;
                         stats_r2.reads_written += 1;
+                        // --passthrough: surviving pair → emit passthrough record
+                        // in the same iteration (lockstep with R1/R2 writes).
+                        if let (Some(ref mut w), Some(pt)) =
+                            (writer_passthrough.as_deref_mut(), &pt_record)
+                        {
+                            w.write_record(pt)?;
+                            pair_stats.passthrough_records_kept += 1;
+                        }
                     }
                     PairFilterResult::TooManyN => {
                         // N-filter: always discard entire pair, no rescue
@@ -474,13 +563,20 @@ pub fn run_paired_end(
                         pair_stats.pairs_removed_n += 1;
                         stats_r1.too_many_n += 1;
                         stats_r2.too_many_n += 1;
+                        if pt_record.is_some() {
+                            pair_stats.passthrough_records_dropped += 1;
+                        }
                     }
                     PairFilterResult::TooShort { r1_ok, r2_ok } => {
                         pair_stats.pairs_removed += 1;
                         stats_r1.too_short += 1;
                         stats_r2.too_short += 1;
 
-                        // Rescue individual reads if --retain_unpaired
+                        // Rescue individual reads if --retain_unpaired. Note:
+                        // --retain_unpaired is rejected by Cli::validate when
+                        // --passthrough is set (plan v2 step 1.iii), so the
+                        // passthrough drop accounting below is unambiguous —
+                        // pt_record is_some() ⇒ no unpaired writer was opened.
                         if let Some(ref mut w) = unpaired_r1.as_deref_mut()
                             && r1_ok
                         {
@@ -493,16 +589,22 @@ pub fn run_paired_end(
                             w.write_record(&r2)?;
                             pair_stats.r2_unpaired += 1;
                         }
+                        if pt_record.is_some() {
+                            pair_stats.passthrough_records_dropped += 1;
+                        }
                     }
                     PairFilterResult::TooLong => {
                         pair_stats.pairs_removed += 1;
                         pair_stats.pairs_removed_too_long += 1;
                         stats_r1.too_long += 1;
                         stats_r2.too_long += 1;
+                        if pt_record.is_some() {
+                            pair_stats.passthrough_records_dropped += 1;
+                        }
                     }
                 }
             }
-            (None, None) => break, // Both files ended
+            (None, None) => break, // Both files ended (and pt also EOF, verified above)
             (Some(_), None) => {
                 anyhow::bail!(
                     "Read 2 file is truncated — R1 has more reads than R2. \

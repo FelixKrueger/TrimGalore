@@ -20,6 +20,21 @@ pub fn is_gzipped(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "gz")
 }
 
+/// Case-folded (ASCII lowercase) string view of a path for collision detection
+/// on case-insensitive filesystems (APFS/NTFS). Used by:
+///   * `Cli::validate()` to catch `--passthrough` aliasing R1 or R2 (e.g.
+///     `--passthrough r1.fq.gz` while R1 is `R1.fq.gz`).
+///   * `main::run` paired-end output-collision pre-flight, which hashes
+///     prospective output paths so case-only aliases fail loudly rather
+///     than silently overwriting (issue #216).
+///
+/// Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
+/// false-positive, but the penalty is a loud early error rather than
+/// silent data loss.
+pub(crate) fn norm_path(p: &Path) -> String {
+    p.to_string_lossy().to_ascii_lowercase()
+}
+
 /// Ensure the user-supplied `--output_dir` exists, creating it (and any
 /// missing ancestors) if not. No-op when no `--output_dir` was passed or
 /// the directory already exists.
@@ -147,6 +162,44 @@ pub fn unpaired_output_names(
         .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
 
     (dir.join(&f1), dir.join(&f2))
+}
+
+/// Generate the passthrough output filename for paired-end mode with
+/// `--passthrough` (10X Multiome / scATAC cell-barcode carrier).
+///
+/// The naming follows the same `--basename` semantic as
+/// `paired_end_output_names`: when `--basename foo` is set the output is
+/// `foo_passthrough.{fq,fq.gz}`; otherwise the stem derives from the
+/// passthrough input filename via `strip_fastq_extensions`.
+///
+/// Note: `gzip` is the resolved global flag (driven by R1's input
+/// compression in `main.rs`), not the passthrough input's own extension —
+/// output compression is uniform across the three pair outputs, see plan
+/// v2 §Assumptions §11.
+pub fn passthrough_output_name(
+    input_passthrough: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+    gzip: bool,
+) -> PathBuf {
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input_passthrough));
+
+    let ext = if gzip {
+        "_passthrough.fq.gz"
+    } else {
+        "_passthrough.fq"
+    };
+    let filename = format!("{}{}", stem, ext);
+
+    let dir = output_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| {
+        input_passthrough
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    });
+    dir.join(&filename)
 }
 
 /// Generate the trimming report filename.
@@ -359,6 +412,76 @@ mod tests {
     fn test_ensure_output_dir_none_is_noop() {
         // No --output_dir was passed; helper must be a clean no-op.
         ensure_output_dir(None).unwrap();
+    }
+
+    #[test]
+    fn test_norm_path_case_folds() {
+        // norm_path is the case-folded normalisation that the output-collision
+        // pre-flight + --passthrough validation both use. Plain lowercase is
+        // identity; uppercase / mixed case fold to lowercase.
+        assert_eq!(norm_path(Path::new("foo.fq.gz")), "foo.fq.gz");
+        assert_eq!(norm_path(Path::new("FOO.FQ.GZ")), "foo.fq.gz");
+        assert_eq!(norm_path(Path::new("Foo.Fq.Gz")), "foo.fq.gz");
+        assert_eq!(
+            norm_path(Path::new("/Some/Dir/Sample_R1.fq.gz")),
+            "/some/dir/sample_r1.fq.gz"
+        );
+        // Case-folded aliases compare equal under norm_path.
+        assert_eq!(
+            norm_path(Path::new("R1.fq.gz")),
+            norm_path(Path::new("r1.fq.gz"))
+        );
+    }
+
+    // ── passthrough_output_name (plan v2 Step 2) ──────────────────────────
+
+    #[test]
+    fn test_passthrough_output_name_bare() {
+        let pt = Path::new("/data/I1.fq.gz");
+        let out = passthrough_output_name(pt, None, None, true);
+        assert_eq!(out, PathBuf::from("/data/I1_passthrough.fq.gz"));
+    }
+
+    #[test]
+    fn test_passthrough_output_name_plain() {
+        let pt = Path::new("/data/I1.fq.gz");
+        let out = passthrough_output_name(pt, None, None, false);
+        assert_eq!(out, PathBuf::from("/data/I1_passthrough.fq"));
+    }
+
+    #[test]
+    fn test_passthrough_output_name_with_output_dir() {
+        let pt = Path::new("/in/I1.fq.gz");
+        let out = passthrough_output_name(pt, Some(Path::new("/out")), None, true);
+        assert_eq!(out, PathBuf::from("/out/I1_passthrough.fq.gz"));
+    }
+
+    #[test]
+    fn test_passthrough_output_name_with_basename() {
+        let pt = Path::new("/data/I1.fq.gz");
+        let out = passthrough_output_name(pt, None, Some("foo"), true);
+        assert_eq!(out, PathBuf::from("/data/foo_passthrough.fq.gz"));
+    }
+
+    #[test]
+    fn test_passthrough_output_name_basename_with_output_dir() {
+        let pt = Path::new("/in/I1.fq.gz");
+        let out = passthrough_output_name(pt, Some(Path::new("/out")), Some("foo"), true);
+        assert_eq!(out, PathBuf::from("/out/foo_passthrough.fq.gz"));
+    }
+
+    #[test]
+    fn test_passthrough_output_name_all_extensions() {
+        // Every FASTQ extension Trim Galore recognises strips cleanly.
+        for (input, expected) in [
+            ("/d/s.fastq.gz", "/d/s_passthrough.fq.gz"),
+            ("/d/s.fq.gz", "/d/s_passthrough.fq.gz"),
+            ("/d/s.fastq", "/d/s_passthrough.fq.gz"),
+            ("/d/s.fq", "/d/s_passthrough.fq.gz"),
+        ] {
+            let out = passthrough_output_name(Path::new(input), None, None, true);
+            assert_eq!(out, PathBuf::from(expected), "input={input}");
+        }
     }
 
     #[test]
