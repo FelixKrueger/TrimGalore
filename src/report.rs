@@ -103,7 +103,12 @@ impl TrimStats {
 }
 
 /// Statistics for paired-end validation.
-#[derive(Debug, Default)]
+///
+/// `PartialEq, Eq` are required for plan-v2 Validation §2's serial-vs-parallel
+/// parity assertion (`assert_eq!(serial_stats, parallel_stats)`). Without them
+/// the parity test would not compile. TrimStats already derives PartialEq for
+/// the same reason. *(Reviewer-A critical catch.)*
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct PairValidationStats {
     /// Total read pairs analyzed
     pub pairs_analyzed: usize,
@@ -117,6 +122,20 @@ pub struct PairValidationStats {
     pub r1_unpaired: usize,
     /// R2 reads written to unpaired output
     pub r2_unpaired: usize,
+
+    // ── --passthrough fields (plan v2 Step 3) ───────────────────────────
+    // Default 0; non-zero only when --passthrough is set.
+    // Note: plan specifies `u64`, but the existing fields are `usize` —
+    // tracking the codebase convention matters more than the plan's exact
+    // numeric type. All counters are read-record counts, well within usize
+    // range on 32-bit-or-larger platforms.
+    /// Records carried through to the passthrough output (one per surviving pair).
+    pub passthrough_records_kept: usize,
+    /// Records dropped from the passthrough output (one per dropped pair).
+    pub passthrough_records_dropped: usize,
+    /// Sync checks performed across R1/R2/passthrough headers (= pairs_analyzed
+    /// when --passthrough is active, 0 otherwise).
+    pub passthrough_records_checked: usize,
 }
 
 impl PairValidationStats {
@@ -128,6 +147,10 @@ impl PairValidationStats {
         self.pairs_removed_too_long += other.pairs_removed_too_long;
         self.r1_unpaired += other.r1_unpaired;
         self.r2_unpaired += other.r2_unpaired;
+        // --passthrough fields (plan v2 Step 3)
+        self.passthrough_records_kept += other.passthrough_records_kept;
+        self.passthrough_records_dropped += other.passthrough_records_dropped;
+        self.passthrough_records_checked += other.passthrough_records_checked;
     }
 }
 
@@ -428,6 +451,57 @@ pub fn write_pair_validation_stats<W: Write>(
         )?;
     }
 
+    writeln!(w)?;
+
+    Ok(())
+}
+
+/// Write the `=== Passthrough file ===` section of a paired-end trimming
+/// report (plan v2 Step 9). Emitted **only** when `--passthrough` was active
+/// for the run — detect via `stats.passthrough_records_checked > 0`. Includes
+/// input and output paths so users can grep their reports for the carrier
+/// file. MultiQC compatibility: the block is purely additive content at the
+/// end of the existing report; existing parsers ignore unknown trailing
+/// sections.
+pub fn write_passthrough_stats<W: Write>(
+    w: &mut W,
+    stats: &PairValidationStats,
+    input: &std::path::Path,
+    output: &std::path::Path,
+) -> std::io::Result<()> {
+    // Defensive: caller is responsible for gating, but if checked == 0 the
+    // block would mislead with "0% carried through" etc. Silently skip.
+    if stats.passthrough_records_checked == 0 {
+        return Ok(());
+    }
+
+    writeln!(w, "=== Passthrough file ===")?;
+    writeln!(w)?;
+    writeln!(w, "Input:                          {}", input.display())?;
+    writeln!(w, "Output:                         {}", output.display())?;
+    writeln!(
+        w,
+        "Records carried through:        {:>10} ({:.2}%)",
+        format_number(stats.passthrough_records_kept),
+        percentage(
+            stats.passthrough_records_kept,
+            stats.passthrough_records_checked
+        )
+    )?;
+    writeln!(
+        w,
+        "Records dropped (pair filtered):{:>10} ({:.2}%)",
+        format_number(stats.passthrough_records_dropped),
+        percentage(
+            stats.passthrough_records_dropped,
+            stats.passthrough_records_checked
+        )
+    )?;
+    writeln!(
+        w,
+        "Sync checks performed:          {:>10} (all matched)",
+        format_number(stats.passthrough_records_checked)
+    )?;
     writeln!(w)?;
 
     Ok(())
@@ -925,10 +999,40 @@ pub fn write_json_report<W: Write>(
             )?;
             json_int(w, i2, "r1_unpaired", ps.r1_unpaired, true)?;
             json_int(w, i2, "r2_unpaired", ps.r2_unpaired, false)?;
-            writeln!(w, "{}}}", i1)?;
+            writeln!(w, "{}}},", i1)?;
         }
         None => {
-            json_null(w, i1, "pair_validation", false)?;
+            json_null(w, i1, "pair_validation", true)?;
+        }
+    }
+
+    // ── Passthrough (plan v2 Step 3 + Step 9) ───────────────────
+    // Emitted as `null` when --passthrough was not active; otherwise an
+    // object with kept/dropped/checked counts. `passthrough_records_checked`
+    // is the activation sentinel: it's incremented per record by the sync
+    // check, so > 0 iff --passthrough ran.
+    match pair_stats {
+        Some(ps) if ps.passthrough_records_checked > 0 => {
+            writeln!(w, "{}\"passthrough\": {{", i1)?;
+            json_int(w, i2, "records_kept", ps.passthrough_records_kept, true)?;
+            json_int(
+                w,
+                i2,
+                "records_dropped",
+                ps.passthrough_records_dropped,
+                true,
+            )?;
+            json_int(
+                w,
+                i2,
+                "records_checked",
+                ps.passthrough_records_checked,
+                false,
+            )?;
+            writeln!(w, "{}}}", i1)?;
+        }
+        _ => {
+            json_null(w, i1, "passthrough", false)?;
         }
     }
 
@@ -1326,6 +1430,7 @@ mod tests {
             pairs_removed_too_long: 0,
             r1_unpaired: 10,
             r2_unpaired: 15,
+            ..PairValidationStats::default()
         };
 
         // R1 report

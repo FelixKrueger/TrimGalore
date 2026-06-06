@@ -198,6 +198,18 @@ fn main() -> Result<()> {
                 candidates.push(u1);
                 candidates.push(u2);
             }
+            // --passthrough adds a third output path per pair. v1 only
+            // supports a single pair (Cli::validate enforces input.len() == 2
+            // when passthrough is set), so this either contributes zero or
+            // one extra candidate to the collision set.
+            if let Some(ref pt_input) = cli.passthrough {
+                candidates.push(naming::passthrough_output_name(
+                    pt_input,
+                    output_dir,
+                    cli.basename.as_deref(),
+                    gzip,
+                ));
+            }
             for p in candidates {
                 if let Some(existing) = out_paths.insert(norm(&p), p.clone()) {
                     anyhow::bail!(
@@ -231,6 +243,13 @@ fn main() -> Result<()> {
                 FastqReader::sanity_check(&chunk[0])?;
             }
             FastqReader::sanity_check(&chunk[1])?;
+            // --passthrough: sanity-check the third file once (Cli::validate
+            // already enforces single-pair-only when passthrough is set).
+            if pair_idx == 0
+                && let Some(ref pt_path) = cli.passthrough
+            {
+                FastqReader::sanity_check(pt_path)?;
+            }
 
             let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &chunk[0])?;
 
@@ -718,6 +737,15 @@ fn run_paired(
     eprintln!("  Output R1: {}", output_r1.display());
     eprintln!("  Output R2: {}", output_r2.display());
 
+    // --passthrough wiring (plan v2 Step 8). Compute the third output path
+    // when active and eprintln! it for visibility, matching the R1/R2 idiom.
+    let passthrough_input: Option<&Path> = cli.passthrough.as_deref();
+    let passthrough_output: Option<std::path::PathBuf> =
+        passthrough_input.map(|pt| naming::passthrough_output_name(pt, output_dir, basename, gzip));
+    if let (Some(pt_in), Some(pt_out)) = (passthrough_input, passthrough_output.as_deref()) {
+        eprintln!("  Passthrough: {} → {}", pt_in.display(), pt_out.display());
+    }
+
     // Compute unpaired output paths (needed for both parallel and sequential paths)
     let (unpaired_r1_path, unpaired_r2_path) = if cli.retain_unpaired {
         let (up1, up2) =
@@ -736,8 +764,10 @@ fn run_paired(
         parallel::run_paired_end_parallel(
             input_r1,
             input_r2,
+            passthrough_input,
             &output_r1,
             &output_r2,
+            passthrough_output.as_deref(),
             unpaired_r1_path.as_deref(),
             unpaired_r2_path.as_deref(),
             config,
@@ -757,6 +787,18 @@ fn run_paired(
         let mut writer_r1 = FastqWriter::create(&output_r1, gzip, 1, level)?;
         let mut writer_r2 = FastqWriter::create(&output_r2, gzip, 1, level)?;
 
+        // --passthrough: open the third reader + writer when active.
+        // Plan v2 §Behavior Step 5/6: serial path opens via FastqReader::open
+        // (not open_threaded — single-threaded mode).
+        let mut reader_passthrough = match passthrough_input {
+            Some(p) => Some(FastqReader::open(p)?),
+            None => None,
+        };
+        let mut writer_passthrough = match passthrough_output.as_deref() {
+            Some(p) => Some(FastqWriter::create(p, gzip, 1, level)?),
+            None => None,
+        };
+
         let (mut unpaired_w1, mut unpaired_w2) = match (&unpaired_r1_path, &unpaired_r2_path) {
             (Some(p1), Some(p2)) => (
                 Some(FastqWriter::create(p1, gzip, 1, level)?),
@@ -768,8 +810,10 @@ fn run_paired(
         let result = trimmer::run_paired_end(
             &mut reader_r1,
             &mut reader_r2,
+            reader_passthrough.as_mut(),
             &mut writer_r1,
             &mut writer_r2,
+            writer_passthrough.as_mut(),
             unpaired_w1.as_mut(),
             unpaired_w2.as_mut(),
             config,
@@ -781,6 +825,9 @@ fn run_paired(
 
         writer_r1.flush()?;
         writer_r2.flush()?;
+        if let Some(ref mut w) = writer_passthrough {
+            w.flush()?;
+        }
         if let Some(ref mut w) = unpaired_w1 {
             w.flush()?;
         }
@@ -789,6 +836,7 @@ fn run_paired(
         }
         drop(writer_r1);
         drop(writer_r2);
+        drop(writer_passthrough);
         drop(unpaired_w1);
         drop(unpaired_w2);
 
@@ -930,6 +978,16 @@ fn run_paired(
             // Pair validation stats go in R2 report only (matches Perl behavior)
             if idx == 1 {
                 report::write_pair_validation_stats(&mut w, &pair_stats)?;
+                // --passthrough block: gated on the activation sentinel
+                // (passthrough_records_checked > 0), and only when the user
+                // actually passed --passthrough (otherwise pt_in/pt_out are
+                // None). Both paths must be Some — verified by debug_assert
+                // upstream. (Plan v2 Step 9.)
+                if let (Some(pt_in), Some(pt_out)) =
+                    (cli.passthrough.as_deref(), passthrough_output.as_deref())
+                {
+                    report::write_passthrough_stats(&mut w, &pair_stats, pt_in, pt_out)?;
+                }
             }
             eprintln!("Report: {}", report_path.display());
 
@@ -974,6 +1032,14 @@ fn run_paired(
             output_dir,
             cli.cores,
         )?;
+        // --passthrough: also FastQC the carrier output. Note: cell-barcode
+        // reads (16-28 bp of uniformly-structured sequence) will produce a
+        // FastQC report with per-base content bias warnings — that's expected,
+        // not a defect. The `--passthrough` help text documents this. (Plan
+        // v2 Step 10.)
+        if let Some(ref pt_out) = passthrough_output {
+            fastqc::run(pt_out, cli.fastqc_args.as_deref(), output_dir, cli.cores)?;
+        }
     }
 
     Ok(())

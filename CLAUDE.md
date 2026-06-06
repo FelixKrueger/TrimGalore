@@ -30,7 +30,7 @@ To reproduce the `validation` CI job locally (md5-compare against Perl Trim Galo
 
 ## Test fixtures
 
-`test_files/` holds gzipped FASTQ fixtures used by both `cargo test` and the CI validation matrix: BS-seq paired-end (`BS-seq_10K_R{1,2}.fastq.gz`), RRBS (`SRR24766921_RRBS_R{1,2}.fastq.gz`), Clock-mode (`clock_10K_R{1,2}.fastq.gz`), demux (`demux_test.fastq.gz` + `demux_test_samplesheet.txt`), poly-A/T, plus negative cases (`colorspace_file.fastq`, `truncated.fq.gz`, `empty_file.fastq`). Tests in `src/cli.rs` reference these by relative path, so `cargo test` must be run from the crate root.
+`test_files/` holds gzipped FASTQ fixtures used by both `cargo test` and the CI validation matrix: BS-seq paired-end (`BS-seq_10K_R{1,2}.fastq.gz`), RRBS (`SRR24766921_RRBS_R{1,2}.fastq.gz`), Clock-mode (`clock_10K_R{1,2}.fastq.gz`), demux (`demux_test.fastq.gz` + `demux_test_samplesheet.txt`), poly-A/T, Multiome passthrough (`BS-seq_10K_I1.fastq.gz` — synthetic 16 bp cell-barcode read in lockstep with the BS-seq R1/R2 pair; used by the `--passthrough` demo recipe and the `tests/integration_passthrough.rs` integration test), plus negative cases (`colorspace_file.fastq`, `truncated.fq.gz`, `empty_file.fastq`). Tests in `src/cli.rs` reference these by relative path, so `cargo test` must be run from the crate root.
 
 ## Architecture
 

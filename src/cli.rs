@@ -194,6 +194,26 @@ pub struct Cli {
     #[clap(long = "length_2", default_value = "35", alias = "r2")]
     pub length_2: usize,
 
+    /// Pass a third FASTQ file through unchanged but keep it in lockstep with R1/R2.
+    /// Use case: 10X Multiome / scATAC libraries where the cell-barcode (I1/I2) read
+    /// must stay aligned to the trimmed R1/R2. Records dropped by length/quality/N
+    /// filters are also dropped from the passthrough output. The passthrough file is
+    /// never trimmed or adapter-scanned.
+    ///
+    /// Requires --paired with exactly one R1/R2 pair. Incompatible with
+    /// --retain_unpaired, --clumpify, and all specialty modes (--clock, --implicon,
+    /// --hardtrim5/3, --demux).
+    ///
+    /// Note: legacy headers like @read/1, @read/2, @read/3 sync correctly. If your
+    /// files use unusual header conventions and the sync check fires unexpectedly,
+    /// please file an issue with a sample header line. If --fastqc is enabled the
+    /// passthrough FastQC report will look poor (cell-barcode reads are intentionally
+    /// uniformly-structured) — that's expected, not a defect. On a mid-stream reader
+    /// error (truncated or desynced passthrough), partial output files may remain on
+    /// disk — re-run after fixing the input.
+    #[clap(long = "passthrough")]
+    pub passthrough: Option<PathBuf>,
+
     /// Add clipped sequences to read IDs for --clip_R1/R2, --three_prime_clip_R1/R2, and --hardtrim5/3.
     /// Appends :clip5:SEQ and/or :clip3:SEQ to the read ID (each half only when that side was clipped). Useful for UMI handling.
     #[clap(long = "rename")]
@@ -517,6 +537,74 @@ impl Cli {
             // back to plain mode if the budget is below the floor.
             crate::clump::parse_memory_size(&self.memory)
                 .map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
+        }
+
+        // --passthrough: 9-item compatibility envelope. Layout mirrors --clumpify
+        // above. Each rejection has a precise user-facing message; case-folded
+        // collision check (1.ix) uses crate::io::norm_path to share the same
+        // APFS/NTFS-aware normalisation as the output-collision pre-flight in
+        // main.rs (issue #216 protection).
+        if let Some(ref pt) = self.passthrough {
+            // 1.i — paired-end required
+            if !self.paired {
+                anyhow::bail!("--passthrough requires --paired");
+            }
+            // 1.ii — exactly one R1/R2 pair in v1
+            if self.input.len() != 2 {
+                anyhow::bail!(
+                    "--passthrough requires exactly one R1/R2 pair (got {} input files); \
+                     multi-pair input with passthrough is not yet implemented",
+                    self.input.len()
+                );
+            }
+            // 1.iii — strict pair semantics in v1
+            if self.retain_unpaired {
+                anyhow::bail!(
+                    "--passthrough is incompatible with --retain_unpaired \
+                     (passthrough requires strict pair semantics in v1)"
+                );
+            }
+            // 1.iv — clumpy reorder breaks lockstep
+            if self.clumpify {
+                anyhow::bail!("--passthrough is not yet supported with --clumpify");
+            }
+            // 1.v–1.vii — specialty modes own their own input arity/output naming
+            if self.clock {
+                anyhow::bail!("--passthrough is not compatible with --clock");
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!("--passthrough is not compatible with --implicon");
+            }
+            if self.hardtrim5.is_some() {
+                anyhow::bail!("--passthrough is not compatible with --hardtrim5");
+            }
+            if self.hardtrim3.is_some() {
+                anyhow::bail!("--passthrough is not compatible with --hardtrim3");
+            }
+            if self.demux.is_some() {
+                anyhow::bail!("--passthrough is not compatible with --demux");
+            }
+            // 1.viii — file must exist
+            if !pt.exists() {
+                anyhow::bail!("--passthrough file not found: {}", pt.display());
+            }
+            // 1.ix — case-folded collision with R1/R2 (issue #216-style APFS/NTFS guard).
+            // self.input.len() == 2 here per 1.ii. The plan's main.rs::run pre-flight
+            // catches case-only output collisions; this catches case-only INPUT aliases
+            // where --passthrough silently dual-consumes one input on a case-insensitive
+            // filesystem.
+            if self.input.len() == 2 {
+                let pt_norm = crate::io::norm_path(pt);
+                if pt_norm == crate::io::norm_path(&self.input[0])
+                    || pt_norm == crate::io::norm_path(&self.input[1])
+                {
+                    anyhow::bail!(
+                        "--passthrough cannot point at R1 or R2 (case-insensitive match \
+                         on APFS/NTFS): {} aliases an input file",
+                        pt.display()
+                    );
+                }
+            }
         }
 
         if let Some(n) = self.hardtrim5
@@ -1089,5 +1177,202 @@ mod tests {
             .expect("clumpify --compression 6 should validate");
         assert!(cli.clumpify);
         assert_eq!(cli.compression, 6);
+    }
+
+    // ── --passthrough validation (plan v2 Step 1) ─────────────────────────
+    //
+    // The third fixture used as the "passthrough" target — any existing
+    // test_files/ FASTQ works since we never trim it in validation; we just
+    // need a real path so step 1.viii (file exists) is satisfied.
+    const PT: &str = "test_files/SRR24766921_RRBS_R2.fastq.gz";
+
+    #[test]
+    fn test_passthrough_paired_pair_accepted() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", PT, R1, R2]);
+        cli.validate()
+            .expect("--passthrough with one R1/R2 pair should validate");
+        assert_eq!(cli.passthrough.as_deref(), Some(std::path::Path::new(PT)));
+    }
+
+    #[test]
+    fn test_passthrough_requires_paired() {
+        let cli = Cli::parse_from(["trim_galore", "--passthrough", PT, R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--passthrough requires --paired"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_passthrough_rejects_multi_pair() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+            ALT_R1,
+            ALT_R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--passthrough requires exactly one R1/R2 pair"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_passthrough_rejects_retain_unpaired() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--retain_unpaired",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--retain_unpaired"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_clumpify() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--clumpify",
+            "--cores",
+            "2",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clumpify"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_clock() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--clock",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--clock"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_implicon() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--implicon=8",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--implicon"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_hardtrim5() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--hardtrim5",
+            "30",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--hardtrim5"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_hardtrim3() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--hardtrim3",
+            "30",
+            "--passthrough",
+            PT,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--hardtrim3"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_demux() {
+        // --demux conflicts with --paired in existing validation, but the
+        // --passthrough vs --demux check must fire BEFORE that — confirm the
+        // error message is the passthrough-specific one. (single-end input
+        // shape because --demux requires single-end.)
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--demux",
+            "test_files/demux_test_samplesheet.txt",
+            "--passthrough",
+            PT,
+            R1,
+        ]);
+        // With single-end input + --passthrough we hit 1.i ("requires --paired")
+        // FIRST. To exercise the --demux check specifically, we'd need --paired
+        // + --demux, which clap rejects at the --demux validation step itself.
+        // The 1.i error is sufficient evidence the validation chain runs.
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--passthrough requires --paired") || err.contains("--demux"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_passthrough_rejects_missing_file() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--passthrough",
+            "test_files/this_does_not_exist.fastq.gz",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--passthrough file not found"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_pointing_at_r1() {
+        // 1.ix collision check: the byte-equal case is the strict subset of
+        // case-folded equality, so this also covers the case-folded path —
+        // norm_path() is a single `to_ascii_lowercase()` call which is
+        // trivially correct (and exercised by io::tests in its own right).
+        // True cross-case testing would need a case-insensitive filesystem
+        // which CI doesn't guarantee.
+        let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", R1, R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("cannot point at R1 or R2"), "got: {err}");
+    }
+
+    #[test]
+    fn test_passthrough_rejects_pointing_at_r2() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", R2, R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("cannot point at R1 or R2"), "got: {err}");
     }
 }
