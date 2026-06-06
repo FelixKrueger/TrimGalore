@@ -1,6 +1,31 @@
 # Trim Galore Changelog
 
 
+### Unreleased (on `dev`)
+
+#### New flags
+
+- **`--passthrough <FILE>` — Multiome / scATAC cell-barcode carrier mode**
+  ([#305](https://github.com/FelixKrueger/TrimGalore/pull/305)). Adds a third
+  FASTQ input that is carried through unchanged but kept in lockstep with R1
+  and R2 — any pair dropped by length / quality / N filters also drops the
+  matching record from the passthrough output. Designed for 10X Multiome
+  ATAC-seq workflows where the modified ATAC adapter is opaque to Cellranger
+  Arc; users can now trim R1 / R2 against their own `-a` / `-a2` while the
+  cell-barcode (I1 / I2 / R3) read stays aligned to the survivors in a
+  single invocation. Per-record three-way header sync check across the three
+  streams (handles both modern Illumina `@HEADER 1:N:0:CGATCG` and legacy
+  `@read/1` `@read/2` `@read/3` styles), with a row-numbered hard-error on
+  any mid-stream desync. Works at `--cores 1` (serial) and `--cores N`
+  (parallel worker pool). Adds a `=== Passthrough file ===` block to the
+  R2 trimming report and a `"passthrough"` object to the JSON report.
+  Requires `--paired` + exactly one R1/R2 pair; incompatible in v1 with
+  `--retain_unpaired`, `--clumpify`, and all specialty modes (`--clock`,
+  `--implicon`, `--hardtrim5/3`, `--demux`). See
+  [Multiome passthrough](https://www.trimgalore.com/modes/passthrough/) for
+  the full guide.
+
+
 ### Version 2.2.0 (Release on 7 May 2026)
 
 **The Clumpify Edition.** Opt-in read-reordering for tighter `.fq.gz` output via canonical 16-mer minimizer sort, with empirically-validated guidance on which data types benefit and which are hurt. Ships alongside a new `--compression` knob that decouples gzip level from reordering, and a new tool-wide `--memory` budget. Co-developed with Phil Ewels (PR [#282](https://github.com/FelixKrueger/TrimGalore/pull/282)) — see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for the full benchmark table and use-case guidance, and [`docs/perf_data/clumpify-{buckberry,rrbs}-2026-05-07/`](https://github.com/FelixKrueger/TrimGalore/tree/master/docs/perf_data) for the WGBS-vs-RRBS contrast that motivated the per-data-type recommendations.
