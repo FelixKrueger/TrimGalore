@@ -166,6 +166,17 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Suppressed unmaintained-crate advisories. CVE-class advisories
+          # remain reported; this list is exclusively `unmaintained` warnings
+          # where the fix has to land in an upstream crate.
+          #
+          # RUSTSEC-2024-0436 — `paste` no longer maintained.
+          # Transitive five levels deep:
+          #   trim-galore → fastqc-rust → statrs → nalgebra → simba → paste
+          # `simba` (dimforge) would need to migrate to `pastey`. Revisit
+          # whenever `simba` ships a `paste`-free release; suppression then
+          # becomes a dangling line + clippy-style audit-warn-on-unused-ignore.
+          ignore: RUSTSEC-2024-0436
 
   # #247 item 4: line/branch coverage reporting via `cargo-llvm-cov`.
   # Generates an LCOV file as an artifact (downloadable from the Actions
