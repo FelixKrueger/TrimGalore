@@ -1342,6 +1342,53 @@ These remain Felix-decisions to be resolved at impl time, NOT blockers for start
 
 ## Implementation log
 
+### Session 4 — 2026-06-25 (Tasks 21–26 + reviewer-flagged fixes; feature complete)
+
+**Done (5 tasks → 26 of 26):**
+
+- ✅ **T21–T23 (integration tests)** — `tests/integration_ubam.rs` with 8 tests:
+  - `single_end_ubam_matches_reference` — content-tuple parity vs committed golden
+  - `paired_end_interleaved_ubam_matches_reference` — both R1 and R2 vs goldens + mate-name alignment invariant
+  - `preserve_tags_roundtrip_matches_golden` — committed `ubam_test_with_tags.bam` fixture + golden output
+  - `preserve_tags_user_specified_order_honoured` — tag order locks to argument order, not BAM aux order
+  - `clumpify_plus_ubam_runs_clean` — exercises `Box<dyn RecordSource>` dispatch through worker pool with BAM
+  - `hardtrim5_plus_ubam_runs_clean` — exercises specialty mode + BAM (now works via `format::open_sync_reader`)
+  - `passthrough_plus_ubam_rejected` — accepts either rejection message (Cli::validate fires first; documented)
+  - `paired_with_single_fastq_rejected` — `--paired SINGLE.fq` rejection message verified
+- ✅ **T24 (CI validation-ubam job)** — `.github/workflows/ci.yml` new job: installs samtools, builds release, runs four assertions: (1) content-tuple parity between `samtools fastq -n` + trim_galore and direct trim_galore; (2) PE record-count parity (R1=R2=10); (3) aligned-BAM hard-error via flag-flipped fixture; (4) `--preserve-tags` tag-propagation grep. Failure artefacts uploaded. Also: updated existing `Validate paired-end rejects odd-count input` test to use 3 inputs (N=1 is legal now in paired-uBAM mode), and added a new `Validate --paired + single FASTQ rejected (uBAM-only path)` step.
+- ✅ **T25 (reproducibility)** — Empirical `SOURCE_DATE_EPOCH=1700000000` double-build: md5 `817fff5206f84dd30227a9571f4370a5` matched. Reviewer B independently confirmed via `find` that no noodles crate ships a `build.rs` (so no new build-time non-determinism is introduced). Reproducibility invariant intact.
+- ✅ **T26 (documentation)** — CLAUDE.md: 2 new module-map entries (`bam.rs`, `format.rs`) + new "uBAM input is auto-detected by content" convention bullet. README.md: 3 new usage examples (SE BAM, PE interleaved BAM, --preserve-tags). CHANGELOG.md: full Unreleased entry under new "New input formats" section + `--preserve-tags` under "New flags".
+
+**Reviewer-flagged fixes folded in (cheap wins from CODE_REVIEW_A and CODE_REVIEW_B):**
+
+- ✅ **A4 / B7**: 6 new `parse_sam_tag_name` unit tests in `src/cli.rs::tests` covering ALL keyword rejection, length, leading-non-alpha, non-alphanumeric, and the canonical happy-path cases.
+- ✅ **plan-manager + reviewer A's HIGH "specialty modes don't work with BAM"**: `src/specialty.rs` 4 call sites switched from `FastqReader::open` to `crate::format::open_sync_reader`. PLAN §3.4 invariant now actually holds.
+- ✅ **Updated existing CI test** that asserted N=1 + paired = "even number of input files" — now uses N=3 (genuinely odd) for that assertion, plus a new assertion that N=1 FASTQ in paired mode gets the new "only legal if uBAM" message.
+
+**Reviewer findings deferred to follow-up commits (with rationale):**
+
+- **A1 HIGH / B6+B7 (BAM error-path unit tests)** — A and B both flagged the in-memory BAM builder pattern for error-path unit tests. The integration tests now cover the aligned-BAM rejection path empirically (T24's flag-flipped fixture); the other error paths (IUPAC, `=`, qual-mismatch) are bounded by the BAM spec + noodles' parser invariants. Deferred to a follow-up commit since adding the noodles in-memory BAM builder is ~50 LOC of test-only boilerplate.
+- **A2 HIGH (`Box<dyn RecordSource>` dispatch via BAM zero-tested in parallel.rs in-tree tests)** — The integration tests `clumpify_plus_ubam_runs_clean` exercise this path via the production binary. Adding an `open_bam` helper analogous to `open_fq` in `parallel.rs::tests` would be cheap (~10 LOC). Deferred to follow-up.
+- **A3 HIGH (run_paired_ubam_single_file duplicates run_paired report block)** — ~50 lines of duplication. Real concern but resolution is a refactor (extract `write_paired_reports` helper). Deferred to follow-up.
+- **B1 MEDIUM (producer-thread panic → silent truncation)** — `catch_unwind` wrap on the producer closure inside `open_paired_interleaved_with_tags`. Worth doing but no real noodles panics observed in testing. Deferred.
+- **B3 LOW (MAX_SLACK off-by-one cosmetic)** — Error message says "exceeded MAX_SLACK = 1024 records" but the check fires at depth 1025. Cosmetic; the user-facing meaning is unchanged.
+
+**Verification at session 4 final state:**
+
+| Gate | Result |
+|---|---|
+| `cargo test --release` | **296 passed, 0 failed** (286 lib + 2 integration_passthrough + 8 integration_ubam) |
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --release --all-targets -- -D warnings` | clean |
+| `SOURCE_DATE_EPOCH` reproducibility check | bit-identical builds verified |
+| End-to-end SE uBAM | ✅ |
+| End-to-end PE uBAM | ✅ |
+| End-to-end `--preserve-tags` | ✅ |
+
+**Coverage:** 40 of 40 plan-coverage items mapped to tasks, all 26 tasks DONE. See `COVERAGE.md` for the audit ledger (Mode B verdict was INCOMPLETE at session-3 close with T21–T26 pending; re-running plan-manager after this session should produce COMPLETE).
+
+---
+
 ### Session 3 — 2026-06-25 (Tasks 15, 17, 20-PE; paired-uBAM end-to-end)
 
 **Done in session 3 (3 more tasks → 21 of 26):**

@@ -3,7 +3,37 @@
 
 ### Unreleased (on `dev`)
 
+#### New input formats
+
+- **uBAM (unaligned BAM) input support**
+  ([#316](https://github.com/FelixKrueger/TrimGalore/issues/316)). Trim Galore
+  now accepts unaligned BAM (uBAM) alongside FASTQ. Auto-detection is content-
+  based — first byte for plain FASTQ, decompressed-payload `BAM\1` magic for
+  uBAM (so `bgzip x.fq` BGZF-framed FASTQ is correctly classified as FASTQ,
+  not BAM). Works at single-end (`trim_galore sample.bam`) and paired-end
+  with a single interleaved BAM file (`trim_galore --paired interleaved.bam`);
+  the paired-end de-interleaver streams the BAM through a bounded-buffer
+  (per-side cap of 1024 records) and errors loudly with a `samtools collate`
+  remediation pointer on grouped (non-mate-adjacent) input. All standard
+  uBAM-emitting tools — samtools sort `-n` / collate, Picard `FastqToSam`,
+  fgbio `FastqToBam` — produce mate-adjacent output and work transparently.
+
+  Aligned BAM is rejected per-record (not only at the first record) so
+  mixed-aligned inputs cannot silently produce wrong output. The
+  implementation uses the pure-Rust `noodles` 0.88 umbrella crate
+  (exact-pinned, BAM feature only — no async, no tokio) sharing the version
+  already pulled transitively via `fastqc-rust 1.0.1`, so the release-binary
+  size delta is zero. Output stays FASTQ; there is no BAM writer.
+
 #### New flags
+
+- **`--preserve-tags TAG1,TAG2,…` — fold BAM aux tags into the FASTQ header**
+  ([#316](https://github.com/FelixKrueger/TrimGalore/issues/316)). Tab-separated,
+  samtools `-T`-compatible. Each tag must be a valid 2-character SAM tag name
+  (`[A-Za-z][A-Za-z0-9]`); the reserved `ALL` keyword is rejected in v1.
+  Tag order in the output header matches the user-specified order, NOT the
+  BAM file's aux-field order. Missing per-record tags are silently skipped.
+  Ignored for FASTQ input (emits a stderr warning).
 
 - **`--passthrough <FILE>` — Multiome / scATAC cell-barcode carrier mode**
   ([#305](https://github.com/FelixKrueger/TrimGalore/pull/305)). Adds a third

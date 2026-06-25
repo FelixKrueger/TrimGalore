@@ -341,12 +341,31 @@ jobs:
 
       - name: Validate paired-end rejects odd-count input
         run: |
+          # NOTE: N=1 with --paired is now LEGAL when the single input is a
+          # uBAM (#316 — paired-uBAM de-interleave path). Use 3 inputs to
+          # test the genuine odd-count rejection: still odd, but unambiguous
+          # because no single file is being treated as paired-interleaved.
           set +e
-          ./target/release/trim_galore --paired test_files/BS-seq_10K_R1.fastq.gz 2>&1 | tee /tmp/odd.log
+          ./target/release/trim_galore --paired \
+            test_files/BS-seq_10K_R1.fastq.gz \
+            test_files/BS-seq_10K_R2.fastq.gz \
+            test_files/BS-seq_10K_R1.fastq.gz 2>&1 | tee /tmp/odd.log
           rc=${PIPESTATUS[0]}
           set -e
           test $rc -ne 0
           grep -q "even number of input files" /tmp/odd.log
+
+      - name: Validate --paired + single FASTQ rejected (uBAM-only path)
+        run: |
+          # #316: --paired with N=1 is only legal if the input is a uBAM
+          # (de-interleaved on the fly). A single FASTQ in --paired mode
+          # must be rejected with a clear message.
+          set +e
+          ./target/release/trim_galore --paired test_files/BS-seq_10K_R1.fastq.gz 2>&1 | tee /tmp/paired_single_fq.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "only legal if that file is a uBAM" /tmp/paired_single_fq.log
 
       - name: Validate paired-end rejects R1==R2
         run: |
@@ -624,6 +643,124 @@ jobs:
             /tmp/rust_multi_seq/
             /tmp/rust_retain/
             /tmp/rust_case/
+            /tmp/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ─── uBAM input-format validation (#316) ───────────────────────────────
+  # No Perl 0.6.11 baseline exists for uBAM (the legacy Perl reader rejects
+  # BAM input), so this job compares two paths through the Rust binary:
+  #   path A:  samtools fastq -n <uBAM> | gzip → trim_galore on the FASTQ
+  #   path B:  trim_galore directly on the uBAM
+  # Both must produce equivalent FASTQ content (record-tuple parity).
+  validation-ubam:
+    name: Validate uBAM input
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    needs: [rust-tests, lint]
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Install samtools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y samtools
+          samtools --version | head -1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache cargo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Validate single-end uBAM — content-tuple parity vs samtools fastq
+        run: |
+          mkdir -p /tmp/via_samtools /tmp/via_trimgalore
+          # `-n` suppresses /1 /2 ID-suffix addition for single-end records.
+          # Without it, samtools adds those suffixes and headers diverge from
+          # our BamReader output which uses the bare record name.
+          samtools fastq -n test_files/ubam_test.bam | gzip > /tmp/via_samtools_input.fq.gz
+          ./target/release/trim_galore -o /tmp/via_samtools /tmp/via_samtools_input.fq.gz
+          ./target/release/trim_galore -o /tmp/via_trimgalore test_files/ubam_test.bam
+          # Tier-1 (GATING): content-tuple parity. Resilient to gzip framing
+          # differences. We extract (id, seq, qual) tuples and diff.
+          # The two paths produce different filenames; rename so the diff is
+          # one-shot.
+          gunzip -c /tmp/via_samtools/via_samtools_input_trimmed.fq.gz \
+            | awk 'NR % 4 != 3' > /tmp/via_samtools.tuples
+          cat /tmp/via_trimgalore/ubam_test_trimmed.fq \
+            | awk 'NR % 4 != 3' > /tmp/via_trimgalore.tuples
+          diff /tmp/via_samtools.tuples /tmp/via_trimgalore.tuples || {
+            echo "TIER-1 FAILED: content-tuple parity mismatch between samtools-fastq path and uBAM-direct path"
+            exit 1
+          }
+          echo "TIER-1 (content-tuple parity): PASS"
+
+      - name: Validate paired-end uBAM (de-interleaved) — record-count parity
+        run: |
+          mkdir -p /tmp/via_pe
+          ./target/release/trim_galore --paired -o /tmp/via_pe test_files/ubam_paired_test.bam
+          test -f /tmp/via_pe/ubam_paired_test_val_1.fq
+          test -f /tmp/via_pe/ubam_paired_test_val_2.fq
+          # Same number of records on each side (de-interleaver lockstep
+          # invariant).
+          R1_COUNT=$(awk 'NR % 4 == 1' /tmp/via_pe/ubam_paired_test_val_1.fq | wc -l)
+          R2_COUNT=$(awk 'NR % 4 == 1' /tmp/via_pe/ubam_paired_test_val_2.fq | wc -l)
+          echo "R1=$R1_COUNT R2=$R2_COUNT"
+          [ "$R1_COUNT" -eq "$R2_COUNT" ] || { echo "MISMATCH: R1/R2 counts differ"; exit 1; }
+          [ "$R1_COUNT" -eq "10" ] || { echo "MISMATCH: expected 10 pairs, got R1=$R1_COUNT"; exit 1; }
+
+      - name: Validate aligned BAM is rejected per-record
+        run: |
+          # Build an aligned BAM by aligning the fixture to a tiny synthetic
+          # reference (or by flipping the UNMAP bit on the committed fixture).
+          # Easier: flip the unmap bit via samtools view text-edit.
+          samtools view -h test_files/ubam_test.bam \
+            | awk 'BEGIN{OFS="\t"} /^@/ {print; next} {$2 = 0; print}' \
+            | samtools view -b - -o /tmp/aligned.bam
+          set +e
+          ./target/release/trim_galore /tmp/aligned.bam -o /tmp/aligned_out 2>&1 | tee /tmp/aligned.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0 || { echo "aligned BAM was NOT rejected"; exit 1; }
+          grep -q "aligned BAM\|FUNMAP=0\|unaligned BAM (uBAM)" /tmp/aligned.log
+
+      - name: Validate --preserve-tags propagates tag values
+        run: |
+          mkdir -p /tmp/with_tags
+          ./target/release/trim_galore --preserve-tags CB,UB \
+            test_files/ubam_test_with_tags.bam -o /tmp/with_tags
+          head -1 /tmp/with_tags/ubam_test_with_tags_trimmed.fq | tee /tmp/first_header.txt
+          grep -q "CB:Z:ATCGATCG-1" /tmp/first_header.txt
+          grep -q "UB:Z:GCTAGCTA" /tmp/first_header.txt
+
+      - name: Upload uBAM validation outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validation-ubam-outputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/via_samtools/
+            /tmp/via_trimgalore/
+            /tmp/via_pe/
+            /tmp/with_tags/
+            /tmp/aligned*
+            /tmp/*.tuples
             /tmp/*.log
           if-no-files-found: warn
           retention-days: 7

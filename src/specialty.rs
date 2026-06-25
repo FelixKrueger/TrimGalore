@@ -6,7 +6,7 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 
-use crate::fastq::{FastqReader, FastqWriter};
+use crate::fastq::FastqWriter;
 use crate::io as naming;
 
 /// Hard-trim every read to keep only the first `keep` bases from the 5' end.
@@ -29,7 +29,7 @@ pub fn hardtrim5(
         output_path.display()
     );
 
-    let mut reader = FastqReader::open(input)?;
+    let mut reader = crate::format::open_sync_reader(input, &[])?;
     let mut writer = FastqWriter::create(&output_path, gzip, cores, gzip_level)?;
     let mut count: usize = 0;
 
@@ -72,7 +72,7 @@ pub fn hardtrim3(
         output_path.display()
     );
 
-    let mut reader = FastqReader::open(input)?;
+    let mut reader = crate::format::open_sync_reader(input, &[])?;
     let mut writer = FastqWriter::create(&output_path, gzip, cores, gzip_level)?;
     let mut count: usize = 0;
 
@@ -132,8 +132,8 @@ pub fn clock(
         out2.display()
     );
 
-    let mut reader_r1 = FastqReader::open(input_r1)?;
-    let mut reader_r2 = FastqReader::open(input_r2)?;
+    let mut reader_r1 = crate::format::open_sync_reader(input_r1, &[])?;
+    let mut reader_r2 = crate::format::open_sync_reader(input_r2, &[])?;
     let mut writer_r1 = FastqWriter::create(&out1, gzip, cores, gzip_level)?;
     let mut writer_r2 = FastqWriter::create(&out2, gzip, cores, gzip_level)?;
 
@@ -245,8 +245,8 @@ pub fn implicon(
         out2.display()
     );
 
-    let mut reader_r1 = FastqReader::open(input_r1)?;
-    let mut reader_r2 = FastqReader::open(input_r2)?;
+    let mut reader_r1 = crate::format::open_sync_reader(input_r1, &[])?;
+    let mut reader_r2 = crate::format::open_sync_reader(input_r2, &[])?;
     let mut writer_r1 = FastqWriter::create(&out1, gzip, cores, gzip_level)?;
     let mut writer_r2 = FastqWriter::create(&out2, gzip, cores, gzip_level)?;
 
@@ -373,7 +373,7 @@ pub fn implicon_output_name(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fastq::FastqRecord;
+    use crate::fastq::{FastqReader, FastqRecord};
 
     fn mk_rec(id: &str, seq: &str, qual: &str) -> FastqRecord {
         FastqRecord {

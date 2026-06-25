@@ -740,10 +740,7 @@ mod tests {
         // R1/R2 records interleaved). The "is it actually a BAM?" check
         // happens in main.rs after format detection.
         // See plans/06252026_ubam-input-support/PLAN.md §3.3.
-        for inputs in [
-            vec![R1, R2, ALT_R1],
-            vec![R1, R2, ALT_R1, ALT_R2, R1],
-        ] {
+        for inputs in [vec![R1, R2, ALT_R1], vec![R1, R2, ALT_R1, ALT_R2, R1]] {
             let mut argv = vec!["trim_galore", "--paired"];
             argv.extend(inputs.iter().copied());
             let cli = Cli::parse_from(argv);
@@ -753,6 +750,46 @@ mod tests {
                 "expected even-number error, got: {err}"
             );
         }
+    }
+
+    // ── parse_sam_tag_name (PLAN §5 step 4.3, T16) ──────────────────────
+    // Both code reviewers flagged the absence of these tests; ~10 LOC to
+    // lock the validator's contract.
+
+    #[test]
+    fn parse_sam_tag_name_accepts_canonical_two_char() {
+        assert_eq!(parse_sam_tag_name("CB").unwrap(), "CB");
+        assert_eq!(parse_sam_tag_name("UB").unwrap(), "UB");
+        assert_eq!(parse_sam_tag_name("RX").unwrap(), "RX");
+        assert_eq!(parse_sam_tag_name("A0").unwrap(), "A0");
+        assert_eq!(parse_sam_tag_name("Zz").unwrap(), "Zz");
+    }
+
+    #[test]
+    fn parse_sam_tag_name_rejects_all_keyword() {
+        // PLAN §5 step 4.3 — `ALL` is reserved for a future release.
+        assert!(parse_sam_tag_name("ALL").is_err());
+    }
+
+    #[test]
+    fn parse_sam_tag_name_rejects_wrong_length() {
+        assert!(parse_sam_tag_name("X").is_err());
+        assert!(parse_sam_tag_name("ABC").is_err());
+        assert!(parse_sam_tag_name("").is_err());
+    }
+
+    #[test]
+    fn parse_sam_tag_name_rejects_leading_non_alpha() {
+        // SAM spec: tags match [A-Za-z][A-Za-z0-9]. Leading digit invalid.
+        assert!(parse_sam_tag_name("1A").is_err());
+        assert!(parse_sam_tag_name("9X").is_err());
+    }
+
+    #[test]
+    fn parse_sam_tag_name_rejects_non_alphanumeric() {
+        assert!(parse_sam_tag_name("A_").is_err());
+        assert!(parse_sam_tag_name("A-").is_err());
+        assert!(parse_sam_tag_name(" A").is_err());
     }
 
     #[test]

@@ -102,6 +102,20 @@ trim_galore --rrbs --paired file_R1.fastq.gz file_R2.fastq.gz
 
 # Run FastQC on trimmed output
 trim_galore --fastqc input.fastq.gz
+
+# uBAM (unaligned BAM) input — single-end
+# Auto-detected by content (BAM\1 magic in decompressed payload); no flag needed.
+trim_galore sample.bam
+
+# uBAM input — paired (interleaved single file, R1/R2 by FREAD1/FREAD2 flag).
+# Mate-adjacent ordering required (samtools sort -n / collate / Picard / fgbio
+# all emit this); the de-interleaver errors on grouped input with a
+# `samtools collate` remediation pointer.
+trim_galore --paired interleaved.bam
+
+# Preserve BAM aux tags (CB, UB, RX, …) into the FASTQ header (samtools
+# `-T`-compatible, tab-separated). Ignored for FASTQ input.
+trim_galore --preserve-tags CB,UB sample.bam
 ```
 
 For the complete list of options:
