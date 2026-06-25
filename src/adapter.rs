@@ -3,7 +3,6 @@
 //! Provides built-in adapter sequences for common sequencing platforms
 //! and auto-detection by scanning the first 1M reads.
 
-use crate::fastq::FastqReader;
 use anyhow::{Context, Result};
 use std::io::BufRead;
 use std::path::Path;
@@ -110,7 +109,10 @@ pub(crate) fn autodetect_adapter_with_max_scan<P: AsRef<Path>>(
     consider_already_trimmed: Option<usize>,
     max_scan: usize,
 ) -> Result<DetectionResult> {
-    let mut reader = FastqReader::open(path)?;
+    // Format-aware open so adapter detection works on uBAM too (#316).
+    // Preserve-tags is irrelevant during auto-detection — we don't write
+    // FASTQ records here, just scan sequences. Pass an empty tag list.
+    let mut reader = crate::format::open_sync_reader(path.as_ref(), &[])?;
 
     // BGI/DNBSEQ added to the probe set: its 32bp adapter shares no
     // meaningful subsequence with the other three and the per-match
@@ -263,7 +265,7 @@ fn has_trailing_poly_g(seq: &[u8], min_len: usize) -> bool {
 /// --adapter, etc.), which causes `autodetect_adapter()` to be skipped. Without
 /// this, poly-G auto-detection would silently fail for those users.
 pub fn detect_poly_g<P: AsRef<Path>>(path: P) -> Result<(usize, usize)> {
-    let mut reader = FastqReader::open(path)?;
+    let mut reader = crate::format::open_sync_reader(path.as_ref(), &[])?;
     let mut reads_scanned = 0;
     let mut poly_g_count: usize = 0;
 

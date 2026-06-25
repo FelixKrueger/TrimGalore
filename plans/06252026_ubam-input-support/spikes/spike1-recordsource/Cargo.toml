@@ -1,0 +1,19 @@
+[package]
+name = "spike1-recordsource"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "spike1_recordsource"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+
+# Mirror TrimGalore's release profile exactly so the codegen is comparable.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "debuginfo"

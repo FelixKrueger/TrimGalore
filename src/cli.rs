@@ -181,6 +181,14 @@ pub struct Cli {
     #[clap(long = "no_report_file")]
     pub no_report_file: bool,
 
+    /// Comma-separated list of BAM tags (e.g. "CB,UB,RX") to append to the
+    /// FASTQ header on uBAM input. Tab-separated, samtools `-T`-compatible.
+    /// Each tag must be a 2-char SAM tag name (`[A-Za-z][A-Za-z0-9]`).
+    /// Ignored for FASTQ input. The `ALL` keyword is reserved for a future
+    /// release and rejected in v1. See PLAN §3.2.5.
+    #[clap(long = "preserve-tags", value_delimiter = ',', value_parser = parse_sam_tag_name)]
+    pub preserve_tags: Vec<String>,
+
     /// Retain unpaired reads when the mate is too short (paired-end only).
     /// Cutoff via --length_1 / --length_2 (default 35 each).
     #[clap(long = "retain_unpaired")]
@@ -373,6 +381,26 @@ pub struct Cli {
 ///
 /// Only exact-match tokens are rewritten — `-r10` (legitimate clap
 /// `-r=10`) and any other value-suffixed form pass through unchanged.
+/// clap value parser for `--preserve-tags`. Each tag must be a valid 2-char
+/// SAM tag name (`[A-Za-z][A-Za-z0-9]`). The `ALL` keyword is reserved.
+fn parse_sam_tag_name(s: &str) -> Result<String, String> {
+    if s == "ALL" {
+        return Err("--preserve-tags ALL is not supported in v1 (use an explicit list)".into());
+    }
+    let bytes = s.as_bytes();
+    if bytes.len() != 2 {
+        return Err(format!(
+            "'{s}' is not a valid SAM tag name (must be exactly 2 characters)"
+        ));
+    }
+    if !bytes[0].is_ascii_alphabetic() || !bytes[1].is_ascii_alphanumeric() {
+        return Err(format!(
+            "'{s}' is not a valid SAM tag name (must match [A-Za-z][A-Za-z0-9])"
+        ));
+    }
+    Ok(s.to_string())
+}
+
 pub fn rewrite_perl_short_flags<I>(args: I) -> Vec<String>
 where
     I: IntoIterator<Item = String>,

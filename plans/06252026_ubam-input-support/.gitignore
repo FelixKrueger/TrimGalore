@@ -1,0 +1,2 @@
+# Spike build artifacts — recreate via `cargo build --release` from each spike dir
+spikes/*/target/

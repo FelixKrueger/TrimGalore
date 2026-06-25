@@ -1,11 +1,13 @@
 pub mod adapter;
 pub mod alignment;
+pub mod bam;
 pub mod cli;
 pub mod clump;
 pub mod demux;
 pub mod fastq;
 pub mod fastqc;
 pub mod filters;
+pub mod format;
 pub mod io;
 pub mod parallel;
 pub mod quality;

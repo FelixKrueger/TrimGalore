@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::mpsc;
 
 use crate::clump::{self, ClumpLayout, MinimizerKey, canonical_minimizer, estimated_record_bytes};
-use crate::fastq::{FastqReader, FastqRecord};
+use crate::fastq::{FastqRecord, RecordSource};
 use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
 use crate::report::{PairValidationStats, TrimStats};
 use crate::trimmer::{self, TrimConfig, update_adapter_stats};
@@ -91,9 +91,9 @@ struct PairedBatchResult {
 /// still exist on disk on mid-stream error — v1 contract).
 #[allow(clippy::too_many_arguments)]
 pub fn run_paired_end_parallel(
-    input_r1: &Path,
-    input_r2: &Path,
-    input_passthrough: Option<&Path>,
+    reader_r1: Box<dyn RecordSource>,
+    reader_r2: Box<dyn RecordSource>,
+    reader_passthrough: Option<Box<dyn RecordSource>>,
     output_r1: &Path,
     output_r2: &Path,
     output_passthrough: Option<&Path>,
@@ -108,7 +108,7 @@ pub fn run_paired_end_parallel(
     let retain_unpaired = unpaired_r1_path.is_some();
     // Both passthrough params must be both-Some or both-None.
     debug_assert!(
-        input_passthrough.is_some() == output_passthrough.is_some(),
+        reader_passthrough.is_some() == output_passthrough.is_some(),
         "run_paired_end_parallel: input_passthrough and output_passthrough must be both Some or both None"
     );
 
@@ -184,22 +184,13 @@ pub fn run_paired_end_parallel(
         // passthrough is set — validated by Cli::validate).
         let txs = std::mem::take(&mut work_txs);
         let reader_handle = s.spawn(move || -> Result<()> {
-            let inner = || -> Result<()> {
-                let mut reader_r1 = FastqReader::open_threaded(input_r1)?;
-                let mut reader_r2 = FastqReader::open_threaded(input_r2)?;
-                let mut reader_pt = match input_passthrough {
-                    Some(p) => Some(FastqReader::open_threaded(p)?),
-                    None => None,
-                };
-                if let Some(layout) = clump_layout {
-                    // --clumpify rejects --passthrough at validation, so reader_pt
-                    // is None here. The existing clumpy reader is unchanged.
-                    read_pairs_clumpy(&mut reader_r1, &mut reader_r2, &txs, layout)
-                } else {
-                    read_pairs_round_robin(&mut reader_r1, &mut reader_r2, reader_pt.as_mut(), &txs)
-                }
+            let res: Result<()> = if let Some(layout) = clump_layout {
+                // --clumpify rejects --passthrough at validation, so the
+                // passthrough reader is None here. It drops at end of scope.
+                read_pairs_clumpy(reader_r1, reader_r2, &txs, layout)
+            } else {
+                read_pairs_round_robin(reader_r1, reader_r2, reader_passthrough, &txs)
             };
-            let res = inner();
             if res.is_err() {
                 // Sentinel signal so the main flush loop short-circuits
                 // BEFORE writing more bytes. The full error (with anyhow
@@ -652,9 +643,9 @@ fn process_pairs<W: Write>(
 /// catches truncation and over-shoot in either direction with a precise,
 /// row-numbered error message.
 fn read_pairs_round_robin(
-    reader_r1: &mut FastqReader,
-    reader_r2: &mut FastqReader,
-    reader_passthrough: Option<&mut FastqReader>,
+    mut reader_r1: Box<dyn RecordSource>,
+    mut reader_r2: Box<dyn RecordSource>,
+    reader_passthrough: Option<Box<dyn RecordSource>>,
     txs: &[mpsc::SyncSender<PairedWork>],
 ) -> Result<()> {
     let mut seq: u64 = 0;
@@ -783,8 +774,8 @@ fn read_pairs_round_robin(
 /// dispatch to a worker. Each flushed bin becomes one gzip member in the
 /// output (re-uses the existing BTreeMap reassembly via a flush-order seq).
 fn read_pairs_clumpy(
-    reader_r1: &mut FastqReader,
-    reader_r2: &mut FastqReader,
+    mut reader_r1: Box<dyn RecordSource>,
+    mut reader_r2: Box<dyn RecordSource>,
     txs: &[mpsc::SyncSender<PairedWork>],
     layout: ClumpLayout,
 ) -> Result<()> {
@@ -910,7 +901,7 @@ struct SingleBatchResult {
 
 /// Run the single-end trimming pipeline with N parallel workers.
 pub fn run_single_end_parallel(
-    input: &Path,
+    reader: Box<dyn RecordSource>,
     output: &Path,
     config: &TrimConfig,
     cores: usize,
@@ -954,11 +945,10 @@ pub fn run_single_end_parallel(
         // `read_pairs_clumpy` for the paired-end shape of the same idea.
         let txs = std::mem::take(&mut work_txs);
         let reader_handle = s.spawn(move || -> Result<()> {
-            let mut reader = FastqReader::open_threaded(input)?;
             if let Some(layout) = clump_layout {
-                read_single_clumpy(&mut reader, &txs, layout)
+                read_single_clumpy(reader, &txs, layout)
             } else {
-                read_single_round_robin(&mut reader, &txs)
+                read_single_round_robin(reader, &txs)
             }
         });
 
@@ -1105,7 +1095,7 @@ fn process_reads<W: Write>(
 /// Round-robin single-end reader: batches of `BATCH_SIZE` records dispatched
 /// in input order. The default (non-clumpy) routing.
 fn read_single_round_robin(
-    reader: &mut FastqReader,
+    mut reader: Box<dyn RecordSource>,
     txs: &[mpsc::SyncSender<SingleWork>],
 ) -> Result<()> {
     let mut seq: u64 = 0;
@@ -1137,7 +1127,7 @@ fn read_single_round_robin(
 /// canonical minimizer; when a bin fills its byte budget, sort it by
 /// minimizer and dispatch to a worker.
 fn read_single_clumpy(
-    reader: &mut FastqReader,
+    mut reader: Box<dyn RecordSource>,
     txs: &[mpsc::SyncSender<SingleWork>],
     layout: ClumpLayout,
 ) -> Result<()> {
@@ -1231,6 +1221,13 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    /// Test helper — open a FASTQ file as `Box<dyn RecordSource>`, mirroring
+    /// the old `&Path` shape that the in-test call sites used before the
+    /// `RecordSource` refactor. Cleaner than rewriting every call site.
+    fn open_fq(path: &std::path::Path) -> Box<dyn RecordSource> {
+        Box::new(FastqReader::open_threaded(path).expect("test fixture must open"))
+    }
+
     fn fresh_tmpdir(slug: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(slug);
         let _ = fs::remove_dir_all(&dir);
@@ -1316,8 +1313,14 @@ mod tests {
 
         // Parallel path — same input, 4 workers, plain output.
         let parallel_output = dir.join("parallel_out.fq");
-        let stats_parallel =
-            run_single_end_parallel(&input_path, &parallel_output, &config, 4, false, None)?;
+        let stats_parallel = run_single_end_parallel(
+            open_fq(&input_path),
+            &parallel_output,
+            &config,
+            4,
+            false,
+            None,
+        )?;
 
         // Field-identical stats across paths. PartialEq derive on
         // TrimStats means a single equality check covers every field.
@@ -1366,7 +1369,8 @@ mod tests {
 
         let config = parity_test_config();
         let output_path = dir.join("out.fq.gz");
-        let stats = run_single_end_parallel(&input_path, &output_path, &config, 4, true, None)?;
+        let stats =
+            run_single_end_parallel(open_fq(&input_path), &output_path, &config, 4, true, None)?;
 
         assert_eq!(stats.total_reads, 5000);
         assert_eq!(stats.reads_written, 5000);
@@ -1402,7 +1406,8 @@ mod tests {
 
         let config = parity_test_config();
         let output_path = dir.join("out.fq");
-        let stats = run_single_end_parallel(&input_path, &output_path, &config, 4, false, None)?;
+        let stats =
+            run_single_end_parallel(open_fq(&input_path), &output_path, &config, 4, false, None)?;
 
         assert_eq!(stats.total_reads, 1);
         assert_eq!(stats.reads_written, 1);
@@ -1431,7 +1436,8 @@ mod tests {
 
         let config = parity_test_config();
         let output_path = dir.join("out.fq");
-        let stats = run_single_end_parallel(&input_path, &output_path, &config, 4, false, None)?;
+        let stats =
+            run_single_end_parallel(open_fq(&input_path), &output_path, &config, 4, false, None)?;
 
         assert_eq!(stats.total_reads, 0);
         assert_eq!(stats.reads_written, 0);
@@ -1478,8 +1484,15 @@ mod tests {
         let out_default = dir.join("out_default.fq.gz");
         let out_high = dir.join("out_high.fq.gz");
 
-        run_single_end_parallel(&input_path, &out_default, &config_default, 2, true, None)?;
-        run_single_end_parallel(&input_path, &out_high, &config_high, 2, true, None)?;
+        run_single_end_parallel(
+            open_fq(&input_path),
+            &out_default,
+            &config_default,
+            2,
+            true,
+            None,
+        )?;
+        run_single_end_parallel(open_fq(&input_path), &out_high, &config_high, 2, true, None)?;
 
         assert!(
             fs::metadata(&out_high)?.len() < fs::metadata(&out_default)?.len(),
@@ -1566,9 +1579,9 @@ mod tests {
         let plain_out = dir.join("plain.fq.gz");
         let clumpy_out = dir.join("clumpy.fq.gz");
 
-        run_single_end_parallel(&input_path, &plain_out, &config, 4, true, None)?;
+        run_single_end_parallel(open_fq(&input_path), &plain_out, &config, 4, true, None)?;
         run_single_end_parallel(
-            &input_path,
+            open_fq(&input_path),
             &clumpy_out,
             &config,
             4,
@@ -1639,8 +1652,8 @@ mod tests {
         let clumpy_r2_out = dir.join("clumpy_R2.fq.gz");
 
         run_paired_end_parallel(
-            &r1_path,
-            &r2_path,
+            open_fq(&r1_path),
+            open_fq(&r2_path),
             None,
             &plain_r1_out,
             &plain_r2_out,
@@ -1654,8 +1667,8 @@ mod tests {
             None,
         )?;
         run_paired_end_parallel(
-            &r1_path,
-            &r2_path,
+            open_fq(&r1_path),
+            open_fq(&r2_path),
             None,
             &clumpy_r1_out,
             &clumpy_r2_out,
@@ -1717,9 +1730,10 @@ mod tests {
         let plain_out = dir.join("plain.fq.gz");
         let clumpy_out = dir.join("clumpy.fq.gz");
 
-        let plain_stats = run_single_end_parallel(&input_path, &plain_out, &config, 4, true, None)?;
+        let plain_stats =
+            run_single_end_parallel(open_fq(&input_path), &plain_out, &config, 4, true, None)?;
         let clumpy_stats = run_single_end_parallel(
-            &input_path,
+            open_fq(&input_path),
             &clumpy_out,
             &config,
             4,
@@ -1787,9 +1801,9 @@ mod tests {
         let plain_out = dir.join("plain.fq.gz");
         let clumpy_out = dir.join("clumpy.fq.gz");
 
-        run_single_end_parallel(&input_path, &plain_out, &config, 4, true, None)?;
+        run_single_end_parallel(open_fq(&input_path), &plain_out, &config, 4, true, None)?;
         run_single_end_parallel(
-            &input_path,
+            open_fq(&input_path),
             &clumpy_out,
             &config,
             4,
@@ -1831,7 +1845,7 @@ mod tests {
         let config = parity_test_config();
         let out = dir.join("out.fq.gz");
         let stats = run_single_end_parallel(
-            &input_path,
+            open_fq(&input_path),
             &out,
             &config,
             2,
@@ -2118,9 +2132,9 @@ mod tests {
         let p_r2 = dir.join("parallel_R2.fq.gz");
         let p_pt = dir.join("parallel_pt.fq.gz");
         let parallel_stats = run_paired_end_parallel(
-            &r1_path,
-            &r2_path,
-            Some(&pt_path),
+            open_fq(&r1_path),
+            open_fq(&r2_path),
+            Some(open_fq(&pt_path)),
             &p_r1,
             &p_r2,
             Some(&p_pt),
@@ -2204,9 +2218,9 @@ mod tests {
         let out_pt = dir.join("out_pt.fq.gz");
 
         let res = run_paired_end_parallel(
-            &r1_path,
-            &r2_path,
-            Some(&pt_path),
+            open_fq(&r1_path),
+            open_fq(&r2_path),
+            Some(open_fq(&pt_path)),
             &out_r1,
             &out_r2,
             Some(&out_pt),
@@ -2250,9 +2264,9 @@ mod tests {
         let out_pt = dir.join("out_pt.fq.gz");
 
         let res = run_paired_end_parallel(
-            &r1_path,
-            &r2_path,
-            Some(&pt_path),
+            open_fq(&r1_path),
+            open_fq(&r2_path),
+            Some(open_fq(&pt_path)),
             &out_r1,
             &out_r2,
             Some(&out_pt),
@@ -2292,9 +2306,9 @@ mod tests {
         let out_pt = dir.join("plain_pt.fq");
 
         let stats = run_paired_end_parallel(
-            &r1_path,
-            &r2_path,
-            Some(&pt_path),
+            open_fq(&r1_path),
+            open_fq(&r2_path),
+            Some(open_fq(&pt_path)),
             &out_r1,
             &out_r2,
             Some(&out_pt),

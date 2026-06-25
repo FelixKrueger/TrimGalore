@@ -4,7 +4,7 @@
 //! filtering, and report generation into complete processing pipelines.
 
 use crate::alignment;
-use crate::fastq::{FastqReader, FastqRecord, FastqWriter};
+use crate::fastq::{FastqRecord, FastqWriter};
 use crate::filters::{self, FilterResult, MaxNFilter, PairFilterResult};
 use crate::quality;
 use crate::report::{PairValidationStats, TrimStats};
@@ -306,7 +306,7 @@ pub fn update_adapter_stats(stats: &mut TrimStats, result: &TrimResult) {
 /// Reads input, trims each read, applies filters, writes output.
 /// Returns trimming statistics.
 pub fn run_single_end(
-    reader: &mut FastqReader,
+    reader: &mut dyn crate::fastq::RecordSource,
     writer: &mut FastqWriter,
     config: &TrimConfig,
 ) -> Result<TrimStats> {
@@ -379,9 +379,9 @@ pub fn run_single_end(
 /// v2 §Behavior §7 for the 8-arm three-way EOF match enumeration.
 #[allow(clippy::too_many_arguments)]
 pub fn run_paired_end(
-    reader_r1: &mut FastqReader,
-    reader_r2: &mut FastqReader,
-    reader_passthrough: Option<&mut FastqReader>,
+    reader_r1: &mut dyn crate::fastq::RecordSource,
+    reader_r2: &mut dyn crate::fastq::RecordSource,
+    reader_passthrough: Option<&mut dyn crate::fastq::RecordSource>,
     writer_r1: &mut FastqWriter,
     writer_r2: &mut FastqWriter,
     mut writer_passthrough: Option<&mut FastqWriter>,

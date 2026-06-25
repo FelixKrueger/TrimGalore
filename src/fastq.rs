@@ -189,7 +189,7 @@ const READER_CHANNEL_BATCHES: usize = 4;
 /// fed by a background decompression thread.
 enum ReaderSource {
     Direct {
-        reader: Box<dyn BufRead>,
+        reader: Box<dyn BufRead + Send>,
         line_buf: String,
     },
     Threaded {
@@ -198,6 +198,26 @@ enum ReaderSource {
         buf_pos: usize,
         _handle: std::thread::JoinHandle<()>,
     },
+}
+
+/// Polymorphic input source — anything that can yield `FastqRecord`s.
+///
+/// Both `FastqReader` and `crate::bam::BamReader` implement this so the worker
+/// pool in `parallel.rs` can dispatch through a single trait-object hand-off.
+/// Spike 1 measured the dispatch overhead at +0.86–1.28% over a concrete-type
+/// baseline on a 500K × 150bp parse loop — well under the 2% bar; see
+/// `plans/06252026_ubam-input-support/spikes/SPIKE_recordsource.md`.
+///
+/// The `Send` bound is required because the reader is moved into the spawned
+/// reader thread inside the parallel pipeline.
+pub trait RecordSource: Send {
+    fn next_record(&mut self) -> Result<Option<FastqRecord>>;
+}
+
+impl RecordSource for FastqReader {
+    fn next_record(&mut self) -> Result<Option<FastqRecord>> {
+        FastqReader::next_record(self)
+    }
 }
 
 /// A streaming FASTQ reader that handles both plain and gzipped files.
@@ -218,7 +238,7 @@ impl FastqReader {
         let file = File::open(path)
             .with_context(|| format!("Failed to open input file: {}", path.display()))?;
 
-        let reader: Box<dyn BufRead> = if path.extension().is_some_and(|ext| ext == "gz") {
+        let reader: Box<dyn BufRead + Send> = if path.extension().is_some_and(|ext| ext == "gz") {
             Box::new(BufReader::with_capacity(
                 BUF_SIZE,
                 MultiGzDecoder::new(file),

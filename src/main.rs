@@ -5,17 +5,70 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use trim_galore::adapter;
+use trim_galore::bam::BamReader;
 use trim_galore::cli::{Cli, rewrite_perl_short_flags};
 use trim_galore::clump;
 use trim_galore::demux;
-use trim_galore::fastq::{FastqReader, FastqWriter};
+use trim_galore::fastq::{FastqReader, FastqWriter, RecordSource};
 use trim_galore::fastqc;
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
+use trim_galore::format::{InputFormat, detect_input_format};
 use trim_galore::io as naming;
 use trim_galore::parallel;
 use trim_galore::report;
 use trim_galore::specialty;
 use trim_galore::trimmer;
+
+/// Format-aware sanity check — dispatches `FastqReader::sanity_check` for
+/// FASTQ input or peek-reads the first BAM record (asserting `is_unmapped()`)
+/// for uBAM. The per-record aligned-BAM check in `BamReader::next_record`
+/// catches mixed-aligned BAMs that slip past this fast-path.
+fn sanity_check_any(path: &std::path::Path) -> Result<()> {
+    match detect_input_format(path)? {
+        InputFormat::FastqPlain | InputFormat::FastqGz => FastqReader::sanity_check(path),
+        InputFormat::UnalignedBam => {
+            let mut r = BamReader::open(path)?;
+            match r.next_record()? {
+                None => anyhow::bail!(
+                    "Input file '{}' is a uBAM with no records (empty BAM).",
+                    path.display()
+                ),
+                Some(_) => Ok(()),
+            }
+        }
+    }
+}
+
+/// Open a threaded reader for `path`, dispatching by detected format.
+/// `preserve_tags` is honoured for BAM input; silently ignored for FASTQ.
+fn open_threaded_reader(
+    path: &std::path::Path,
+    preserve_tags: &[String],
+) -> Result<Box<dyn RecordSource>> {
+    match detect_input_format(path)? {
+        InputFormat::FastqPlain | InputFormat::FastqGz => {
+            Ok(Box::new(FastqReader::open_threaded(path)?))
+        }
+        InputFormat::UnalignedBam => Ok(Box::new(BamReader::open_threaded_with_tags(
+            path,
+            preserve_tags,
+        )?)),
+    }
+}
+
+/// Open a sync (single-threaded) reader for `path`, dispatching by detected
+/// format. Used by the `--cores 1` (serial) path.
+fn open_sync_reader(
+    path: &std::path::Path,
+    preserve_tags: &[String],
+) -> Result<Box<dyn RecordSource>> {
+    match detect_input_format(path)? {
+        InputFormat::FastqPlain | InputFormat::FastqGz => Ok(Box::new(FastqReader::open(path)?)),
+        InputFormat::UnalignedBam => Ok(Box::new(
+            BamReader::open(path)?.with_preserved_tags(preserve_tags),
+        )),
+    }
+}
 
 type AdapterList = Vec<(String, String)>;
 type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
@@ -72,7 +125,7 @@ fn main() -> Result<()> {
     eprintln!("{}", env!("VERSION_BODY"));
     eprintln!("==================================================\n");
 
-    FastqReader::sanity_check(&cli.input[0])?;
+    sanity_check_any(&cli.input[0])?;
 
     // Output gzip mode. Mirror Perl: by default the output's compression
     // matches the input's (plain `.fastq` → plain `.fq`, gzipped `.fastq.gz`
@@ -240,9 +293,9 @@ fn main() -> Result<()> {
             // R2 of pair 0 and both files of every later pair need checking
             // before setup_trimming reads the header.
             if pair_idx > 0 {
-                FastqReader::sanity_check(&chunk[0])?;
+                sanity_check_any(&chunk[0])?;
             }
-            FastqReader::sanity_check(&chunk[1])?;
+            sanity_check_any(&chunk[1])?;
             // --passthrough: sanity-check the third file once (Cli::validate
             // already enforces single-pair-only when passthrough is set).
             if pair_idx == 0
@@ -280,7 +333,7 @@ fn main() -> Result<()> {
         for (i, input) in cli.input.iter().enumerate() {
             if i > 0 {
                 eprintln!("\n--------------------------------------------------");
-                FastqReader::sanity_check(input)?;
+                sanity_check_any(input)?;
             }
             let (_label, adapters_r1, _, config) = setup_trimming(&cli, input)?;
             run_single_file(&cli, input, &config, gzip, output_dir, &adapters_r1)?;
@@ -549,9 +602,10 @@ fn run_single_file(
     let stats = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpify` always routes here (validation enforces cores >= 2).
+        let reader = open_threaded_reader(input, &cli.preserve_tags)?;
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_single_end_parallel(
-            input,
+            reader,
             &output_path,
             config,
             cli.cores,
@@ -559,9 +613,9 @@ fn run_single_file(
             clump_layout,
         )?
     } else {
-        let mut reader = FastqReader::open(input)?;
+        let mut reader = open_sync_reader(input, &cli.preserve_tags)?;
         let mut writer = FastqWriter::create(&output_path, gzip, 1, config.gzip_level)?;
-        let stats = trimmer::run_single_end(&mut reader, &mut writer, config)?;
+        let stats = trimmer::run_single_end(reader.as_mut(), &mut writer, config)?;
         writer.flush()?;
         drop(writer);
         stats
@@ -757,14 +811,35 @@ fn run_paired(
         (None, None)
     };
 
+    // Paired-uBAM support is deferred to a follow-up (T15 in IMPL.md —
+    // `BamReader::open_paired_interleaved` with `MAX_SLACK = 1024`). For v1
+    // here, reject BAM input in paired mode with a clear error pointing at
+    // the recommended workaround.
+    for p in [input_r1, input_r2] {
+        if matches!(detect_input_format(p)?, InputFormat::UnalignedBam) {
+            anyhow::bail!(
+                "Paired-end uBAM input is not yet supported in this build (#316 follow-up). \
+                 For now, convert with `samtools fastq -n -1 r1.fq.gz -2 r2.fq.gz {}` and pass \
+                 the resulting FASTQ files to --paired.",
+                p.display()
+            );
+        }
+    }
+
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpify` always routes here (validation enforces cores >= 2).
+        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags)?;
+        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags)?;
+        let reader_passthrough: Option<Box<dyn RecordSource>> = match passthrough_input {
+            Some(p) => Some(Box::new(FastqReader::open_threaded(p)?)),
+            None => None,
+        };
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_paired_end_parallel(
-            input_r1,
-            input_r2,
-            passthrough_input,
+            reader_r1,
+            reader_r2,
+            reader_passthrough,
             &output_r1,
             &output_r2,
             passthrough_output.as_deref(),
@@ -780,7 +855,8 @@ fn run_paired(
             clump_layout,
         )?
     } else {
-        // Sequential path (--cores 1)
+        // Sequential path (--cores 1) — paired-BAM rejected above, so both
+        // are FastqReader.
         let mut reader_r1 = FastqReader::open(input_r1)?;
         let mut reader_r2 = FastqReader::open(input_r2)?;
         let level = config.gzip_level;
@@ -810,7 +886,9 @@ fn run_paired(
         let result = trimmer::run_paired_end(
             &mut reader_r1,
             &mut reader_r2,
-            reader_passthrough.as_mut(),
+            reader_passthrough
+                .as_mut()
+                .map(|r| r as &mut dyn RecordSource),
             &mut writer_r1,
             &mut writer_r2,
             writer_passthrough.as_mut(),

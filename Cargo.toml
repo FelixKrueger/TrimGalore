@@ -40,9 +40,16 @@ env_logger = "0.11"
 # (ewels/FastQC-Rust#2); restored byte-identity to Java FastQC 0.12.1 for that
 # section.
 fastqc-rust = "=1.0.1"
+# uBAM input support (#316). Exact-pinned to the version already pulled
+# transitively via fastqc-rust 1.0.1 — using the `noodles` umbrella crate with
+# features=["bam"] reuses that tree rather than forcing a parallel-version
+# compile. Treat upstream bumps as deliberate-test events.
+# See plans/06252026_ubam-input-support/PLAN.md §5 step 1.
+noodles = { version = "=0.88.0", default-features = false, features = ["bam"] }
 
 [dev-dependencies]
 serde_json = "1"
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

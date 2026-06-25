@@ -1,0 +1,8 @@
+@HD	VN:1.6	SO:unsorted
+@SQ	SN:chr1	LN:1000
+pair_C	77	*	0	0	*	*	0	0	GGG	III
+pair_A	141	*	0	0	*	*	0	0	TTT	III
+pair_B	77	*	0	0	*	*	0	0	CCC	III
+pair_A	77	*	0	0	*	*	0	0	AAA	III
+pair_C	141	*	0	0	*	*	0	0	GGG	III
+pair_B	141	*	0	0	*	*	0	0	CCC	III
