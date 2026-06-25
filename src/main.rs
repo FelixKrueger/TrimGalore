@@ -127,6 +127,39 @@ fn main() -> Result<()> {
 
     sanity_check_any(&cli.input[0])?;
 
+    // ─── uBAM-specific format-dependent validation (T17) ───────────────────
+    // Detect format of all inputs once; the call is cheap (24-byte peek +
+    // at most one BGZF block decompress). Used for both validation and
+    // dispatch below.
+    let input_formats: Vec<InputFormat> = cli
+        .input
+        .iter()
+        .map(|p| detect_input_format(p))
+        .collect::<Result<_>>()?;
+    let any_bam = input_formats
+        .iter()
+        .any(|f| matches!(f, InputFormat::UnalignedBam));
+
+    if !cli.preserve_tags.is_empty() && !any_bam {
+        eprintln!(
+            "WARNING: --preserve-tags has no effect — no uBAM input was detected. \
+             The flag is ignored for FASTQ input."
+        );
+    }
+    if cli.passthrough.is_some() && any_bam {
+        anyhow::bail!(
+            "--passthrough is not supported with uBAM input in this release. \
+             Either convert the uBAM to FASTQ via `samtools fastq` first, or drop --passthrough."
+        );
+    }
+    if cli.paired && cli.input.len() == 1 && !matches!(input_formats[0], InputFormat::UnalignedBam)
+    {
+        anyhow::bail!(
+            "--paired with a single input file is only legal if that file is a uBAM. \
+             Provide R1 and R2 as separate files for FASTQ paired-end mode."
+        );
+    }
+
     // Output gzip mode. Mirror Perl: by default the output's compression
     // matches the input's (plain `.fastq` → plain `.fq`, gzipped `.fastq.gz`
     // → gzipped `.fq.gz`). `--dont_gzip` overrides to always-plain. The
@@ -218,6 +251,24 @@ fn main() -> Result<()> {
             "Using {} worker threads (parallel trim + compress)",
             cli.cores
         );
+    }
+
+    // Paired-uBAM single-file de-interleaved path (T20-PE). The validation
+    // above guarantees `cli.input[0]` is BAM when `--paired` and len == 1.
+    // Routes through the single-file paired-uBAM helper which sets up its
+    // own output paths and calls `BamReader::open_paired_interleaved`.
+    if cli.paired && cli.input.len() == 1 {
+        let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &cli.input[0])?;
+        run_paired_ubam_single_file(
+            &cli,
+            &cli.input[0],
+            &config,
+            gzip,
+            output_dir,
+            &adapters_r1,
+            &adapters_r2,
+        )?;
+        return Ok(());
     }
 
     if cli.paired {
@@ -811,16 +862,15 @@ fn run_paired(
         (None, None)
     };
 
-    // Paired-uBAM support is deferred to a follow-up (T15 in IMPL.md —
-    // `BamReader::open_paired_interleaved` with `MAX_SLACK = 1024`). For v1
-    // here, reject BAM input in paired mode with a clear error pointing at
-    // the recommended workaround.
+    // Two-file paired-uBAM is rejected per PLAN §3.3 — paired uBAM expects
+    // a single interleaved file (handled in main() before this fn is called).
     for p in [input_r1, input_r2] {
         if matches!(detect_input_format(p)?, InputFormat::UnalignedBam) {
             anyhow::bail!(
-                "Paired-end uBAM input is not yet supported in this build (#316 follow-up). \
-                 For now, convert with `samtools fastq -n -1 r1.fq.gz -2 r2.fq.gz {}` and pass \
-                 the resulting FASTQ files to --paired.",
+                "--paired with two BAM files is not supported. \
+                 uBAM paired mode expects a single interleaved file: \
+                 `trim_galore --paired interleaved.bam`. \
+                 Got two BAM files; one of them is {}.",
                 p.display()
             );
         }
@@ -1117,6 +1167,237 @@ fn run_paired(
         // v2 Step 10.)
         if let Some(ref pt_out) = passthrough_output {
             fastqc::run(pt_out, cli.fastqc_args.as_deref(), output_dir, cli.cores)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Paired-uBAM single-file pipeline (T20-PE). The input is one BAM file
+/// containing interleaved R1/R2 records; `BamReader::open_paired_interleaved`
+/// de-interleaves on the fly via the bounded `MAX_SLACK` buffer.
+///
+/// Output names: derived from the input BAM's stem (`input.bam` →
+/// `input_val_1.fq[.gz]` + `input_val_2.fq[.gz]`).
+#[allow(clippy::too_many_arguments)]
+fn run_paired_ubam_single_file(
+    cli: &Cli,
+    input: &Path,
+    config: &trimmer::TrimConfig,
+    gzip: bool,
+    output_dir: Option<&Path>,
+    adapters_r1: &[(String, String)],
+    adapters_r2: &[(String, String)],
+) -> Result<()> {
+    // Derive output paths from the single BAM input's stem.
+    let stem = input
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let ext = if gzip { ".fq.gz" } else { ".fq" };
+    let dir = output_dir
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| input.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let output_r1 = dir.join(format!("{}_val_1{}", stem, ext));
+    let output_r2 = dir.join(format!("{}_val_2{}", stem, ext));
+
+    eprintln!("Trimming (paired-end, de-interleaved uBAM):");
+    eprintln!("  Input:     {}", input.display());
+    eprintln!("  Output R1: {}", output_r1.display());
+    eprintln!("  Output R2: {}", output_r2.display());
+
+    let (unpaired_r1_path, unpaired_r2_path) = if cli.retain_unpaired {
+        let up1 = dir.join(format!("{}_unpaired_1{}", stem, ext));
+        let up2 = dir.join(format!("{}_unpaired_2{}", stem, ext));
+        eprintln!("  Unpaired R1: {}", up1.display());
+        eprintln!("  Unpaired R2: {}", up2.display());
+        (Some(up1), Some(up2))
+    } else {
+        (None, None)
+    };
+
+    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
+        let (r1, r2) = BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
+        let clump_layout = resolve_clump_layout(cli)?;
+        parallel::run_paired_end_parallel(
+            Box::new(r1),
+            Box::new(r2),
+            None, // --passthrough + BAM rejected earlier
+            &output_r1,
+            &output_r2,
+            None,
+            unpaired_r1_path.as_deref(),
+            unpaired_r2_path.as_deref(),
+            config,
+            cli.cores,
+            gzip,
+            UnpairedLengths {
+                r1: cli.length_1,
+                r2: cli.length_2,
+            },
+            clump_layout,
+        )?
+    } else {
+        // Serial path
+        let (mut r1, mut r2) =
+            BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
+        let level = config.gzip_level;
+        let mut writer_r1 = FastqWriter::create(&output_r1, gzip, 1, level)?;
+        let mut writer_r2 = FastqWriter::create(&output_r2, gzip, 1, level)?;
+        let (mut unpaired_w1, mut unpaired_w2) = match (&unpaired_r1_path, &unpaired_r2_path) {
+            (Some(p1), Some(p2)) => (
+                Some(FastqWriter::create(p1, gzip, 1, level)?),
+                Some(FastqWriter::create(p2, gzip, 1, level)?),
+            ),
+            _ => (None, None),
+        };
+        let result = trimmer::run_paired_end(
+            &mut r1,
+            &mut r2,
+            None,
+            &mut writer_r1,
+            &mut writer_r2,
+            None,
+            unpaired_w1.as_mut(),
+            unpaired_w2.as_mut(),
+            config,
+            UnpairedLengths {
+                r1: cli.length_1,
+                r2: cli.length_2,
+            },
+        )?;
+        writer_r1.flush()?;
+        writer_r2.flush()?;
+        if let Some(ref mut w) = unpaired_w1 {
+            w.flush()?;
+        }
+        if let Some(ref mut w) = unpaired_w2 {
+            w.flush()?;
+        }
+        result
+    };
+
+    // Summary (mirrors run_paired's print shape).
+    eprintln!("\n=== Summary (Read 1) ===\n");
+    eprintln!(
+        "Total reads processed:           {:>10}",
+        stats_r1.total_reads
+    );
+    eprintln!(
+        "Reads with adapters:             {:>10} ({:.1}%)",
+        stats_r1.total_reads_with_adapter,
+        pct(stats_r1.total_reads_with_adapter, stats_r1.total_reads)
+    );
+    eprintln!("\n=== Summary (Read 2) ===\n");
+    eprintln!(
+        "Total reads processed:           {:>10}",
+        stats_r2.total_reads
+    );
+    eprintln!(
+        "Reads with adapters:             {:>10} ({:.1}%)",
+        stats_r2.total_reads_with_adapter,
+        pct(stats_r2.total_reads_with_adapter, stats_r2.total_reads)
+    );
+    eprintln!("\n=== Paired-end validation ===\n");
+    eprintln!(
+        "Pairs analyzed:                  {:>10}",
+        pair_stats.pairs_analyzed
+    );
+    eprintln!(
+        "Pairs removed:                   {:>10} ({:.1}%)",
+        pair_stats.pairs_removed,
+        pct(pair_stats.pairs_removed, pair_stats.pairs_analyzed)
+    );
+    if pair_stats.r1_unpaired > 0 || pair_stats.r2_unpaired > 0 {
+        eprintln!(
+            "Unpaired R1 kept:                {:>10}",
+            pair_stats.r1_unpaired
+        );
+        eprintln!(
+            "Unpaired R2 kept:                {:>10}",
+            pair_stats.r2_unpaired
+        );
+    }
+
+    // Reports — text + JSON, mirroring run_paired.
+    if !cli.no_report_file {
+        // We use the BAM input filename for both R1 and R2 reports' "input
+        // filename" field — there's only one input file. Report paths share
+        // the stem, with `_R1` / `_R2` suffix injected so they don't collide.
+        let report_path_r1 = dir.join(format!("{}_R1_trimming_report.txt", stem));
+        let report_path_r2 = dir.join(format!("{}_R2_trimming_report.txt", stem));
+        let json_path_r1 = dir.join(format!("{}_R1_trimming_report.json", stem));
+        let json_path_r2 = dir.join(format!("{}_R2_trimming_report.json", stem));
+
+        let input_filename = input
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let all_input_filenames = vec![input_filename.clone()];
+
+        for (idx, (stats, txt_path, json_path)) in [
+            (&stats_r1, &report_path_r1, &json_path_r1),
+            (&stats_r2, &report_path_r2, &json_path_r2),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let report_cfg = report::TrimConfig {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                quality_cutoff: cli.effective_quality_cutoff(),
+                adapters: adapters_r1.to_vec(),
+                adapters_r2: adapters_r2.to_vec(),
+                times: cli.times,
+                error_rate: cli.error_rate,
+                stringency: cli.stringency,
+                length_cutoff: config.length_cutoff,
+                max_length: cli.max_length,
+                paired: true,
+                gzip,
+                trim_n: cli.trim_n,
+                nextseq: cli.nextseq.is_some(),
+                rrbs: cli.rrbs,
+                non_directional: cli.non_directional,
+                phred_encoding: cli.phred_offset(),
+                poly_a: cli.poly_a,
+                poly_g: config.poly_g,
+                command_line: std::env::args().collect::<Vec<_>>().join(" "),
+                input_filename: input_filename.clone(),
+                input_filenames: all_input_filenames.clone(),
+            };
+            let file = File::create(txt_path)?;
+            let mut w = BufWriter::new(file);
+            report::write_report_header(&mut w, &report_cfg)?;
+            report::write_cutadapt_compatible_section(&mut w, &report_cfg, stats, (idx + 1) as u8)?;
+            report::write_run_footer(&mut w, &report_cfg, stats)?;
+            if idx == 1 {
+                report::write_pair_validation_stats(&mut w, &pair_stats)?;
+            }
+            eprintln!("Report: {}", txt_path.display());
+
+            let json_extra = report::JsonReportParams {
+                clip_r1: config.clip_r1,
+                clip_r2: config.clip_r2,
+                three_prime_clip_r1: config.three_prime_clip_r1,
+                three_prime_clip_r2: config.three_prime_clip_r2,
+                max_n: cli.max_n,
+                discard_untrimmed: config.discard_untrimmed,
+                consider_already_trimmed: cli.consider_already_trimmed,
+            };
+            let json_file = File::create(json_path)?;
+            let mut jw = BufWriter::new(json_file);
+            report::write_json_report(
+                &mut jw,
+                &report_cfg,
+                stats,
+                Some(&pair_stats),
+                (idx + 1) as u8,
+                &json_extra,
+            )?;
+            jw.flush()?;
+            eprintln!("JSON report: {}", json_path.display());
         }
     }
 

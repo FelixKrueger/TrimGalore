@@ -435,6 +435,15 @@ impl Cli {
     /// `mode_label` is used in the user-facing error string, e.g.
     /// `"Paired-end"`, `"--clock"`, `"--implicon"`.
     fn validate_paired_input(&self, mode_label: &str) -> anyhow::Result<()> {
+        // Allow N=1 for the `--paired` case: that's only legal if the single
+        // file is a uBAM, in which case the de-interleaver produces R1+R2 from
+        // one interleaved BAM. The "is it BAM?" check happens at main.rs
+        // sanity_check time (after format detection has run). For specialty
+        // modes (--clock, --implicon, --hardtrim) the strict even-count rule
+        // still applies because they don't yet support uBAM input.
+        if self.input.len() == 1 && self.paired && mode_label == "Paired-end" {
+            return Ok(());
+        }
         if !self.input.len().is_multiple_of(2) {
             anyhow::bail!(
                 "{} mode requires an even number of input files (R1/R2 pairs), got {}",
@@ -726,8 +735,12 @@ mod tests {
 
     #[test]
     fn test_validate_paired_odd_count_rejected() {
+        // N=1 with --paired is INTENTIONALLY accepted by validate() — it's
+        // the new paired-uBAM-interleaved entry point (one BAM file containing
+        // R1/R2 records interleaved). The "is it actually a BAM?" check
+        // happens in main.rs after format detection.
+        // See plans/06252026_ubam-input-support/PLAN.md §3.3.
         for inputs in [
-            vec![R1],
             vec![R1, R2, ALT_R1],
             vec![R1, R2, ALT_R1, ALT_R2, R1],
         ] {
@@ -740,6 +753,19 @@ mod tests {
                 "expected even-number error, got: {err}"
             );
         }
+    }
+
+    #[test]
+    fn test_validate_paired_single_input_accepted_at_validate_layer() {
+        // The v3 paired-uBAM change: `--paired SINGLE.bam` is structurally
+        // legal at the validate() layer. main.rs runs format detection and
+        // errors if SINGLE.bam turns out to be FASTQ (test that path is
+        // covered by integration tests, not here).
+        let cli = Cli::parse_from(["trim_galore", "--paired", R1]);
+        assert!(
+            cli.validate().is_ok(),
+            "--paired with N=1 must be accepted at the structural-validation layer"
+        );
     }
 
     #[test]

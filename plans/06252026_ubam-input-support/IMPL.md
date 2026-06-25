@@ -1342,6 +1342,65 @@ These remain Felix-decisions to be resolved at impl time, NOT blockers for start
 
 ## Implementation log
 
+### Session 3 — 2026-06-25 (Tasks 15, 17, 20-PE; paired-uBAM end-to-end)
+
+**Done in session 3 (3 more tasks → 21 of 26):**
+
+- ✅ **T15** — `BamReader::open_paired_interleaved` + `..._with_tags` variant in `src/bam.rs`. One background thread reads the BAM, routes records by FREAD1/FREAD2 flag, runs them through a bounded-buffer de-interleaver, and emits matched pairs to two `mpsc` channels in lockstep. `MAX_SLACK = 1024` per-side queue depth bound triggers `GROUPED_INPUT_ERR` if a hand-spliced grouped input is fed in (catches the `cat r1.bam r2.bam` adversarial case without unbounded memory). New unit test `paired_interleaved_de_interleaves_fixture` verifies 10 R1 + 10 R2 from the committed fixture round-trip with mate-adjacent template names.
+- ✅ **T17** — `Cli::validate` allows N=1 with `--paired` (the BAM de-interleave case); the "is it actually BAM?" check happens in `main.rs` after format detection. Three new validation rules in main.rs immediately after `sanity_check_any`: (a) `--preserve-tags` without BAM input → stderr warning; (b) `--passthrough` + BAM input → hard error; (c) `--paired` with N=1 + non-BAM → hard error. Updated `test_validate_paired_odd_count_rejected` (N=1 is now legal) and added `test_validate_paired_single_input_accepted_at_validate_layer`.
+- ✅ **T20-PE** — New `run_paired_ubam_single_file` function in main.rs that synthesizes output paths from the BAM stem (`input.bam → input_val_1.fq[.gz] + input_val_2.fq[.gz]`), opens paired-interleaved, dispatches to parallel or serial trimmer, prints summary, and writes text + JSON reports for both R1 and R2 (pair_validation stats embedded in R2 report, matching `run_paired`'s shape). Removed the temporary "paired uBAM not yet supported" rejection guard in `run_paired`; replaced it with a "two-BAM-files-paired rejected" check (per PLAN §3.3 — paired uBAM expects one interleaved file).
+
+**End-to-end PE-uBAM smoke test:**
+
+```
+$ ./target/release/trim_galore --paired test_files/ubam_paired_test.bam -o /tmp/tg_e2e_pe_ubam/
+...
+Trimming (paired-end, de-interleaved uBAM):
+  Input:     test_files/ubam_paired_test.bam
+  Output R1: /tmp/tg_e2e_pe_ubam/ubam_paired_test_val_1.fq
+  Output R2: /tmp/tg_e2e_pe_ubam/ubam_paired_test_val_2.fq
+
+=== Summary (Read 1) ===
+Total reads processed:                   10
+Reads with adapters:                      5 (50.0%)
+
+=== Summary (Read 2) ===
+Total reads processed:                   10
+Reads with adapters:                      3 (30.0%)
+
+=== Paired-end validation ===
+Pairs analyzed:                          10
+Pairs removed:                            0 (0.0%)
+Report: ubam_paired_test_R1_trimming_report.txt
+JSON report: ubam_paired_test_R1_trimming_report.json
+Report: ubam_paired_test_R2_trimming_report.txt
+JSON report: ubam_paired_test_R2_trimming_report.json
+```
+
+uBAM in → two FASTQ outputs + four reports. De-interleaver routed all 20 records (10 R1 + 10 R2) into matched pairs successfully.
+
+**Architectural notes:**
+
+1. **Producer-thread JoinHandle is detached.** `open_paired_interleaved_with_tags` spawns one background thread and drops its `JoinHandle` at end of function — per Rust semantics that detaches the thread (it runs to completion regardless). Errors are surfaced through the channels to consumers, so we don't need the handle for joining. Each returned `BamReader` carries a sentinel noop `JoinHandle` in its struct's `_handle` field (the field exists to satisfy the type shape, not because the readers own the real thread).
+2. **`MAX_SLACK = 1024` per-side bound is a guardrail, not a happy-path mechanism.** Spike 2's tool survey found every standard uBAM emitter (samtools, Picard, fgbio) produces mate-adjacent output, so the realistic per-side queue depth is 0 or 1 records. The bound caps adversarial inputs at ~1 MB / side, not GB-scale unbounded.
+3. **Output naming for paired-uBAM derives from a SINGLE stem.** `input.bam → input_val_1.fq[.gz] + input_val_2.fq[.gz]`. There's no R1/R2 input file to distinguish; the `_val_1` / `_val_2` suffix carries the side distinction (mirrors the existing `--basename` paired-end semantics from `naming::paired_end_output_names`).
+
+**Verification at checkpoint:**
+
+- `cargo test --release` — **283 passed, 0 failed** (+2 over session-2 baseline: paired-interleaved de-interleaver + N=1-accepted validation rule).
+- `cargo fmt --all -- --check` — clean.
+- `cargo clippy --release --all-targets -- -D warnings` — clean.
+- End-to-end SE uBAM and PE uBAM both pass through production binary.
+
+**Remaining (5 of 26 tasks):**
+
+- ⏳ **T21–T23** — Integration tests + golden references (`tests/integration_ubam.rs`).
+- ⏳ **T24** — CI `validation-ubam` job (`.github/workflows/ci.yml`).
+- ⏳ **T25** — Reproducibility verification (`SOURCE_DATE_EPOCH` bit-identical build check).
+- ⏳ **T26** — Documentation (CLAUDE.md, README, CHANGELOG).
+
+---
+
 ### Session 2 — 2026-06-25 (Tasks 16, 18–20 SE; architectural refactor)
 
 **Done in session 2 (8 more tasks → 18 of 26 total):**

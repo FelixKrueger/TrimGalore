@@ -29,6 +29,24 @@ const BAM_READER_BATCH_SIZE: usize = 4096;
 /// Lookahead batches buffered ahead in the channel. Matches `FastqReader`.
 const BAM_READER_CHANNEL_BATCHES: usize = 4;
 
+/// Per-side queue depth bound for the paired-interleaved de-interleaver.
+/// Spike 2 surveyed all standard uBAM-emitting tools (samtools sort -n /
+/// collate, Picard `FastqToSam`, fgbio `FastqToBam`) and found mate-adjacent
+/// ordering universally. The slack is a guardrail for bespoke hand-spliced
+/// pipelines that violate the contract — at ~1 KB / record it caps the
+/// per-side buffer at ~1 MB, not unbounded.
+///
+/// See `plans/06252026_ubam-input-support/spikes/SPIKE_paired_ordering.md`.
+const MAX_SLACK: usize = 1024;
+
+/// Suggested remediation text when the de-interleaver detects grouped input.
+const GROUPED_INPUT_ERR: &str = "Paired uBAM input has non-adjacent mates (one side queue exceeded MAX_SLACK = 1024 \
+     records without seeing a matching mate). TrimGalore's paired-uBAM reader requires \
+     mate-adjacent ordering to stream without unbounded buffering. \
+     Re-interleave the input first: \
+     `samtools collate -O input.bam tmp > interleaved.bam` \
+     (or `samtools sort -n input.bam -o interleaved.bam`).";
+
 const PHRED_OFFSET: u8 = 33;
 const QUAL_MISSING_SENTINEL: u8 = 0xFF;
 const QUAL_MISSING_REPLACEMENT: u8 = b'!';
@@ -94,6 +112,212 @@ impl BamReader {
         preserve_tags: &[String],
     ) -> Result<Self> {
         Self::open_threaded_inner(path, preserve_tags.to_vec())
+    }
+
+    /// Open a paired uBAM and de-interleave on the fly.
+    ///
+    /// Returns two `BamReader`s, both in `Threaded` mode, fed from a single
+    /// background thread that:
+    /// - reads BAM records sequentially from `path`,
+    /// - routes by `BAM_FREAD1` (0x40) / `BAM_FREAD2` (0x80) flag bits,
+    /// - emits matched pairs (R1, R2) to two parallel channels in lockstep,
+    /// - bounds per-side buffering at `MAX_SLACK` records and errors with
+    ///   `GROUPED_INPUT_ERR` if exceeded (catches `cat r1.bam r2.bam`-style
+    ///   hand-spliced grouped input without exhausting memory).
+    ///
+    /// Per Spike 2: all standard tools (samtools sort -n / collate, Picard,
+    /// fgbio) emit mate-adjacent paired BAM, so the happy path is `MAX_SLACK
+    /// = 0` in practice. The bound is a guardrail.
+    pub fn open_paired_interleaved<P: AsRef<Path>>(path: P) -> Result<(Self, Self)> {
+        Self::open_paired_interleaved_with_tags(path, &[])
+    }
+
+    /// `open_paired_interleaved` plus tag preservation in a single call.
+    pub fn open_paired_interleaved_with_tags<P: AsRef<Path>>(
+        path: P,
+        preserve_tags: &[String],
+    ) -> Result<(Self, Self)> {
+        let path = path.as_ref().to_path_buf();
+        if !path.exists() {
+            bail!("Input file not found: {}", path.display());
+        }
+        let (tx_r1, rx_r1) = mpsc::sync_channel(BAM_READER_CHANNEL_BATCHES);
+        let (tx_r2, rx_r2) = mpsc::sync_channel(BAM_READER_CHANNEL_BATCHES);
+        let tags_for_thread = preserve_tags.to_vec();
+        let path_for_thread = path.clone();
+
+        // Producer thread — the JoinHandle drops at end of this fn, which
+        // detaches the thread (per Rust semantics; the thread runs to
+        // completion regardless). Errors are surfaced to consumers via the
+        // channels, so we don't need to keep the handle around for joining.
+        let _producer_handle: JoinHandle<()> = std::thread::spawn(move || {
+            let mut inner = match open_inner(&path_for_thread) {
+                Ok(r) => r,
+                Err(e) => {
+                    let msg = format!("{:#}", e);
+                    let _ = tx_r1.send(Err(anyhow::anyhow!("{msg}")));
+                    let _ = tx_r2.send(Err(anyhow::anyhow!("{msg}")));
+                    return;
+                }
+            };
+            // Per-side queues for the de-interleaver. Records buffered here
+            // are FastqRecord (already-converted) so the conversion cost is
+            // accounted for at-read-time, not at-emit-time.
+            let mut r1_queue: std::collections::VecDeque<FastqRecord> =
+                std::collections::VecDeque::new();
+            let mut r2_queue: std::collections::VecDeque<FastqRecord> =
+                std::collections::VecDeque::new();
+            // Output batches.
+            let mut batch_r1: Vec<FastqRecord> = Vec::with_capacity(BAM_READER_BATCH_SIZE);
+            let mut batch_r2: Vec<FastqRecord> = Vec::with_capacity(BAM_READER_BATCH_SIZE);
+            let mut record_idx: usize = 0;
+
+            const FREAD1: u16 = 0x40;
+            const FREAD2: u16 = 0x80;
+
+            // Helper to dual-emit a fatal error message.
+            let send_pair_err = |tx_r1: &mpsc::SyncSender<Result<Vec<FastqRecord>>>,
+                                 tx_r2: &mpsc::SyncSender<Result<Vec<FastqRecord>>>,
+                                 msg: String| {
+                let _ = tx_r1.send(Err(anyhow::anyhow!("{}", msg)));
+                let _ = tx_r2.send(Err(anyhow::anyhow!("{}", msg)));
+            };
+
+            loop {
+                let mut bam_rec = bam::Record::default();
+                match inner.read_record(&mut bam_rec) {
+                    Ok(0) => {
+                        // EOF — flush remaining batches, then check de-interleaver.
+                        if !batch_r1.is_empty() {
+                            let _ = tx_r1.send(Ok(batch_r1));
+                            let _ = tx_r2.send(Ok(batch_r2));
+                        }
+                        if !r1_queue.is_empty() || !r2_queue.is_empty() {
+                            send_pair_err(
+                                &tx_r1,
+                                &tx_r2,
+                                format!(
+                                    "Paired uBAM '{}' ended with {} unmatched R1 and {} unmatched R2 records (orphans). Consider --retain_unpaired or re-interleave with `samtools collate`.",
+                                    path_for_thread.display(),
+                                    r1_queue.len(),
+                                    r2_queue.len()
+                                ),
+                            );
+                            return;
+                        }
+                        // EOF sentinels.
+                        let _ = tx_r1.send(Ok(Vec::new()));
+                        let _ = tx_r2.send(Ok(Vec::new()));
+                        return;
+                    }
+                    Ok(_) => {
+                        record_idx += 1;
+                        let flags = bam_rec.flags().bits();
+                        let is_r1 = flags & FREAD1 != 0;
+                        let is_r2 = flags & FREAD2 != 0;
+                        if is_r1 == is_r2 {
+                            // Both or neither — invalid for paired uBAM.
+                            send_pair_err(
+                                &tx_r1,
+                                &tx_r2,
+                                format!(
+                                    "Paired uBAM '{}': record {} has invalid flag bits (FREAD1={}, FREAD2={}, raw=0x{:04X}). Each record must have exactly one of READ1 (0x40) / READ2 (0x80) set.",
+                                    path_for_thread.display(),
+                                    record_idx,
+                                    is_r1,
+                                    is_r2,
+                                    flags
+                                ),
+                            );
+                            return;
+                        }
+                        // Convert (also runs per-record aligned-BAM check).
+                        let fq = match bam_record_to_fastq(&bam_rec, &tags_for_thread) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                send_pair_err(
+                                    &tx_r1,
+                                    &tx_r2,
+                                    format!(
+                                        "{}: BAM record {}: {:#}",
+                                        path_for_thread.display(),
+                                        record_idx,
+                                        e
+                                    ),
+                                );
+                                return;
+                            }
+                        };
+                        // Route to the correct side queue.
+                        if is_r1 {
+                            r1_queue.push_back(fq);
+                        } else {
+                            r2_queue.push_back(fq);
+                        }
+                        // Emit a matched pair if both queues are non-empty.
+                        if !r1_queue.is_empty() && !r2_queue.is_empty() {
+                            batch_r1.push(r1_queue.pop_front().unwrap());
+                            batch_r2.push(r2_queue.pop_front().unwrap());
+                            if batch_r1.len() >= BAM_READER_BATCH_SIZE {
+                                let send_r1 = std::mem::replace(
+                                    &mut batch_r1,
+                                    Vec::with_capacity(BAM_READER_BATCH_SIZE),
+                                );
+                                let send_r2 = std::mem::replace(
+                                    &mut batch_r2,
+                                    Vec::with_capacity(BAM_READER_BATCH_SIZE),
+                                );
+                                if tx_r1.send(Ok(send_r1)).is_err()
+                                    || tx_r2.send(Ok(send_r2)).is_err()
+                                {
+                                    return; // receiver(s) dropped
+                                }
+                            }
+                        }
+                        // Bound the buffer — if either side has exceeded MAX_SLACK
+                        // pending records without a mate, the input is grouped.
+                        if r1_queue.len() > MAX_SLACK || r2_queue.len() > MAX_SLACK {
+                            send_pair_err(&tx_r1, &tx_r2, GROUPED_INPUT_ERR.to_string());
+                            return;
+                        }
+                    }
+                    Err(io_err) => {
+                        send_pair_err(
+                            &tx_r1,
+                            &tx_r2,
+                            format!(
+                                "{}: failed to read BAM record {}: {}",
+                                path_for_thread.display(),
+                                record_idx + 1,
+                                io_err
+                            ),
+                        );
+                        return;
+                    }
+                }
+            }
+        });
+
+        let r1 = Self {
+            source: BamReaderSource::Threaded {
+                rx: rx_r1,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                _handle: spawn_noop_joinhandle(),
+            },
+            preserved_tags: preserve_tags.to_vec(),
+        };
+        let r2 = Self {
+            source: BamReaderSource::Threaded {
+                rx: rx_r2,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                _handle: spawn_noop_joinhandle(),
+            },
+            preserved_tags: preserve_tags.to_vec(),
+        };
+        // `_producer_handle` drops here → thread detaches and continues.
+        Ok((r1, r2))
     }
 
     fn open_threaded_inner<P: AsRef<Path>>(path: P, preserved_tags: Vec<String>) -> Result<Self> {
@@ -253,6 +477,14 @@ impl BamReader {
             }
         }
     }
+}
+
+/// Construct a JoinHandle that wraps a no-op thread, used as a sentinel for
+/// the paired-interleaved readers (only one of the two readers needs the
+/// real handle; the other gets this). Cheap — the spawned thread exits
+/// immediately. Workaround for the struct field needing a concrete value.
+fn spawn_noop_joinhandle() -> JoinHandle<()> {
+    std::thread::spawn(|| {})
 }
 
 /// Open a BAM file, read its header, return the constructed reader.
@@ -512,6 +744,41 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn paired_interleaved_de_interleaves_fixture() -> Result<()> {
+        // The committed paired fixture is `samtools import`-emitted with
+        // strict mate-adjacent ordering (R1 flag 77, R2 flag 141, repeating).
+        // The de-interleaver should drain it cleanly with MAX_SLACK never
+        // exceeded — 10 R1 / 10 R2 in lockstep → 10 matched pairs.
+        let (mut r1_reader, mut r2_reader) =
+            BamReader::open_paired_interleaved("test_files/ubam_paired_test.bam")?;
+
+        let mut r1_records = Vec::new();
+        let mut r2_records = Vec::new();
+        // Pull from BOTH sides alternately — this is the access pattern
+        // parallel.rs::read_pairs_round_robin uses.
+        loop {
+            let r1 = r1_reader.next_record()?;
+            let r2 = r2_reader.next_record()?;
+            match (r1, r2) {
+                (Some(a), Some(b)) => {
+                    // Same template name (mate-adjacent invariant).
+                    assert_eq!(
+                        a.id, b.id,
+                        "paired-interleaved must emit matched-name pairs"
+                    );
+                    r1_records.push(a);
+                    r2_records.push(b);
+                }
+                (None, None) => break,
+                _ => panic!("paired readers desynchronised at EOF"),
+            }
+        }
+        assert_eq!(r1_records.len(), 10, "expected 10 R1 records");
+        assert_eq!(r2_records.len(), 10, "expected 10 R2 records");
         Ok(())
     }
 
