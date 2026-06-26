@@ -137,10 +137,22 @@ impl FastqRecord {
     }
 
     /// Append clipping info to the read ID for --rename support.
+    ///
+    /// If the id carries a `\t`-separated tag tail (from a BamReader-fed
+    /// uBAM input, where the format is `@NAME\tTAG:TYPE:VALUE\t...`), the
+    /// suffix is spliced into the NAME portion BEFORE the first tab so
+    /// the tail stays intact for the BamWriter round-trip. Otherwise the
+    /// `:clip5:...` suffix would land inside the last tag's value and
+    /// silently corrupt it. Caught by code-review finding C1 against the
+    /// PLAN v2.1 §3.6 round-trip mechanism.
     pub fn append_to_id(&mut self, suffix: &str) {
-        // Strip any trailing whitespace/newline from id before appending
-        let id = self.id.trim_end().to_string();
-        self.id = format!("{}{}", id, suffix);
+        // Strip any trailing whitespace/newline from id before appending.
+        let id = self.id.trim_end();
+        if let Some(tab_pos) = id.find('\t') {
+            self.id = format!("{}{}{}", &id[..tab_pos], suffix, &id[tab_pos..]);
+        } else {
+            self.id = format!("{}{}", id, suffix);
+        }
     }
 }
 
@@ -572,6 +584,44 @@ impl Drop for FastqWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_append_to_id_no_tag_tail_appends_to_end() {
+        let mut rec = FastqRecord {
+            id: "@read1".to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        };
+        rec.append_to_id(":clip5:ACGT");
+        assert_eq!(rec.id, "@read1:clip5:ACGT");
+    }
+
+    #[test]
+    fn test_append_to_id_with_tag_tail_splices_before_first_tab() {
+        // Code-review C1 regression guard: when the id carries a tag tail
+        // (BamReader-fed uBAM input), the --rename suffix MUST splice into
+        // the name portion, not append after the tags — otherwise the last
+        // tag's value gets silently corrupted.
+        let mut rec = FastqRecord {
+            id: "@read1\tCB:Z:ATCGATCG-1\tUB:Z:GCTAGCTA".to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        };
+        rec.append_to_id(":clip5:AATT");
+        assert_eq!(rec.id, "@read1:clip5:AATT\tCB:Z:ATCGATCG-1\tUB:Z:GCTAGCTA");
+    }
+
+    #[test]
+    fn test_append_to_id_trims_trailing_whitespace() {
+        let mut rec = FastqRecord {
+            id: "@read1  \n".to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        };
+        rec.append_to_id(":clip5:A");
+        assert_eq!(rec.id, "@read1:clip5:A");
+    }
+
     #[test]
     fn test_fastq_record_clip_5prime() {
         let mut rec = FastqRecord {

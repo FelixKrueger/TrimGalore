@@ -6,7 +6,9 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 
+use crate::bam::{BamWriter, peek_header};
 use crate::fastq::FastqWriter;
+use crate::format::{InputFormat, detect_input_format};
 use crate::io as naming;
 
 /// Hard-trim every read to keep only the first `keep` bases from the 5' end.
@@ -91,6 +93,107 @@ pub fn hardtrim3(
 
     writer.flush()?;
     drop(writer);
+
+    eprintln!("Finished writing {} sequences\n", count);
+    Ok(())
+}
+
+/// uBAM-output counterpart of [`hardtrim5`]: same logic, writes to a single
+/// `.bam` (BGZF) file instead of `.fq(.gz)`. Per PLAN v2.1 §3.2 specialty row.
+///
+/// Output filename: `<stem>.<keep>bp_5prime.bam` — see
+/// [`hardtrim_bam_output_name`] for the spec deviation rationale.
+pub fn hardtrim5_to_bam(
+    input: &Path,
+    keep: usize,
+    output_dir: Option<&Path>,
+    rename: bool,
+    preserve_tags: &[String],
+    command_line: &str,
+) -> Result<()> {
+    let output_path = hardtrim_bam_output_name(input, keep, "5prime", output_dir);
+    eprintln!(
+        "Writing hard-trimmed (first {}bp) version of '{}' to '{}'",
+        keep,
+        input.display(),
+        output_path.display()
+    );
+
+    let source_header = match detect_input_format(input)? {
+        InputFormat::UnalignedBam => Some(peek_header(input)?),
+        InputFormat::FastqPlain | InputFormat::FastqGz => None,
+    };
+    let mut reader = crate::format::open_sync_reader(input, preserve_tags)?;
+    let mut writer = BamWriter::create(
+        &output_path,
+        source_header.as_ref(),
+        preserve_tags,
+        command_line,
+    )?;
+    let mut count: usize = 0;
+
+    while let Some(mut record) = reader.next_record()? {
+        count += 1;
+        if record.seq.len() > keep {
+            if rename {
+                let clipped = &record.seq[keep..];
+                record.append_to_id(&format!(":clip5:{}", clipped));
+            }
+            record.truncate(keep);
+        }
+        writer.write_record(&record, None)?;
+    }
+
+    writer.finish()?;
+
+    eprintln!("Finished writing {} sequences\n", count);
+    Ok(())
+}
+
+/// uBAM-output counterpart of [`hardtrim3`]. Output: `<stem>.<keep>bp_3prime.bam`.
+pub fn hardtrim3_to_bam(
+    input: &Path,
+    keep: usize,
+    output_dir: Option<&Path>,
+    rename: bool,
+    preserve_tags: &[String],
+    command_line: &str,
+) -> Result<()> {
+    let output_path = hardtrim_bam_output_name(input, keep, "3prime", output_dir);
+    eprintln!(
+        "Writing hard-trimmed (last {}bp) version of '{}' to '{}'",
+        keep,
+        input.display(),
+        output_path.display()
+    );
+
+    let source_header = match detect_input_format(input)? {
+        InputFormat::UnalignedBam => Some(peek_header(input)?),
+        InputFormat::FastqPlain | InputFormat::FastqGz => None,
+    };
+    let mut reader = crate::format::open_sync_reader(input, preserve_tags)?;
+    let mut writer = BamWriter::create(
+        &output_path,
+        source_header.as_ref(),
+        preserve_tags,
+        command_line,
+    )?;
+    let mut count: usize = 0;
+
+    while let Some(mut record) = reader.next_record()? {
+        count += 1;
+        if record.seq.len() > keep {
+            let start = record.seq.len() - keep;
+            if rename {
+                let clipped = &record.seq[..start];
+                record.append_to_id(&format!(":clip3:{}", clipped));
+            }
+            record.clip_5prime(start);
+        }
+        writer.write_record(&record, None)?;
+    }
+
+    writer.finish()?;
 
     eprintln!("Finished writing {} sequences\n", count);
     Ok(())
@@ -316,6 +419,27 @@ fn hardtrim_output_name(
     let stem = naming::strip_fastq_extensions(input);
     let ext = if gzip { ".fq.gz" } else { ".fq" };
     let filename = format!("{}.{}bp_{}{}", stem, keep, end, ext);
+    match output_dir {
+        Some(dir) => dir.join(filename),
+        None => PathBuf::from(filename),
+    }
+}
+
+/// uBAM-output counterpart of [`hardtrim_output_name`]: `<stem>.<keep>bp_<end>.bam`.
+///
+/// PLAN v2.1 §3.2 specialty-mode row says `sample_<N>bp_trimmed.bam` for
+/// both hardtrim5 and hardtrim3; reading that as a literal would collide
+/// 5'- and 3'-outputs from the same input. The deliberate departure here
+/// preserves the `5prime` / `3prime` discriminator from the FASTQ scheme
+/// — a v2.1 spec-correction documented inline.
+fn hardtrim_bam_output_name(
+    input: &Path,
+    keep: usize,
+    end: &str,
+    output_dir: Option<&Path>,
+) -> PathBuf {
+    let stem = naming::strip_fastq_extensions(input);
+    let filename = format!("{}.{}bp_{}.bam", stem, keep, end);
     match output_dir {
         Some(dir) => dir.join(filename),
         None => PathBuf::from(filename),

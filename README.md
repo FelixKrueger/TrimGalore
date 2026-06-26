@@ -116,6 +116,17 @@ trim_galore --paired interleaved.bam
 # Preserve BAM aux tags (CB, UB, RX, …) into the FASTQ header (samtools
 # `-T`-compatible, tab-separated). Ignored for FASTQ input.
 trim_galore --preserve-tags CB,UB sample.bam
+
+# uBAM output — emit unaligned BAM instead of FASTQ. Single-threaded; the
+# input `@HD`/`@PG` chain is propagated and a trim_galore `@PG` line is
+# appended. Paired output is ONE interleaved BAM (`<stem>_val.bam`) with
+# FREAD1/FREAD2 flag bits per record (samtools/Picard/fgbio convention).
+trim_galore --output-format ubam sample.bam
+trim_galore --paired --output-format ubam interleaved.bam
+
+# Preserve aux tags THROUGH trimming (uBAM-in → uBAM-out). A/Z/i/f scalar
+# tags round-trip; B (array) and H (hex) types are not supported in v1.
+trim_galore --preserve-tags CB,UB --output-format ubam sample.bam
 ```
 
 For the complete list of options:
@@ -131,6 +142,8 @@ trim_galore --help
 | Single-end | `*_trimmed.fq.gz` | `*_trimming_report.txt` + `*_trimming_report.json` |
 | Paired-end | `*_val_1.fq.gz` / `*_val_2.fq.gz` | per-read text + JSON reports |
 | Unpaired (with `--retain_unpaired`) | `*_unpaired_1.fq.gz` / `*_unpaired_2.fq.gz` | |
+| Single-end, `--output-format ubam` | `*_trimmed.bam` | (same text + JSON reports) |
+| Paired-end, `--output-format ubam` | `*_val.bam` (ONE interleaved BAM) | R1 + R2 reports |
 
 Output compression mirrors the input: gzipped input (`*.fastq.gz`) produces gzipped output (`*.fq.gz`); plain input (`*.fastq`) produces plain output (`*.fq`). Pass `--dont_gzip` to force plain output regardless. By default, gzip output is written at compression level 1 (fastest); pass `--compression <N>` (1–9) to override — decompressed content is byte-identical regardless of level, but level-1 `.fq.gz` files are roughly 75% larger than level-9 in exchange for substantially faster trimming.
 
