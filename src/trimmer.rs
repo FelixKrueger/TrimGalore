@@ -623,6 +623,214 @@ pub fn run_paired_end(
     Ok((stats_r1, stats_r2, pair_stats))
 }
 
+/// Run the single-end trimming pipeline writing to uBAM.
+///
+/// Same trim + filter logic as [`run_single_end`]; the only structural
+/// difference is the output type — a [`crate::bam::BamWriter`] instead of a
+/// [`FastqWriter`]. Per PLAN v2.1 (see
+/// `plans/06252026_pluggable-io-formats/phase1-trimgalore-formats/PLAN.md`
+/// §3 / §5), uBAM output lives on a separate serial code path from the
+/// FASTQ parallel.rs pipeline.
+pub fn run_single_end_to_bam(
+    reader: &mut dyn crate::fastq::RecordSource,
+    writer: &mut crate::bam::BamWriter,
+    config: &TrimConfig,
+) -> Result<TrimStats> {
+    let mut stats = TrimStats::with_adapter_count(config.adapters.len());
+
+    while let Some(mut record) = reader.next_record()? {
+        stats.total_reads += 1;
+        stats.total_bp_processed += record.seq.len();
+
+        let result = trim_read(&mut record, config, false);
+        stats.bases_quality_trimmed += result.quality_trimmed_bp;
+        update_adapter_stats(&mut stats, &result);
+        if result.rrbs_trimmed_3prime {
+            stats.rrbs_trimmed_3prime += 1;
+        }
+        if result.rrbs_trimmed_5prime {
+            stats.rrbs_trimmed_5prime += 1;
+        }
+        if result.poly_a_trimmed > 0 {
+            stats.poly_a_trimmed += 1;
+            stats.poly_a_bases_trimmed += result.poly_a_trimmed;
+        }
+        if result.poly_g_trimmed > 0 {
+            stats.poly_g_trimmed += 1;
+            stats.poly_g_bases_trimmed += result.poly_g_trimmed;
+        }
+
+        if config.discard_untrimmed && !result.had_adapter {
+            stats.discarded_untrimmed += 1;
+            continue;
+        }
+
+        stats.total_bp_after_trim += result.bp_after_cutadapt;
+
+        match filters::filter_single_end(
+            &record,
+            config.length_cutoff,
+            config.max_length,
+            config.max_n.clone(),
+        ) {
+            FilterResult::Pass => {
+                stats.total_bp_written += record.seq.len();
+                writer.write_record(&record, None)?;
+                stats.reads_written += 1;
+            }
+            FilterResult::TooShort => stats.too_short += 1,
+            FilterResult::TooLong => stats.too_long += 1,
+            FilterResult::TooManyN => stats.too_many_n += 1,
+        }
+    }
+
+    Ok(stats)
+}
+
+/// Run the paired-end trimming pipeline writing ONE interleaved uBAM.
+///
+/// Same trim + filter logic as [`run_paired_end`]; structurally simpler
+/// because:
+/// - Only one [`crate::bam::BamWriter`] — the paired output is a single
+///   interleaved BAM file per PLAN §3.2 (matching samtools/Picard/fgbio
+///   convention + #317's reader-side expectation).
+/// - No `--passthrough` — rejected at CLI (PLAN §3.4a).
+/// - No `--retain_unpaired` — also rejected at CLI (PLAN §3.4a addendum
+///   added during Step 3 implementation; multi-output BAM is out of scope
+///   for v1).
+///
+/// Record order is R1, R2, R1, R2, … (mate-adjacent), with FREAD1 / FREAD2
+/// flag bits set per record via [`crate::bam::BamWriter::write_record`].
+pub fn run_paired_end_to_bam(
+    reader_r1: &mut dyn crate::fastq::RecordSource,
+    reader_r2: &mut dyn crate::fastq::RecordSource,
+    writer: &mut crate::bam::BamWriter,
+    config: &TrimConfig,
+) -> Result<(TrimStats, TrimStats, PairValidationStats)> {
+    let mut stats_r1 = TrimStats::with_adapter_count(config.adapters.len());
+    let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
+    let mut pair_stats = PairValidationStats::default();
+
+    // `filter_paired_end` requires an `UnpairedLengths` even when no rescue
+    // happens. The BAM path never rescues (--retain_unpaired is rejected
+    // upstream), so the value is never consulted.
+    let unpaired_sentinel = crate::filters::UnpairedLengths { r1: 0, r2: 0 };
+
+    loop {
+        let rec1 = reader_r1.next_record()?;
+        let rec2 = reader_r2.next_record()?;
+        match (rec1, rec2) {
+            (Some(mut r1), Some(mut r2)) => {
+                stats_r1.total_reads += 1;
+                stats_r2.total_reads += 1;
+                stats_r1.total_bp_processed += r1.seq.len();
+                stats_r2.total_bp_processed += r2.seq.len();
+                pair_stats.pairs_analyzed += 1;
+
+                let result_r1 = trim_read(&mut r1, config, false);
+                let result_r2 = trim_read(&mut r2, config, true);
+
+                stats_r1.bases_quality_trimmed += result_r1.quality_trimmed_bp;
+                stats_r2.bases_quality_trimmed += result_r2.quality_trimmed_bp;
+                update_adapter_stats(&mut stats_r1, &result_r1);
+                update_adapter_stats(&mut stats_r2, &result_r2);
+                if result_r1.rrbs_trimmed_3prime {
+                    stats_r1.rrbs_trimmed_3prime += 1;
+                }
+                if result_r1.rrbs_trimmed_5prime {
+                    stats_r1.rrbs_trimmed_5prime += 1;
+                }
+                if result_r2.rrbs_trimmed_3prime {
+                    stats_r2.rrbs_trimmed_3prime += 1;
+                }
+                if result_r2.rrbs_trimmed_5prime {
+                    stats_r2.rrbs_trimmed_5prime += 1;
+                }
+                if config.rrbs && result_r2.clip_5prime_applied {
+                    stats_r2.rrbs_r2_clipped_5prime += 1;
+                }
+                if result_r1.poly_a_trimmed > 0 {
+                    stats_r1.poly_a_trimmed += 1;
+                    stats_r1.poly_a_bases_trimmed += result_r1.poly_a_trimmed;
+                }
+                if result_r2.poly_a_trimmed > 0 {
+                    stats_r2.poly_a_trimmed += 1;
+                    stats_r2.poly_a_bases_trimmed += result_r2.poly_a_trimmed;
+                }
+                if result_r1.poly_g_trimmed > 0 {
+                    stats_r1.poly_g_trimmed += 1;
+                    stats_r1.poly_g_bases_trimmed += result_r1.poly_g_trimmed;
+                }
+                if result_r2.poly_g_trimmed > 0 {
+                    stats_r2.poly_g_trimmed += 1;
+                    stats_r2.poly_g_bases_trimmed += result_r2.poly_g_trimmed;
+                }
+
+                if config.discard_untrimmed && !result_r1.had_adapter && !result_r2.had_adapter {
+                    stats_r1.discarded_untrimmed += 1;
+                    stats_r2.discarded_untrimmed += 1;
+                    pair_stats.pairs_removed += 1;
+                    continue;
+                }
+
+                stats_r1.total_bp_after_trim += result_r1.bp_after_cutadapt;
+                stats_r2.total_bp_after_trim += result_r2.bp_after_cutadapt;
+
+                match filters::filter_paired_end(
+                    &r1,
+                    &r2,
+                    config.length_cutoff,
+                    config.max_length,
+                    config.max_n.clone(),
+                    unpaired_sentinel,
+                ) {
+                    PairFilterResult::Pass => {
+                        stats_r1.total_bp_written += r1.seq.len();
+                        stats_r2.total_bp_written += r2.seq.len();
+                        writer.write_record(&r1, Some(1))?;
+                        writer.write_record(&r2, Some(2))?;
+                        stats_r1.reads_written += 1;
+                        stats_r2.reads_written += 1;
+                    }
+                    PairFilterResult::TooManyN => {
+                        pair_stats.pairs_removed += 1;
+                        pair_stats.pairs_removed_n += 1;
+                        stats_r1.too_many_n += 1;
+                        stats_r2.too_many_n += 1;
+                    }
+                    PairFilterResult::TooShort { .. } => {
+                        // --retain_unpaired is rejected upstream — no rescue.
+                        pair_stats.pairs_removed += 1;
+                        stats_r1.too_short += 1;
+                        stats_r2.too_short += 1;
+                    }
+                    PairFilterResult::TooLong => {
+                        pair_stats.pairs_removed += 1;
+                        pair_stats.pairs_removed_too_long += 1;
+                        stats_r1.too_long += 1;
+                        stats_r2.too_long += 1;
+                    }
+                }
+            }
+            (None, None) => break,
+            (Some(_), None) => {
+                anyhow::bail!(
+                    "Read 2 file is truncated — R1 has more reads than R2. \
+                     Please check your paired-end input files!"
+                );
+            }
+            (None, Some(_)) => {
+                anyhow::bail!(
+                    "Read 1 file is truncated — R2 has more reads than R1. \
+                     Please check your paired-end input files!"
+                );
+            }
+        }
+    }
+
+    Ok((stats_r1, stats_r2, pair_stats))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -50,6 +50,10 @@ noodles = { version = "=0.88.0", default-features = false, features = ["bam"] }
 [dev-dependencies]
 serde_json = "1"
 tempfile = "3"
+# Already in the dep graph (transitive via noodles); promoted to a direct
+# dev-dep so test code can construct `bstr::BStr` for noodles-aux-Value
+# variants that take `&'a BStr` (e.g. `Value::Hex`).
+bstr = "1"
 
 [profile.release]
 opt-level = 3

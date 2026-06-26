@@ -727,12 +727,31 @@ jobs:
 
       - name: Validate aligned BAM is rejected per-record
         run: |
-          # Build an aligned BAM by aligning the fixture to a tiny synthetic
-          # reference (or by flipping the UNMAP bit on the committed fixture).
-          # Easier: flip the unmap bit via samtools view text-edit.
+          # Build a truly-aligned BAM: just clearing the FUNMAP bit isn't
+          # enough — modern samtools (≥1.20) auto-restores FUNMAP when
+          # RNAME=* and POS=0, treating "no position → must be unmapped"
+          # as the canonical SAM-spec inference. So we ALSO inject an @SQ
+          # header line declaring `chr1` and set RNAME=chr1 / POS=1 /
+          # MAPQ=60 / CIGAR=65M on every record. The BS-seq fixture is
+          # 65bp uniform (see test_files/README.md), so 65M matches the
+          # SEQ length and samtools accepts the record as aligned.
           samtools view -h test_files/ubam_test.bam \
-            | awk 'BEGIN{OFS="\t"} /^@/ {print; next} {$2 = 0; print}' \
+            | awk '
+                BEGIN{OFS="\t"}
+                /^@HD/  {print; print "@SQ\tSN:chr1\tLN:1000000"; next}
+                /^@/    {print; next}
+                        {$2 = 0; $3 = "chr1"; $4 = "1"; $5 = "60"; $6 = "65M"; print}
+              ' \
             | samtools view -b - -o /tmp/aligned.bam
+          # Confirm the synthesised BAM is genuinely aligned (FUNMAP NOT set)
+          # before asserting trim_galore rejects it — otherwise we'd be
+          # asserting against a fixture that doesn't match its name.
+          ALIGNED_COUNT=$(samtools view -c -F 0x4 /tmp/aligned.bam)
+          [ "$ALIGNED_COUNT" -gt 0 ] || {
+            echo "FIXTURE BROKEN: synthesised /tmp/aligned.bam has 0 aligned records (samtools auto-corrected FUNMAP)"
+            samtools view -h /tmp/aligned.bam | head -10
+            exit 1
+          }
           set +e
           ./target/release/trim_galore /tmp/aligned.bam -o /tmp/aligned_out 2>&1 | tee /tmp/aligned.log
           rc=${PIPESTATUS[0]}
@@ -749,6 +768,69 @@ jobs:
           grep -q "CB:Z:ATCGATCG-1" /tmp/first_header.txt
           grep -q "UB:Z:GCTAGCTA" /tmp/first_header.txt
 
+      # ─── uBAM-OUTPUT validation (PLAN v2.1 §5 step 6) ─────────────────────
+      # No Perl baseline exists for uBAM output. These assertions verify
+      # the BAM produced by `--output-format ubam` has the structural
+      # invariants we promised — flag bits, record counts, aux-tag round-
+      # trip — by post-processing it with samtools.
+
+      - name: Validate SE uBAM-out — content-tuple parity vs FASTQ-out path
+        # Run even if a prior uBAM-input step failed — these uBAM-OUTPUT
+        # assertions are independent and shouldn't be silently skipped by
+        # a transient failure in the read-side suite.
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/ubam_out_se /tmp/fastq_out_se
+          ./target/release/trim_galore --output-format ubam -o /tmp/ubam_out_se test_files/ubam_test.bam
+          ./target/release/trim_galore -o /tmp/fastq_out_se test_files/ubam_test.bam
+          # samtools fastq from the uBAM output, vs the FASTQ-out path.
+          # `-n` keeps bare read names (no /1 suffix).
+          samtools fastq -n /tmp/ubam_out_se/ubam_test_trimmed.bam \
+            | awk 'NR % 4 != 3' > /tmp/ubam_out_se.tuples
+          cat /tmp/fastq_out_se/ubam_test_trimmed.fq \
+            | awk 'NR % 4 != 3' > /tmp/fastq_out_se.tuples
+          diff /tmp/ubam_out_se.tuples /tmp/fastq_out_se.tuples || {
+            echo "SE uBAM-out content-tuple parity FAILED"
+            exit 1
+          }
+          echo "SE uBAM-out content-tuple parity: PASS"
+
+      - name: Validate PE uBAM-out — interleaved flag-bit counts
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/ubam_out_pe
+          ./target/release/trim_galore --paired --output-format ubam \
+            -o /tmp/ubam_out_pe test_files/ubam_paired_test.bam
+          test -f /tmp/ubam_out_pe/ubam_paired_test_val.bam
+          # PLAN §3.2: paired uBAM output is ONE interleaved BAM file.
+          # FREAD1 (0x40) and FREAD2 (0x80) counts must be equal.
+          R1=$(samtools view -c -f 0x40 /tmp/ubam_out_pe/ubam_paired_test_val.bam)
+          R2=$(samtools view -c -f 0x80 /tmp/ubam_out_pe/ubam_paired_test_val.bam)
+          echo "FREAD1=$R1 FREAD2=$R2"
+          [ "$R1" -eq "$R2" ] || { echo "MISMATCH: FREAD1/FREAD2 counts differ"; exit 1; }
+          # flagstat: 20 total, all unmapped, paired
+          samtools flagstat /tmp/ubam_out_pe/ubam_paired_test_val.bam | tee /tmp/ubam_out_pe.flagstat
+          grep -q "20 .* paired in sequencing" /tmp/ubam_out_pe.flagstat
+
+      - name: Validate uBAM-out aux-tag preservation
+        if: ${{ !cancelled() }}
+        run: |
+          # Skip gracefully if the with-tags fixture isn't present (it's
+          # not strictly required for uBAM-out — lib tests cover the
+          # round-trip — but exercise it end-to-end when available).
+          if [ -f test_files/ubam_test_with_tags.bam ]; then
+            mkdir -p /tmp/ubam_out_aux
+            ./target/release/trim_galore --output-format ubam \
+              --preserve-tags CB,UB \
+              -o /tmp/ubam_out_aux test_files/ubam_test_with_tags.bam
+            samtools view /tmp/ubam_out_aux/ubam_test_with_tags_trimmed.bam \
+              | head -1 | tee /tmp/ubam_out_aux_first.txt
+            grep -q "CB:Z:ATCGATCG-1" /tmp/ubam_out_aux_first.txt
+            grep -q "UB:Z:GCTAGCTA" /tmp/ubam_out_aux_first.txt
+          else
+            echo "SKIP: ubam_test_with_tags.bam not committed; aux-tag round-trip covered by lib tests"
+          fi
+
       - name: Upload uBAM validation outputs on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -760,6 +842,7 @@ jobs:
             /tmp/via_pe/
             /tmp/with_tags/
             /tmp/aligned*
+            /tmp/ubam_out_*
             /tmp/*.tuples
             /tmp/*.log
           if-no-files-found: warn

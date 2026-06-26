@@ -92,6 +92,54 @@ pub fn single_end_output_name(
     }
 }
 
+/// Generate the trimmed output filename for single-end mode, uBAM variant.
+///
+/// `<stem>_trimmed.bam` — compression is implicit (BGZF, always on for BAM).
+/// Per PLAN v2.1 §3.2.
+pub fn single_end_bam_output_name(
+    input: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+) -> PathBuf {
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input));
+    let filename = format!("{}_trimmed.bam", stem);
+
+    match output_dir {
+        Some(dir) => dir.join(&filename),
+        None => input.parent().unwrap_or(Path::new(".")).join(&filename),
+    }
+}
+
+/// Generate the validated output filename for paired-end mode, uBAM variant.
+///
+/// Returns a SINGLE interleaved BAM path (`<stem>_val.bam`) — no `_1`/`_2`
+/// suffix. Matches samtools/Picard/fgbio convention and #317's
+/// `BamReader::open_paired_interleaved` reader-side expectation. Per PLAN
+/// v2.1 §3.2.
+///
+/// When `--basename foo` is set, the path is `foo_val.bam`; otherwise the
+/// stem derives from R1's filename (R2's is ignored — same convention as
+/// the FASTQ path).
+pub fn paired_bam_output_name(
+    input_r1: &Path,
+    _input_r2: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+) -> PathBuf {
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input_r1));
+    let filename = format!("{}_val.bam", stem);
+
+    let dir = output_dir
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    dir.join(&filename)
+}
+
 /// Generate the validated output filenames for paired-end mode.
 ///
 /// Returns (val_1_path, val_2_path).

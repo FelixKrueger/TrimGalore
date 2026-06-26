@@ -23,7 +23,41 @@
   implementation uses the pure-Rust `noodles` 0.88 umbrella crate
   (exact-pinned, BAM feature only — no async, no tokio) sharing the version
   already pulled transitively via `fastqc-rust 1.0.1`, so the release-binary
-  size delta is zero. Output stays FASTQ; there is no BAM writer.
+  size delta is zero. Output defaults to FASTQ; opt-in uBAM output is
+  available via `--output-format ubam` (see below).
+
+#### New output formats
+
+- **uBAM (unaligned BAM) output via `--output-format ubam`**
+  ([#315](https://github.com/FelixKrueger/TrimGalore/issues/315)).
+  Single-threaded in v1; `--cores N` is silently ignored on this path
+  (uBAM-in → uBAM-out is bottlenecked by single-threaded BGZF decompression
+  anyway). Single-end output is `<stem>_trimmed.bam`; paired output is
+  **ONE interleaved BAM** (`<stem>_val.bam`) with `FREAD1`/`FREAD2` flag
+  bits per record, matching samtools/Picard/fgbio/CellRanger convention
+  and TrimGalore's own paired-uBAM-input de-interleaver expectation.
+
+  The input SAM header (`@HD`/`@PG`/`@CO`/`@RG`) is propagated as-is and
+  a `trim_galore @PG VN:<version> CL:<command-line> PP:<prev-pg-id>` line
+  is appended on every run — output is NOT byte-identical to input, but
+  provenance is preserved by adding to history. For FASTQ input, a
+  minimal `@HD VN:1.6` + trim_galore `@PG` header is synthesised.
+
+  Aux tags from uBAM input round-trip through trimming when
+  `--preserve-tags` is set: BamReader folds the tag-list into a textual
+  `\tTAG:TYPE:VALUE` tail on the FastqRecord id; BamWriter parses it
+  back into typed BAM aux fields. Only A (char), Z (string), i (i32),
+  and f (f32) scalar types round-trip; B (array) and H (hex) types are
+  rejected at the writer with an explicit error. BAM `i:` tags originally
+  stored as int8/int16/int64 are re-emitted as int32 (lossless for all
+  biologically meaningful tag values).
+
+  Specialty modes `--hardtrim5/3` are supported with `--output-format ubam`
+  (output: `<stem>.<N>bp_{5,3}prime.bam`). The following are rejected at
+  the CLI layer in v1: `--clumpify`, `--passthrough`, `--clock`,
+  `--implicon`, `--demux`, `--retain_unpaired` — each produces multiple
+  output files or encodes metadata in FASTQ headers in ways that don't
+  translate cleanly to BAM in v1.
 
 #### New flags
 

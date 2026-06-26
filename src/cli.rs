@@ -3,6 +3,23 @@
 use clap::Parser;
 use std::path::PathBuf;
 
+/// Output container format. FASTQ is the default and preserves byte-identity
+/// with Perl Trim Galore 0.6.11. uBAM is opt-in and carries the input BAM's
+/// aux tags through (via `--preserve-tags`).
+///
+/// See `plans/06252026_pluggable-io-formats/phase1-trimgalore-formats/PLAN.md`
+/// §3.2 for the full output-naming + behaviour matrix.
+#[derive(Clone, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// FASTQ output, mirroring input compression (default).
+    #[default]
+    Fastq,
+    /// Unaligned BAM output. Always single-threaded in v1; --clumpify,
+    /// --passthrough, --clock, --implicon, --demux are rejected at validation.
+    #[clap(name = "ubam")]
+    UBam,
+}
+
 /// Trim Galore: A fast, single-pass NGS adapter and quality trimmer.
 ///
 /// Drop-in replacement for Trim Galore, rewritten in Rust. Matches v0.6.x outputs
@@ -188,6 +205,15 @@ pub struct Cli {
     /// release and rejected in v1. See PLAN §3.2.5.
     #[clap(long = "preserve-tags", value_delimiter = ',', value_parser = parse_sam_tag_name)]
     pub preserve_tags: Vec<String>,
+
+    /// Output container format. Default `fastq` keeps existing behaviour
+    /// (input-compression-mirroring FASTQ); `ubam` emits unaligned BAM with
+    /// aux tags propagated from uBAM inputs (when `--preserve-tags` is set).
+    /// uBAM output is always single-threaded in v1; see the rejection rules
+    /// in `Cli::validate` for incompatible combinations.
+    /// See `plans/06252026_pluggable-io-formats/phase1-trimgalore-formats/PLAN.md`.
+    #[clap(long = "output-format", value_enum, default_value_t = OutputFormat::Fastq)]
+    pub output_format: OutputFormat,
 
     /// Retain unpaired reads when the mate is too short (paired-end only).
     /// Cutoff via --length_1 / --length_2 (default 35 each).
@@ -481,6 +507,46 @@ impl Cli {
 
     /// Validate CLI arguments after parsing.
     pub fn validate(&self) -> anyhow::Result<()> {
+        // §3.4a — `--output-format ubam` exclusions. These are pure CLI-level
+        // (no file I/O); enforced here. The §3.4b rule (preserve-tags + all
+        // FASTQ inputs) requires format detection and lives in main.rs.
+        if matches!(self.output_format, OutputFormat::UBam) {
+            if self.clumpify {
+                anyhow::bail!(
+                    "--clumpify is for gzip output; not applicable with --output-format ubam"
+                );
+            }
+            if self.passthrough.is_some() {
+                anyhow::bail!("--passthrough is not supported with --output-format ubam in v1");
+            }
+            if self.clock {
+                anyhow::bail!(
+                    "--clock + --output-format ubam: UMI-to-BAM-tag mapping not defined in v1; \
+                     use FASTQ output or convert after"
+                );
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!(
+                    "--implicon + --output-format ubam: UMI-to-BAM-tag mapping not defined in v1"
+                );
+            }
+            if self.demux.is_some() {
+                anyhow::bail!("--demux is not supported with --output-format ubam in v1");
+            }
+            // PLAN v2.1 §3.4a addendum (Step 3 implementation note): v2.1 left
+            // --retain_unpaired silent, but it produces multiple output files
+            // (`*_unpaired_{1,2}.fq.gz`) — same shape as --demux / --passthrough
+            // which are already rejected. Multi-output BAM is out of scope for
+            // v1; revisit if a real workload demands it.
+            if self.retain_unpaired {
+                anyhow::bail!(
+                    "--retain_unpaired is not supported with --output-format ubam in v1 \
+                     (unpaired records would require additional BAM output paths; \
+                     run without --retain_unpaired or post-process via samtools)"
+                );
+            }
+        }
+
         if self.paired {
             // `#[clap(required = true)]` on `input` guarantees at least one file
             // reaches validate(), so no is_empty() check is needed.
@@ -1465,5 +1531,137 @@ mod tests {
         let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", R2, R1, R2]);
         let err = cli.validate().unwrap_err().to_string();
         assert!(err.contains("cannot point at R1 or R2"), "got: {err}");
+    }
+
+    // ── --output-format (PLAN v2.1 §3.4a) ─────────────────────────────────
+
+    #[test]
+    fn output_format_default_is_fastq() {
+        let cli = Cli::parse_from(["trim_galore", R1]);
+        assert_eq!(cli.output_format, OutputFormat::Fastq);
+    }
+
+    #[test]
+    fn output_format_ubam_parses() {
+        let cli = Cli::parse_from(["trim_galore", "--output-format", "ubam", R1]);
+        assert_eq!(cli.output_format, OutputFormat::UBam);
+    }
+
+    #[test]
+    fn output_format_unknown_value_rejected() {
+        let r = Cli::try_parse_from(["trim_galore", "--output-format", "binseq", R1]);
+        assert!(r.is_err(), "BINSEQ is deferred in v1 — clap must reject it");
+    }
+
+    #[test]
+    fn output_format_ubam_alone_validates() {
+        let cli = Cli::parse_from(["trim_galore", "--output-format", "ubam", R1]);
+        cli.validate()
+            .expect("plain --output-format ubam must validate");
+    }
+
+    #[test]
+    fn output_format_ubam_plus_clumpify_rejected() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--output-format",
+            "ubam",
+            "--clumpify",
+            "--cores",
+            "2",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--clumpify") && err.contains("--output-format ubam"),
+            "expected clumpify+ubam rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn output_format_ubam_plus_passthrough_rejected() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--output-format",
+            "ubam",
+            "--passthrough",
+            ALT_R1,
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--passthrough") && err.contains("--output-format ubam"),
+            "expected passthrough+ubam rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn output_format_ubam_plus_clock_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", "--output-format", "ubam", R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--clock") && err.contains("--output-format ubam"),
+            "expected clock+ubam rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn output_format_ubam_plus_implicon_rejected() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--implicon",
+            "8",
+            "--output-format",
+            "ubam",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--implicon") && err.contains("--output-format ubam"),
+            "expected implicon+ubam rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn output_format_ubam_plus_retain_unpaired_rejected() {
+        // PLAN v2.1 §3.4a addendum: --retain_unpaired produces additional
+        // FASTQ files (`*_unpaired_{1,2}.fq.gz`); multi-output BAM is out of
+        // scope for v1.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--retain_unpaired",
+            "--output-format",
+            "ubam",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--retain_unpaired") && err.contains("--output-format ubam"),
+            "expected retain_unpaired+ubam rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn output_format_ubam_plus_demux_rejected() {
+        // --demux takes a barcode-file path; any path string suffices for parser.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--demux",
+            "test_files/demux_test_samplesheet.txt",
+            "--output-format",
+            "ubam",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--demux") && err.contains("--output-format ubam"),
+            "expected demux+ubam rejection, got: {err}"
+        );
     }
 }

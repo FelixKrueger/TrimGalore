@@ -163,6 +163,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
 dependencies = [
  "memchr",
+ "regex-automata",
  "serde",
 ]
 
@@ -1766,6 +1767,7 @@ name = "trim-galore"
 version = "2.2.0"
 dependencies = [
  "anyhow",
+ "bstr",
  "clap",
  "env_logger",
  "fastqc-rust",
