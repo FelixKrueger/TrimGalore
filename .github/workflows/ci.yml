@@ -727,12 +727,31 @@ jobs:
 
       - name: Validate aligned BAM is rejected per-record
         run: |
-          # Build an aligned BAM by aligning the fixture to a tiny synthetic
-          # reference (or by flipping the UNMAP bit on the committed fixture).
-          # Easier: flip the unmap bit via samtools view text-edit.
+          # Build a truly-aligned BAM: just clearing the FUNMAP bit isn't
+          # enough — modern samtools (≥1.20) auto-restores FUNMAP when
+          # RNAME=* and POS=0, treating "no position → must be unmapped"
+          # as the canonical SAM-spec inference. So we ALSO inject an @SQ
+          # header line declaring `chr1` and set RNAME=chr1 / POS=1 /
+          # MAPQ=60 / CIGAR=65M on every record. The BS-seq fixture is
+          # 65bp uniform (see test_files/README.md), so 65M matches the
+          # SEQ length and samtools accepts the record as aligned.
           samtools view -h test_files/ubam_test.bam \
-            | awk 'BEGIN{OFS="\t"} /^@/ {print; next} {$2 = 0; print}' \
+            | awk '
+                BEGIN{OFS="\t"}
+                /^@HD/  {print; print "@SQ\tSN:chr1\tLN:1000000"; next}
+                /^@/    {print; next}
+                        {$2 = 0; $3 = "chr1"; $4 = "1"; $5 = "60"; $6 = "65M"; print}
+              ' \
             | samtools view -b - -o /tmp/aligned.bam
+          # Confirm the synthesised BAM is genuinely aligned (FUNMAP NOT set)
+          # before asserting trim_galore rejects it — otherwise we'd be
+          # asserting against a fixture that doesn't match its name.
+          ALIGNED_COUNT=$(samtools view -c -F 0x4 /tmp/aligned.bam)
+          [ "$ALIGNED_COUNT" -gt 0 ] || {
+            echo "FIXTURE BROKEN: synthesised /tmp/aligned.bam has 0 aligned records (samtools auto-corrected FUNMAP)"
+            samtools view -h /tmp/aligned.bam | head -10
+            exit 1
+          }
           set +e
           ./target/release/trim_galore /tmp/aligned.bam -o /tmp/aligned_out 2>&1 | tee /tmp/aligned.log
           rc=${PIPESTATUS[0]}
@@ -756,6 +775,10 @@ jobs:
       # trip — by post-processing it with samtools.
 
       - name: Validate SE uBAM-out — content-tuple parity vs FASTQ-out path
+        # Run even if a prior uBAM-input step failed — these uBAM-OUTPUT
+        # assertions are independent and shouldn't be silently skipped by
+        # a transient failure in the read-side suite.
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p /tmp/ubam_out_se /tmp/fastq_out_se
           ./target/release/trim_galore --output-format ubam -o /tmp/ubam_out_se test_files/ubam_test.bam
@@ -773,6 +796,7 @@ jobs:
           echo "SE uBAM-out content-tuple parity: PASS"
 
       - name: Validate PE uBAM-out — interleaved flag-bit counts
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p /tmp/ubam_out_pe
           ./target/release/trim_galore --paired --output-format ubam \
@@ -789,6 +813,7 @@ jobs:
           grep -q "20 .* paired in sequencing" /tmp/ubam_out_pe.flagstat
 
       - name: Validate uBAM-out aux-tag preservation
+        if: ${{ !cancelled() }}
         run: |
           # Skip gracefully if the with-tags fixture isn't present (it's
           # not strictly required for uBAM-out — lib tests cover the
