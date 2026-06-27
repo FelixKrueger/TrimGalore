@@ -77,7 +77,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:latest trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.2.0`), `:v2.2.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.3.0`), `:v2.3.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
 
 ### Prebuilt binaries
 
