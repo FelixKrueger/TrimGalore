@@ -1089,12 +1089,12 @@ fn run_paired(
     }
     if stats_r2.poly_g_trimmed > 0 {
         eprintln!(
-            "R2 reads with poly-C trimmed:    {:>10} ({:.1}%)",
+            "R2 reads with poly-G trimmed:    {:>10} ({:.1}%)",
             stats_r2.poly_g_trimmed,
             pct(stats_r2.poly_g_trimmed, stats_r2.total_reads)
         );
         eprintln!(
-            "  R2 poly-C bases removed:       {:>10}",
+            "  R2 poly-G bases removed:       {:>10}",
             stats_r2.poly_g_bases_trimmed
         );
     }

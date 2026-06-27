@@ -42,9 +42,9 @@ pub struct TrimStats {
     pub poly_a_trimmed: usize,
     /// Total bases removed by poly-A/poly-T trimming
     pub poly_a_bases_trimmed: usize,
-    /// Reads with poly-G/poly-C tails trimmed
+    /// Reads with 3' poly-G tails trimmed (2-colour sequencing artifact, both R1 and R2)
     pub poly_g_trimmed: usize,
-    /// Total bases removed by poly-G/poly-C trimming
+    /// Total bases removed by poly-G trimming
     pub poly_g_bases_trimmed: usize,
     /// Reads discarded because no adapter was found (--discard-untrimmed)
     pub discarded_untrimmed: usize,
@@ -288,7 +288,7 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     if config.poly_g {
         writeln!(
             w,
-            "Poly-G trimming enabled: removing poly-G tails from 3' end of R1/SE reads, and poly-C heads from 5' end of R2 reads"
+            "Poly-G trimming enabled: removing poly-G tails from 3' end of both R1 and R2 (2-colour sequencer artifact)"
         )?;
     }
     if config.gzip {

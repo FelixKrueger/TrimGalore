@@ -3,6 +3,29 @@
 
 ### Unreleased (on `dev`)
 
+#### Fixes
+
+- **`--poly_g` now correctly trims the 3' end of Read 2** (was trimming
+  the 5' end as poly-C — wrong location for the 2-colour artifact).
+  Reported by @K81ta in
+  [#321](https://github.com/FelixKrueger/TrimGalore/issues/321).
+  The 2-colour poly-G artifact is sequencer-induced (the instrument
+  calls "no signal" as a high-quality G when it overruns the template),
+  which happens at the 3' end of every read regardless of strand
+  orientation — unlike poly-A, which is a template feature (mRNA tail
+  on the forward strand) and presents at opposite ends of R1 vs R2 in
+  the reverse-complement orientation. The original code copied the
+  poly-A `revcomp = is_r2` pattern, addressing the wrong location on
+  R2. Stat labels and reports also updated from "R2 poly-C" to "R2
+  poly-G".
+
+  Behaviour change: R2 records with 3' poly-G tails are now trimmed
+  (previously untouched); R2 records that happened to start with a
+  poly-C run on their 5' end are no longer trimmed by `--poly_g` (that
+  was the bug). No effect on `--poly_a` / poly-T handling. No effect on
+  R1 / single-end (only the R2 path changed). v0.6.x Perl byte-identity
+  unaffected (`--poly_g` is a v2.x-only feature, no Perl baseline).
+
 #### New input formats
 
 - **uBAM (unaligned BAM) input support**
