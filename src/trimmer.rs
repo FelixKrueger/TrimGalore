@@ -213,23 +213,23 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         }
     }
 
-    // 2.8. Poly-G / Poly-C trimming (2-colour chemistry artifact removal)
-    // R1/SE: trim poly-G from 3' end. R2: trim poly-C from 5' end.
+    // 2.8. Poly-G trimming (2-colour chemistry artifact removal).
+    //
+    // Unlike poly-A (template-side: mRNA poly-A tail on the forward
+    // strand → R1 sees 3' poly-A, R2 sees 5' poly-T), the 2-colour
+    // poly-G artifact is sequencer-induced: the instrument calls "no
+    // signal" as a high-quality G when it overruns the template, which
+    // happens at the 3' end of BOTH reads regardless of strand. So
+    // poly-G must be trimmed at the 3' end on R1 AND R2 — NOT at the
+    // 5' end of R2 (which would address poly-C, the wrong location for
+    // this artifact). See issue #321.
     let mut poly_g_trimmed: usize = 0;
     if config.poly_g && !record.is_empty() {
-        let revcomp = is_r2;
         let seq_len_before = record.seq.len();
-        let idx = quality::homopolymer_trim_index(record.seq.as_bytes(), b'G', revcomp);
-        if revcomp {
-            if idx > 0 {
-                record.clip_5prime(idx);
-                poly_g_trimmed = idx;
-            }
-        } else {
-            if idx < seq_len_before {
-                record.truncate(idx);
-                poly_g_trimmed = seq_len_before - idx;
-            }
+        let idx = quality::homopolymer_trim_index(record.seq.as_bytes(), b'G', false);
+        if idx < seq_len_before {
+            record.truncate(idx);
+            poly_g_trimmed = seq_len_before - idx;
         }
     }
 
@@ -1104,5 +1104,69 @@ mod tests {
 
         assert!(result.had_adapter);
         assert_eq!(result.bp_after_cutadapt, record.seq.len());
+    }
+
+    // ── Poly-G + R2 (issue #321 regression guards) ─────────────────────────
+
+    fn poly_g_config() -> TrimConfig {
+        let mut c = test_config_with_adapters(Vec::<(&str, &str)>::new(), 1);
+        c.poly_g = true;
+        c
+    }
+
+    #[test]
+    fn test_poly_g_r2_trims_3prime_tail() {
+        // Issue #321: 2-colour artifact appears at 3' end of BOTH reads
+        // (sequencer-induced, not template-side). R2 with a 3' poly-G
+        // tail must get trimmed at the 3' end — previously the code
+        // mistakenly looked for 5' poly-C only and left R2 3' tails
+        // untrimmed.
+        let read_seq = "ACGTACGTACGTACGTGGGGGGGGGGGG"; // 16bp signal + 12 G's
+        let config = poly_g_config();
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, true); // is_r2 = true
+
+        assert!(
+            result.poly_g_trimmed >= 12,
+            "expected ≥12 G's trimmed from R2 3' end, got {}",
+            result.poly_g_trimmed
+        );
+        assert_eq!(
+            record.seq.len(),
+            16,
+            "R2 should be trimmed to 16bp (signal only)"
+        );
+        assert!(!record.seq.ends_with('G'));
+    }
+
+    #[test]
+    fn test_poly_g_r1_still_trims_3prime_tail() {
+        // R1 regression guard: the fix must NOT alter R1 behaviour.
+        let read_seq = "ACGTACGTACGTACGTGGGGGGGGGGGG";
+        let config = poly_g_config();
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, false); // is_r2 = false
+
+        assert!(result.poly_g_trimmed >= 12);
+        assert_eq!(record.seq.len(), 16);
+    }
+
+    #[test]
+    fn test_poly_g_r2_does_not_trim_5prime_poly_c() {
+        // After the issue-#321 fix, a 5' poly-C run on R2 is NOT touched
+        // by `--poly_g` (that was the bug — `--poly_g` was incorrectly
+        // attacking the 5' end of R2). The artifact is sequencer-side
+        // 3' poly-G; legitimate 5' content stays intact.
+        let read_seq = "CCCCCCCCCCCCACGTACGTACGTACGT"; // 12 C's at 5' + 16bp signal
+        let config = poly_g_config();
+        let mut record = make_record(read_seq);
+        let result = trim_read(&mut record, &config, true); // is_r2 = true
+
+        assert_eq!(
+            result.poly_g_trimmed, 0,
+            "R2 5' poly-C must NOT be trimmed by --poly_g (issue #321)"
+        );
+        assert_eq!(record.seq.len(), 28, "no length change expected");
+        assert!(record.seq.starts_with('C'));
     }
 }

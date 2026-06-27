@@ -9,7 +9,7 @@ v2 ships with two built-in poly-X trimmers that the Perl version did not have: *
 
 On 2-colour Illumina instruments (NextSeq, NovaSeq, NovaSeq X), no signal is encoded as a high-quality **G**. This produces spurious G-runs at the 3' end of reads with little signal. They look like high-quality bases to the basecaller but represent dark cycles, not actual G calls.
 
-`--poly_g` scans the 3' end of Read 1 (and the 5' end of Read 2, where the reverse complement reads as poly-C) for these runs and trims them. It is auto-enabled when the data looks 2-colour, based on sequence detection of trailing G-runs.
+`--poly_g` scans the 3' end of **both** Read 1 and Read 2 for these runs and trims them. The artifact is sequencer-induced (overrun → high-quality "G" called for no signal), so it appears at the 3' end of every read regardless of strand orientation — unlike poly-A, which is a template feature and presents at opposite ends of R1 and R2 in the reverse-complement orientation. `--poly_g` is auto-enabled when the data looks 2-colour, based on sequence detection of trailing G-runs.
 
 ```bash
 # Auto-detection runs by default. No flag needed.
