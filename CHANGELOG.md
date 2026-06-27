@@ -1,7 +1,11 @@
 # Trim Galore Changelog
 
 
-### Unreleased (on `dev`)
+### Version 2.3.0 (Release on 27 June 2026)
+
+**The Formats Edition.** Both directions of unaligned BAM (uBAM) now ship: TrimGalore reads uBAM transparently (auto-detected by content, paired-interleaved supported via a bounded de-interleaver, BAM aux tags fold into FASTQ headers via `--preserve-tags`) and emits uBAM via `--output-format ubam` (SE → `*_trimmed.bam`, PE → ONE interleaved `*_val.bam` matching samtools/Picard/fgbio convention, aux tags round-trip A/Z/i/f scalars). Pairs with Bismark's uBAM input support ([Bismark#1026](https://github.com/FelixKrueger/Bismark/pull/1026) + [#1027](https://github.com/FelixKrueger/Bismark/pull/1027)) — the cross-tool TrimGalore-emits → Bismark-reads handshake is now first-class, and Bismark's test suite confirms byte-identity between TrimGalore's uBAM output and `samtools fastq` on real BS-seq data (SE + PE), so the transcoder is hermetically guarded at the byte level.
+
+Also ships `--passthrough` for 10X Multiome cell-barcode carrier reads (paired-end + a third inline FASTQ kept in lockstep), and a corrected R2 poly-G trimming behaviour for 2-colour instruments (the artifact is sequencer-side and appears at the 3' end of both reads — was incorrectly trimming 5' poly-C on R2 before; reported by @K81ta in [#321](https://github.com/FelixKrueger/TrimGalore/issues/321)).
 
 #### Fixes
 
