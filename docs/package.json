@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@astrojs/mdx": "^5.0.4",
-    "@astrojs/starlight": "^0.39.3",
+    "@astrojs/starlight": "^0.41.1",
     "@fontsource/bricolage-grotesque": "^5.2.10",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
@@ -24,6 +24,6 @@
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
     "satori": "^0.26.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.35.2"
   }
 }
