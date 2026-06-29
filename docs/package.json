@@ -12,7 +12,7 @@
     "logos": "node scripts/generate-png-logos.mjs"
   },
   "dependencies": {
-    "@astrojs/mdx": "^5.0.4",
+    "@astrojs/mdx": "^7.0.0",
     "@astrojs/starlight": "^0.41.1",
     "@fontsource/bricolage-grotesque": "^5.2.10",
     "@fontsource/inter": "^5.2.8",
