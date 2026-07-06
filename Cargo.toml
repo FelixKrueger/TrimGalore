@@ -45,7 +45,7 @@ fastqc-rust = "=1.0.1"
 # features=["bam"] reuses that tree rather than forcing a parallel-version
 # compile. Treat upstream bumps as deliberate-test events.
 # See plans/06252026_ubam-input-support/PLAN.md §5 step 1.
-noodles = { version = "=0.88.0", default-features = false, features = ["bam"] }
+noodles = { version = "=0.109.0", default-features = false, features = ["bam"] }
 
 [dev-dependencies]
 serde_json = "1"
