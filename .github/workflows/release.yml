@@ -2,10 +2,20 @@ name: Release
 
 # ------------------------------------------------------------------
 # Release invariant:
-#   Never push `v*` tags manually. This workflow creates and pushes
-#   the tag itself during the create-tag-and-release job; an external
-#   `git push origin v...` collides with the workflow's tag push and
-#   can leave the release in a half-created state.
+#   Prefer NOT to push `v*` tags manually — this workflow creates and
+#   pushes the tag itself during the create-tag-and-release job. The
+#   canonical sequence is:
+#     1. Bump version in Cargo.toml (on dev, then FF master)
+#     2. Push master
+#     3. Dispatch this workflow with `--ref master` (workflow_dispatch)
+#   Do NOT `git tag v... && git push origin v...` between step 2 and 3.
+#
+#   Idempotency (added after v2.3.0's partial-shipping incident): if the
+#   tag DOES already exist AT the same commit as source-branch HEAD
+#   (accidental pre-tag; or a previous partial run got to Create tag
+#   but no further), the workflow will skip the Create tag step and
+#   proceed with the release. A tag at a DIFFERENT commit is still a
+#   hard error.
 #
 #   For dry-run validation before a real release, dispatch this
 #   workflow with `dry_run: true` — all destructive side effects
@@ -58,6 +68,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       version_major: ${{ steps.check.outputs.version_major }}
       version_minor: ${{ steps.check.outputs.version_minor }}
+      tag_preexists: ${{ steps.check.outputs.tag_preexists }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -96,10 +107,24 @@ jobs:
               echo "::warning::Dry run mode: no crates.io publish, no tag push, no Docker push, no GH release"
             fi
 
+            # Idempotency guard: a pre-existing tag at the SAME commit as the
+            # source-branch HEAD is fine (workflow may have been re-triggered
+            # after a prior partial run, or someone pre-tagged accidentally —
+            # both recoverable). A pre-existing tag at a DIFFERENT commit is
+            # still a hard error. Sets `tag_preexists` output for the
+            # Create-tag step to consume.
+            TAG_PREEXISTS="false"
             if [ "${{ inputs.dry_run }}" != "true" ] && git tag -l "$VERSION" | grep -q .; then
-              echo "::error::Tag $VERSION already exists"
-              exit 1
+              TAG_SHA=$(git rev-parse "$VERSION^{}")
+              HEAD_SHA=$(git rev-parse HEAD)
+              if [ "$TAG_SHA" != "$HEAD_SHA" ]; then
+                echo "::error::Tag $VERSION already exists at $TAG_SHA but source-branch HEAD is $HEAD_SHA — refusing to release from mismatched refs. Delete the misplaced tag or trigger on the correct branch."
+                exit 1
+              fi
+              echo "::notice::Tag $VERSION already exists at $HEAD_SHA (matches source-branch HEAD); Create tag step will be skipped."
+              TAG_PREEXISTS="true"
             fi
+            echo "tag_preexists=$TAG_PREEXISTS" >> "$GITHUB_OUTPUT"
 
             LOCK_VERSION=$(awk '/^name = "trim-galore"/{found=1} found && /^version =/{print; exit}' Cargo.lock | sed 's/.*"\(.*\)"/\1/')
             if [ "$LOCK_VERSION" != "$RAW_VERSION" ]; then
@@ -345,10 +370,15 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Create tag
-        if: needs.check-release.outputs.is_dry_run != 'true'
+        if: needs.check-release.outputs.is_dry_run != 'true' && needs.check-release.outputs.tag_preexists != 'true'
         run: |
           git tag "${{ needs.check-release.outputs.version }}"
           git push origin "${{ needs.check-release.outputs.version }}"
+
+      - name: Reuse existing tag (idempotency)
+        if: needs.check-release.outputs.is_dry_run != 'true' && needs.check-release.outputs.tag_preexists == 'true'
+        run: |
+          echo "Tag ${{ needs.check-release.outputs.version }} already exists at the correct commit; skipping tag create + push."
 
       - name: Create release
         if: needs.check-release.outputs.is_dry_run != 'true'
