@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install Trim Galore via cargo, bioconda, Docker, or prebuilt binaries.
+description: Install Trim Galore via cargo, bioconda, Homebrew, Docker, or prebuilt binaries.
 ---
 
 Trim Galore v2 ships as a single static binary. No Python, no Perl, no Cutadapt, no Java, no `igzip`, no `pigz`, no external FastQC. Pick whichever channel fits the rest of your stack.
@@ -17,6 +17,14 @@ cargo install trim-galore
 
 ```bash
 conda install -c bioconda trim-galore
+```
+
+## From Homebrew
+
+Available in [homebrew-core](https://formulae.brew.sh/formula/trim-galore) for macOS and Linux:
+
+```bash
+brew install trim-galore
 ```
 
 ## Build from source
@@ -52,8 +60,8 @@ FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fast
 
 | Tag | Updates |
 | --- | --- |
-| `:latest` | latest stable release (currently v2.2.0) |
-| `:v2.2.0` | pinned to a specific release |
+| `:latest` | latest stable release (currently v2.3.0) |
+| `:v2.3.0` | pinned to a specific release |
 | `:beta` | latest prerelease — only set during an active beta cycle |
 | `:dev` | every push to the `dev` development branch |
 
@@ -74,7 +82,7 @@ trim_galore --version
 Should print:
 
 ```
-trim_galore 2.1.0
+trim_galore 2.3.0
 <git-hash> — <os>/<arch> — built <ISO-8601-UTC>
 ```
 
