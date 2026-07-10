@@ -11,6 +11,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 [![CI](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/FelixKrueger/TrimGalore/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/trim-galore)](https://crates.io/crates/trim-galore)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](https://bioconda.github.io/recipes/trim-galore/README.html)
+[![install with homebrew](https://img.shields.io/homebrew/v/trim-galore)](https://formulae.brew.sh/formula/trim-galore)
 
 <h3 align="center"><a href="https://www.trimgalore.com/">https://www.trimgalore.com/</a></h3>
 
@@ -48,6 +49,14 @@ cargo install trim-galore
 
 ```bash
 conda install -c bioconda trim-galore
+```
+
+### From Homebrew
+
+Available in [homebrew-core](https://formulae.brew.sh/formula/trim-galore) for macOS and Linux:
+
+```bash
+brew install trim-galore
 ```
 
 ### Build from source
