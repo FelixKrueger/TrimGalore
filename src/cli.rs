@@ -14,7 +14,7 @@ pub enum OutputFormat {
     /// FASTQ output, mirroring input compression (default).
     #[default]
     Fastq,
-    /// Unaligned BAM output. Always single-threaded in v1; --clumpify,
+    /// Unaligned BAM output. Always single-threaded; --clumpify,
     /// --passthrough, --clock, --implicon, --demux are rejected at validation.
     #[clap(name = "ubam")]
     UBam,
@@ -22,9 +22,9 @@ pub enum OutputFormat {
 
 /// Trim Galore: A fast, single-pass NGS adapter and quality trimmer.
 ///
-/// Drop-in replacement for Trim Galore, rewritten in Rust. Matches v0.6.x outputs
-/// for the core feature set and extends it with poly-G / generic poly-A auto-trimming
-/// and other additions. Compatible with MultiQC and existing pipelines.
+/// Single-binary adapter and quality trimmer for NGS FASTQ data, with poly-G /
+/// generic poly-A auto-trimming and built-in FastQC reporting. Compatible with
+/// MultiQC and existing pipelines.
 #[derive(Parser, Debug)]
 #[clap(
     name = "trim_galore",
@@ -33,7 +33,11 @@ pub enum OutputFormat {
         env!("CARGO_PKG_VERSION"), "\n",
         env!("VERSION_BODY")
     ),
-    about
+    about,
+    // Bare `trim_galore` (no args) prints help and exits 0 rather than a
+    // "required arguments were not provided" usage error, matching the
+    // convention of samtools/git/bwa and friends.
+    arg_required_else_help = true
 )]
 pub struct Cli {
     /// Input FASTQ file(s). For paired-end, provide two files.
@@ -109,7 +113,7 @@ pub struct Cli {
     #[clap(long = "max_n")]
     pub max_n: Option<f64>,
 
-    /// Trim N bases from both ends of reads. Suppressed under --rrbs (matches Perl v0.6.x).
+    /// Trim N bases from both ends of reads. Suppressed under --rrbs.
     #[clap(long = "trim-n", alias = "trim_n")]
     pub trim_n: bool,
 
@@ -155,7 +159,7 @@ pub struct Cli {
 
     /// Do not gzip-compress output files. Forces plain output regardless of
     /// input compression. By default, output compression mirrors the input
-    /// (plain → plain, .gz → .gz; matches Perl v0.6.x behaviour).
+    /// (plain → plain, .gz → .gz).
     #[clap(long = "dont_gzip")]
     pub dont_gzip: bool,
 
@@ -202,16 +206,15 @@ pub struct Cli {
     /// FASTQ header on uBAM input. Tab-separated, samtools `-T`-compatible.
     /// Each tag must be a 2-char SAM tag name (`[A-Za-z][A-Za-z0-9]`).
     /// Ignored for FASTQ input. The `ALL` keyword is reserved for a future
-    /// release and rejected in v1. See PLAN §3.2.5.
+    /// release and is currently rejected.
     #[clap(long = "preserve-tags", value_delimiter = ',', value_parser = parse_sam_tag_name)]
     pub preserve_tags: Vec<String>,
 
     /// Output container format. Default `fastq` keeps existing behaviour
     /// (input-compression-mirroring FASTQ); `ubam` emits unaligned BAM with
     /// aux tags propagated from uBAM inputs (when `--preserve-tags` is set).
-    /// uBAM output is always single-threaded in v1; see the rejection rules
-    /// in `Cli::validate` for incompatible combinations.
-    /// See `plans/06252026_pluggable-io-formats/phase1-trimgalore-formats/PLAN.md`.
+    /// uBAM output is always single-threaded; some flag combinations are
+    /// rejected (see `--help` and the startup diagnostics for details).
     #[clap(long = "output-format", value_enum, default_value_t = OutputFormat::Fastq)]
     pub output_format: OutputFormat,
 
@@ -816,6 +819,25 @@ mod tests {
                 "expected even-number error, got: {err}"
             );
         }
+    }
+
+    #[test]
+    fn test_no_args_displays_help_not_missing_arg_error() {
+        // Running `trim_galore` with no arguments should print the help text
+        // and exit 0 (like samtools/git/bwa), NOT bail with a "required
+        // arguments were not provided" usage error. clap signals the former
+        // with ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand, which
+        // renders to stdout and exits with a success code.
+        use clap::CommandFactory;
+        use clap::error::ErrorKind;
+        let err = Cli::command()
+            .try_get_matches_from(["trim_galore"])
+            .unwrap_err();
+        assert_eq!(
+            err.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand,
+            "no-args invocation should show help, got: {err}"
+        );
     }
 
     // ── parse_sam_tag_name (PLAN §5 step 4.3, T16) ──────────────────────

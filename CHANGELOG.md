@@ -1,6 +1,22 @@
 # Trim Galore Changelog
 
 
+### Unreleased
+
+#### Changes
+
+- **`trim_galore` with no arguments now prints the full help and exits 0**,
+  instead of the terse `error: the following required arguments were not
+  provided: <INPUT>...` usage error on stderr with a non-zero status. This
+  matches the convention of most modern CLIs (help to stdout, success exit
+  code). Explicit `--help` / `--version` are unchanged, and genuine usage
+  errors (e.g. an unknown flag, or `--paired` with no input files) still fail
+  loudly on stderr with a non-zero status.
+- **Tidied the `--help` text**: removed developer-internal references (legacy
+  Perl `v0.6.x` version notes and internal `PLAN.md`/`§` pointers) that had
+  leaked into user-facing flag descriptions. No behaviour change.
+
+
 ### Version 2.3.0 (Release on 27 June 2026)
 
 **The Formats Edition.** Both directions of unaligned BAM (uBAM) now ship: TrimGalore reads uBAM transparently (auto-detected by content, paired-interleaved supported via a bounded de-interleaver, BAM aux tags fold into FASTQ headers via `--preserve-tags`) and emits uBAM via `--output-format ubam` (SE → `*_trimmed.bam`, PE → ONE interleaved `*_val.bam` matching samtools/Picard/fgbio convention, aux tags round-trip A/Z/i/f scalars). Pairs with Bismark's uBAM input support ([Bismark#1026](https://github.com/FelixKrueger/Bismark/pull/1026) + [#1027](https://github.com/FelixKrueger/Bismark/pull/1027)) — the cross-tool TrimGalore-emits → Bismark-reads handshake is now first-class, and Bismark's test suite confirms byte-identity between TrimGalore's uBAM output and `samtools fastq` on real BS-seq data (SE + PE), so the transcoder is hermetically guarded at the byte level.
