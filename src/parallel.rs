@@ -1565,7 +1565,7 @@ mod tests {
             let tail: String = (0..40)
                 .map(|j| {
                     let r = i.wrapping_mul(2654435761).wrapping_add(j as u32);
-                    [b'A', b'C', b'G', b'T'][(r >> 28) as usize & 0x3] as char
+                    (*b"ACGT")[(r >> 28) as usize & 0x3] as char
                 })
                 .collect();
             content.push_str(&format!(
@@ -1621,14 +1621,14 @@ mod tests {
             let r1_tail: String = (0..40)
                 .map(|j| {
                     let r = i.wrapping_mul(2654435761).wrapping_add(j as u32);
-                    [b'A', b'C', b'G', b'T'][(r >> 28) as usize & 0x3] as char
+                    (*b"ACGT")[(r >> 28) as usize & 0x3] as char
                 })
                 .collect();
             // R2 sequence different from R1 — mates aren't byte-identical.
             let r2_tail: String = (0..40)
                 .map(|j| {
                     let r = i.wrapping_mul(0x9E3779B1).wrapping_add(j as u32);
-                    [b'A', b'C', b'G', b'T'][(r >> 28) as usize & 0x3] as char
+                    (*b"ACGT")[(r >> 28) as usize & 0x3] as char
                 })
                 .collect();
             r1_content.push_str(&format!(
@@ -1768,7 +1768,7 @@ mod tests {
                 (0..120)
                     .map(|i| {
                         let r = seed.wrapping_mul(2654435761).wrapping_add(i);
-                        [b'A', b'C', b'G', b'T'][(r >> 28) as usize & 0x3] as char
+                        (*b"ACGT")[(r >> 28) as usize & 0x3] as char
                     })
                     .collect()
             })

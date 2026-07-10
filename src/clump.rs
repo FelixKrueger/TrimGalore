@@ -393,7 +393,7 @@ mod tests {
         // not a quality claim.
         let n_bins = 64;
         let mut counts = vec![0u32; n_bins];
-        let bases = [b'A', b'C', b'G', b'T'];
+        let bases = *b"ACGT";
         let mut rng_state: u64 = 0x9E3779B97F4A7C15;
         let mut next_byte = || {
             rng_state = rng_state
