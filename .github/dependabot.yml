@@ -40,6 +40,14 @@ updates:
         update-types:
           - "patch"
           - "minor"
+    # noodles is exact-pinned (`=0.88.0`) in Cargo.toml for byte-identity of
+    # uBAM I/O. In the pre-1.0 (0.x) series, minor bumps carry no wire-format
+    # or API compat guarantees, and any noodles change here is coordinated
+    # against Bismark's cross-tool byte-identity CI (src/bam.rs + noodles both
+    # need scoped human review). Dependabot has already tried 0.88 → 0.109 in
+    # PR #326 (5 CI failures, closed with rationale) — silence future attempts.
+    ignore:
+      - dependency-name: "noodles"
 
   - package-ecosystem: "github-actions"
     directory: "/"
