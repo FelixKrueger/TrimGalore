@@ -117,7 +117,27 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // Pre-parse rewrite for Perl-era `-r1`/`-r2` short flags before clap sees them.
-    let cli = Cli::parse_from(rewrite_perl_short_flags(std::env::args()));
+    // A bare `trim_galore` (no args) prints the full help to stdout and exits 0,
+    // like most modern CLIs, rather than a non-zero "missing arguments" error.
+    // clap surfaces the help/version outcomes as `Err`, so intercept those three
+    // kinds and route them to stdout with a success code; genuine usage errors
+    // keep clap's default stderr + non-zero behaviour.
+    let cli = match Cli::try_parse_from(rewrite_perl_short_flags(std::env::args())) {
+        Ok(cli) => cli,
+        Err(err) => {
+            use clap::error::ErrorKind::{
+                DisplayHelp, DisplayHelpOnMissingArgumentOrSubcommand, DisplayVersion,
+            };
+            if matches!(
+                err.kind(),
+                DisplayHelp | DisplayHelpOnMissingArgumentOrSubcommand | DisplayVersion
+            ) {
+                print!("{err}");
+                std::process::exit(0);
+            }
+            err.exit();
+        }
+    };
     cli.validate()?;
 
     // Command-line as seen by the user (pre-clap-rewrite). Used by the
