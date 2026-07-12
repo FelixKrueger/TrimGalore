@@ -176,7 +176,15 @@ jobs:
           # `simba` (dimforge) would need to migrate to `pastey`. Revisit
           # whenever `simba` ships a `paste`-free release; suppression then
           # becomes a dangling line + clippy-style audit-warn-on-unused-ignore.
-          ignore: RUSTSEC-2024-0436
+          #
+          # RUSTSEC-2026-0192 — `ttf-parser` no longer maintained.
+          # Transitive five levels deep:
+          #   trim-galore → fastqc-rust → resvg → usvg → fontdb → ttf-parser
+          # Upstream would need to migrate to `skrifa` (Google Fonts' active
+          # ttf-parser successor, part of the `fontations` project). Nothing
+          # we can do at this level; revisit when fastqc-rust or resvg
+          # switches.
+          ignore: RUSTSEC-2024-0436, RUSTSEC-2026-0192
 
   # #247 item 4: line/branch coverage reporting via `cargo-llvm-cov`.
   # Generates an LCOV file as an artifact (downloadable from the Actions
