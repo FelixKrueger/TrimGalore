@@ -184,7 +184,15 @@ jobs:
           # ttf-parser successor, part of the `fontations` project). Nothing
           # we can do at this level; revisit when fastqc-rust or resvg
           # switches.
-          ignore: RUSTSEC-2024-0436, RUSTSEC-2026-0192
+          #
+          # RUSTSEC-2026-0206 — `rustybuzz` no longer maintained.
+          # Transitive four levels deep:
+          #   trim-galore → fastqc-rust → resvg → usvg → rustybuzz
+          # Same upstream story as ttf-parser: sits under the resvg/usvg
+          # font-and-text stack, `harfbuzz` team announced end-of-maintenance
+          # on the pure-Rust port. Revisit when fastqc-rust or resvg swaps in
+          # a maintained text-shaping crate.
+          ignore: RUSTSEC-2024-0436, RUSTSEC-2026-0192, RUSTSEC-2026-0206
 
   # #247 item 4: line/branch coverage reporting via `cargo-llvm-cov`.
   # Generates an LCOV file as an artifact (downloadable from the Actions
