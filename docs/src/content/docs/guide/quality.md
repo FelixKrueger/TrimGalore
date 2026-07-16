@@ -5,7 +5,7 @@ description: How Trim Galore performs Phred-based 3' quality trimming.
 
 In the first step, low-quality base calls are trimmed off from the 3' end of the reads before adapter removal. This efficiently removes poor quality portions of the reads.
 
-The default Phred-score cutoff is **20** (`-q 20`). Trimming uses the BWA algorithm: the running sum of `(Q - cutoff)` is computed from the 3' end, and bases are removed up to the position with the maximum cumulative score.
+The default Phred-score cutoff is **20** (`-q 20`). Trimming uses the BWA algorithm: the running sum of `(cutoff - Q)` is computed from the 3' end, and bases are removed up to the position with the maximum cumulative score.
 
 ## Example: before and after
 
