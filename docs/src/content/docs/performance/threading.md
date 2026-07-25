@@ -7,7 +7,7 @@ description: Why the Rust rewrite is faster. Single-pass paired-end, worker-pool
 
 **The bottleneck is gzip, not trimming.** The actual trimming logic (adapter alignment, quality clipping) is ~5% of runtime; the other 95% is gzip compression (~60%) and decompression (~30%). Rust's speed advantage over Perl/Python only applies to that 5%.
 
-The real wins come from **architectural differences**.
+The remaining speedup is therefore architectural rather than language-level. Three changes account for it.
 
 ## 1. Single-pass vs three-pass
 
@@ -45,7 +45,7 @@ For reference, the contrast against the legacy Perl 0.6.x model at the same `-j 
 
 At Perl `-j 8` vs v2.x `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
 
-Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34% (cores=16) → 22% (cores=24). Scaling is near-linear up to `--cores 8`; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so adding cores helps progressively less. **`--cores 8` is the sweet spot for nf-core / Snakemake / CWL workflows** — also the saturation point.
+Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34% (cores=16) → 22% (cores=24). Scaling is near-linear up to `--cores 8`; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so adding cores helps progressively less. **`--cores 8` is the recommended setting for nf-core / Snakemake / CWL workflows**, and is also the saturation point.
 
 ## Memory profile
 
@@ -66,7 +66,7 @@ For context, mainstream multi-threaded FASTQ trimmers typically use a lot more R
 
 The pipeline is comfortably under disk-bandwidth limits at every reasonable core count. At `--cores 8` on Buckberry, total throughput is ~33 MB/s in + ~33 MB/s out (~7% of a typical SSD ceiling, trivially within spinning-disk capability), with `BufReader` averaging ~33 KB per read syscall and `BufWriter` ~114 KB per write syscall. Neither saturates kernel I/O machinery; disk is not the bottleneck for any realistic deployment.
 
-**L3 cache pressure shows up at high core counts.** Each worker's hot working set (deflate sliding window + hash chain + output batch buffer) is ~200 KB; aggregate through `--cores 16` fits comfortably within typical 16-32 MB L3, but `--cores 32` starts to press at ~13 MB combined. This is one of the contributing mechanisms behind the diminishing-returns plateau past `--cores 8` — alongside the gzip-output I/O bottleneck and the single-threaded reader/main-collector serialisation. **Stay at `--cores 8` for the sweet spot; `--cores 16` is the upper end of useful parallelism on typical x86 servers.**
+**L3 cache pressure shows up at high core counts.** Each worker's hot working set (deflate sliding window + hash chain + output batch buffer) is ~200 KB; aggregate through `--cores 16` fits comfortably within typical 16-32 MB L3, but `--cores 32` starts to press at ~13 MB combined. This is one of the contributing mechanisms behind the diminishing-returns plateau past `--cores 8` — alongside the gzip-output I/O bottleneck and the single-threaded reader/main-collector serialisation. **`--cores 8` remains the recommended setting; `--cores 16` is the upper end of useful parallelism on typical x86 servers.**
 
 ## Beyond speed
 
