@@ -5,6 +5,26 @@
 
 #### Changes
 
+- **New `--clump_only` specialty mode** — lossless reorder-only mode
+  requested in [#353](https://github.com/FelixKrueger/TrimGalore/issues/353).
+  Reorders FASTQ records by canonical 16-mer minimizer for gzip-friendly
+  compression, without any trimming, filtering, or adapter detection.
+  Output records are byte-identical to input records (header, sequence,
+  quality); only file-level order changes. Composes with `--compression`,
+  `--memory`, `--cores`, `--paired`, `--fastqc`, `--dont_gzip`, and
+  `--basename`. Trim/filter flags (`-a`, `--length`, `--rrbs`, `--polyA`,
+  `--polyG`, `--rename`, `--discard_untrimmed`, other specialty modes,
+  `--passthrough`, `--retain_unpaired`, `--output-format ubam`) are rejected
+  at CLI validation. Produces `*_clumped.fq(.gz)` outputs and a short
+  `*_clumping_report.txt` (deliberately distinct from `*_trimming_report.*`
+  so downstream nf-core/MultiQC pipelines don't scan an empty-of-trim-stats
+  file). Byte-identity + cross-run determinism are enforced by CI (record-
+  multiset diff + md5 cross-run check). FASTQ in/out only in v1; uBAM
+  in/out is a natural follow-up. Contract-scope note: the byte-identity
+  claim covers the three semantic fields — the plus-line (line 3) is
+  normalized to bare `+` on output, and CRLF line endings are normalized
+  to LF, matching existing codebase-wide `FastqReader`/`FastqWriter`
+  behaviour.
 - **`trim_galore` with no arguments now prints the full help and exits 0**,
   instead of the terse `error: the following required arguments were not
   provided: <INPUT>...` usage error on stderr with a non-zero status. This

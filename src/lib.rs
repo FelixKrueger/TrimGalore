@@ -3,6 +3,7 @@ pub mod alignment;
 pub mod bam;
 pub mod cli;
 pub mod clump;
+pub mod clump_only;
 pub mod demux;
 pub mod fastq;
 pub mod fastqc;

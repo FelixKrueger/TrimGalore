@@ -8,6 +8,7 @@ use trim_galore::adapter;
 use trim_galore::bam::BamReader;
 use trim_galore::cli::{Cli, rewrite_perl_short_flags};
 use trim_galore::clump;
+use trim_galore::clump_only;
 use trim_galore::demux;
 use trim_galore::fastq::{FastqReader, FastqWriter, RecordSource};
 use trim_galore::fastqc;
@@ -320,6 +321,70 @@ fn main() -> Result<()> {
                 )
             },
         )?;
+        return Ok(());
+    }
+    if cli.clump_only {
+        // --clump_only: lossless reorder-only specialty mode. Feature #353.
+        // uBAM input is rejected inside clump_only::* at format-detection time.
+        let memory_bytes =
+            clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
+        let basename = cli.basename.as_deref();
+        if cli.paired {
+            run_specialty_paired(
+                &cli,
+                "--clump_only",
+                |r1, r2| naming::clumped_paired_output_names(r1, r2, output_dir, basename, gzip),
+                |r1, r2| {
+                    clump_only::clump_only_paired(
+                        r1,
+                        r2,
+                        output_dir,
+                        basename,
+                        gzip,
+                        cli.cores,
+                        memory_bytes,
+                        cli.compression,
+                        cli.fastqc,
+                        cli.fastqc_args.as_deref(),
+                        cli.no_report_file,
+                    )
+                    .map(|_| ())
+                },
+            )?;
+        } else {
+            // SE pre-flight: two inputs with the same stem in different dirs
+            // would collide on the output path (case-folded per issue #216).
+            // --basename multi-input is already rejected by Cli::validate.
+            let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
+                std::collections::HashMap::new();
+            for input in &cli.input {
+                let out = naming::clumped_output_name(input, output_dir, basename, gzip);
+                if let Some(existing) = out_paths.insert(naming::norm_path(&out), out.clone()) {
+                    anyhow::bail!(
+                        "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                         {} and {} would be written to the same file. \
+                         Check that inputs produce distinct output paths \
+                         (e.g., different source directories or `--output_dir`).",
+                        existing.display(),
+                        out.display()
+                    );
+                }
+            }
+            for input in &cli.input {
+                clump_only::clump_only_single(
+                    input,
+                    output_dir,
+                    basename,
+                    gzip,
+                    cli.cores,
+                    memory_bytes,
+                    cli.compression,
+                    cli.fastqc,
+                    cli.fastqc_args.as_deref(),
+                    cli.no_report_file,
+                )?;
+            }
+        }
         return Ok(());
     }
 

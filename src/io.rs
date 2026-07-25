@@ -31,7 +31,7 @@ pub fn is_gzipped(path: &Path) -> bool {
 /// Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
 /// false-positive, but the penalty is a loud early error rather than
 /// silent data loss.
-pub(crate) fn norm_path(p: &Path) -> String {
+pub fn norm_path(p: &Path) -> String {
     p.to_string_lossy().to_ascii_lowercase()
 }
 
@@ -248,6 +248,94 @@ pub fn passthrough_output_name(
             .to_path_buf()
     });
     dir.join(&filename)
+}
+
+/// Generate the reorder-only (`--clump_only`) output filename for single-end mode.
+///
+/// Follows the same input-extension-stripping convention as
+/// `single_end_output_name`, but emits `_clumped` in place of `_trimmed` so
+/// downstream globbing pipelines don't mistake the output for a trim result:
+///
+/// - `.fastq.gz` → `_clumped.fq.gz` (or `_clumped.fq` if `--dont_gzip`)
+/// - `.fastq`    → `_clumped.fq`(.gz)
+/// - `.fq.gz`    → `_clumped.fq`(.gz)
+/// - `.fq`       → `_clumped.fq`(.gz)
+///
+/// When `--basename BASE` is supplied the output is `BASE_clumped.fq(.gz)`.
+pub fn clumped_output_name(
+    input: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+    gzip: bool,
+) -> PathBuf {
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input));
+
+    let ext = if gzip {
+        "_clumped.fq.gz"
+    } else {
+        "_clumped.fq"
+    };
+    let filename = format!("{}{}", stem, ext);
+
+    match output_dir {
+        Some(dir) => dir.join(&filename),
+        None => input.parent().unwrap_or(Path::new(".")).join(&filename),
+    }
+}
+
+/// Generate the reorder-only output filenames for paired-end mode.
+///
+/// Returns `(clumped_1_path, clumped_2_path)`. Follows the same
+/// `--basename` semantic as `paired_end_output_names`: with basename "foo"
+/// both mates use `foo_clumped_{1,2}` (no `_R1`/`_R2` interpolation).
+pub fn clumped_paired_output_names(
+    input_r1: &Path,
+    input_r2: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+    gzip: bool,
+) -> (PathBuf, PathBuf) {
+    let ext = if gzip { ".fq.gz" } else { ".fq" };
+
+    let (stem1, stem2) = match basename {
+        Some(b) => (b.to_string(), b.to_string()),
+        None => (
+            strip_fastq_extensions(input_r1),
+            strip_fastq_extensions(input_r2),
+        ),
+    };
+
+    let f1 = format!("{}_clumped_1{}", stem1, ext);
+    let f2 = format!("{}_clumped_2{}", stem2, ext);
+
+    let dir = output_dir
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    (dir.join(&f1), dir.join(&f2))
+}
+
+/// Generate the `--clump_only` reorder report filename.
+///
+/// Deliberately distinct from `report_name`'s `*_trimming_report.txt` so
+/// downstream tools (nf-core/rnaseq's MultiQC integration) that scan
+/// `*_trimming_report.*` don't mis-classify an empty-of-trim-stats file.
+/// Text-only (no JSON): the reorder report is short enough to grep.
+pub fn clumping_report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
+    let input_name = input
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let report = format!("{}_clumping_report.txt", input_name);
+
+    match output_dir {
+        Some(dir) => dir.join(&report),
+        None => input.parent().unwrap_or(Path::new(".")).join(&report),
+    }
 }
 
 /// Generate the trimming report filename.
@@ -530,6 +618,77 @@ mod tests {
             let out = passthrough_output_name(Path::new(input), None, None, true);
             assert_eq!(out, PathBuf::from(expected), "input={input}");
         }
+    }
+
+    // ── clumped_output_name / clumped_paired_output_names / clumping_report_name ──
+
+    #[test]
+    fn test_clumped_output_name_gzip() {
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumped_output_name(input, None, None, true);
+        assert_eq!(out, PathBuf::from("/data/sample_clumped.fq.gz"));
+    }
+
+    #[test]
+    fn test_clumped_output_name_plain() {
+        // --dont_gzip is allowed under --clump_only (diverges from --clumpify).
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumped_output_name(input, None, None, false);
+        assert_eq!(out, PathBuf::from("/data/sample_clumped.fq"));
+    }
+
+    #[test]
+    fn test_clumped_output_name_with_basename() {
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumped_output_name(input, None, Some("archive"), true);
+        assert_eq!(out, PathBuf::from("/data/archive_clumped.fq.gz"));
+    }
+
+    #[test]
+    fn test_clumped_output_name_with_output_dir() {
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumped_output_name(input, Some(Path::new("/tmp/out")), None, true);
+        assert_eq!(out, PathBuf::from("/tmp/out/sample_clumped.fq.gz"));
+    }
+
+    #[test]
+    fn test_clumped_paired_output_names_bare() {
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        let (o1, o2) = clumped_paired_output_names(r1, r2, None, None, true);
+        assert_eq!(o1, PathBuf::from("/data/sample_R1_clumped_1.fq.gz"));
+        assert_eq!(o2, PathBuf::from("/data/sample_R2_clumped_2.fq.gz"));
+    }
+
+    #[test]
+    fn test_clumped_paired_output_names_with_basename() {
+        // Same #244-shaped semantic: `--basename foo` yields `foo_clumped_{1,2}`
+        // with no `_R1`/`_R2` interpolation.
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        let (o1, o2) = clumped_paired_output_names(r1, r2, None, Some("foo"), true);
+        assert_eq!(o1, PathBuf::from("/data/foo_clumped_1.fq.gz"));
+        assert_eq!(o2, PathBuf::from("/data/foo_clumped_2.fq.gz"));
+    }
+
+    #[test]
+    fn test_clumped_paired_output_names_plain() {
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        let (o1, o2) = clumped_paired_output_names(r1, r2, None, None, false);
+        assert_eq!(o1, PathBuf::from("/data/sample_R1_clumped_1.fq"));
+        assert_eq!(o2, PathBuf::from("/data/sample_R2_clumped_2.fq"));
+    }
+
+    #[test]
+    fn test_clumping_report_name_distinct_from_trimming_report() {
+        // Load-bearing invariant: the clump-only report filename must NOT
+        // match the `*_trimming_report.*` glob that nf-core / MultiQC scan.
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumping_report_name(input, None);
+        assert_eq!(out, PathBuf::from("/data/sample.fq.gz_clumping_report.txt"));
+        // Confirm it's NOT the trimming-report shape.
+        assert_ne!(out, report_name(input, None));
     }
 
     #[test]

@@ -635,6 +635,61 @@ jobs:
             [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
           done
 
+      - name: Validate --clump_only byte-identity (SE)
+        run: |
+          # Load-bearing invariant: every input record appears in the output
+          # byte-identically (header + sequence + quality); only file-level
+          # order changes. Use `paste - - - -` to reconstitute 4-line FASTQ
+          # records into single tab-separated lines BEFORE sort — otherwise
+          # per-line sort would miss the class of bug where lines from
+          # different records get mixed up (R1's quality attached to R2's
+          # sequence). See PLAN.md §Implementation outline step 9.
+          rm -rf /tmp/co-se; mkdir -p /tmp/co-se
+          ./target/release/trim_galore --clump_only --cores 2 \
+            -o /tmp/co-se test_files/BS-seq_10K_R1.fastq.gz
+          zcat test_files/BS-seq_10K_R1.fastq.gz | paste - - - - | sort > /tmp/co-se/in.sorted
+          zcat /tmp/co-se/BS-seq_10K_R1_clumped.fq.gz | paste - - - - | sort > /tmp/co-se/out.sorted
+          diff -q /tmp/co-se/in.sorted /tmp/co-se/out.sorted \
+            || { echo "MISMATCH: --clump_only SE output records diverge from input!"; exit 1; }
+          echo "--clump_only SE byte-identity: OK ($(wc -l < /tmp/co-se/in.sorted) records preserved)"
+
+      - name: Validate --clump_only byte-identity (PE)
+        run: |
+          # Same test for the paired-end path — per-mate multiset preserved.
+          rm -rf /tmp/co-pe; mkdir -p /tmp/co-pe
+          ./target/release/trim_galore --clump_only --paired --cores 2 \
+            -o /tmp/co-pe test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          for mate in 1 2; do
+            zcat test_files/BS-seq_10K_R${mate}.fastq.gz | paste - - - - | sort > /tmp/co-pe/in-r${mate}.sorted
+            zcat /tmp/co-pe/BS-seq_10K_R${mate}_clumped_${mate}.fq.gz | paste - - - - | sort > /tmp/co-pe/out-r${mate}.sorted
+            diff -q /tmp/co-pe/in-r${mate}.sorted /tmp/co-pe/out-r${mate}.sorted \
+              || { echo "MISMATCH: --clump_only PE R${mate} diverges from input!"; exit 1; }
+          done
+          echo "--clump_only PE byte-identity: OK (both mates preserved)"
+
+      - name: Validate --clump_only cross-run determinism
+        run: |
+          # File-level byte-identity across runs on the same input →
+          # downstream tools that md5 the output get stable hashes.
+          rm -rf /tmp/co-det1 /tmp/co-det2
+          mkdir -p /tmp/co-det1 /tmp/co-det2
+          ./target/release/trim_galore --clump_only --cores 2 \
+            -o /tmp/co-det1 test_files/BS-seq_10K_R1.fastq.gz
+          ./target/release/trim_galore --clump_only --cores 2 \
+            -o /tmp/co-det2 test_files/BS-seq_10K_R1.fastq.gz
+          md1=$(md5sum /tmp/co-det1/BS-seq_10K_R1_clumped.fq.gz | cut -d' ' -f1)
+          md2=$(md5sum /tmp/co-det2/BS-seq_10K_R1_clumped.fq.gz | cut -d' ' -f1)
+          echo "Run 1: $md1"
+          echo "Run 2: $md2"
+          [ "$md1" = "$md2" ] || { echo "MISMATCH: cross-run output not deterministic!"; exit 1; }
+          # Report filename discipline: `_clumping_report.txt` NOT `_trimming_report.txt`
+          # (protects downstream nf-core/MultiQC scanners that glob the trimming report).
+          test -f /tmp/co-det1/BS-seq_10K_R1.fastq.gz_clumping_report.txt \
+            || { echo "MISSING: expected clumping report"; exit 1; }
+          test ! -f /tmp/co-det1/BS-seq_10K_R1.fastq.gz_trimming_report.txt \
+            || { echo "UNEXPECTED: trimming report created under --clump_only"; exit 1; }
+          echo "--clump_only determinism + report-name discipline: OK"
+
       - name: All validations passed
         run: echo "All Rust outputs are byte-identical to Perl TrimGalore 0.6.11"
 
