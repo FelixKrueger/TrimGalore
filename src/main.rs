@@ -219,8 +219,9 @@ fn main() -> Result<()> {
         if cli.cores > 1 {
             eprintln!(
                 "NOTE: --output-format ubam uses single-threaded compression in v1; \
-                 --cores {} is ignored. For high-throughput uBAM output, run \
-                 multiple invocations in parallel.",
+                 --cores {} is ignored for BAM writing (FastQC, if requested, still \
+                 uses it). For high-throughput uBAM output, run multiple invocations \
+                 in parallel.",
                 cli.cores
             );
         }
@@ -1634,7 +1635,8 @@ fn run_ubam_output_single(
         eprintln!("JSON report: {}", json_path.display());
     }
 
-    // Run FastQC if requested (bundled fastqc-rust reads BAM natively).
+    // Run FastQC if requested. fastqc-rust dispatches on file EXTENSION
+    // (not content), so this relies on output_path ending in `.bam`.
     if cli.fastqc || cli.fastqc_args.is_some() {
         fastqc::run(
             &output_path,
@@ -1770,7 +1772,8 @@ fn run_ubam_output_paired_two_files(
         )?;
     }
 
-    // Run FastQC if requested (bundled fastqc-rust reads BAM natively).
+    // Run FastQC if requested. fastqc-rust dispatches on file EXTENSION
+    // (not content), so this relies on output_path ending in `.bam`.
     // PE uBAM output is a single interleaved BAM, so one call covers both mates.
     if cli.fastqc || cli.fastqc_args.is_some() {
         fastqc::run(
@@ -1891,7 +1894,8 @@ fn run_ubam_output_paired_single_file(
         )?;
     }
 
-    // Run FastQC if requested (bundled fastqc-rust reads BAM natively).
+    // Run FastQC if requested. fastqc-rust dispatches on file EXTENSION
+    // (not content), so this relies on output_path ending in `.bam`.
     // PE uBAM output is a single interleaved BAM, so one call covers both mates.
     if cli.fastqc || cli.fastqc_args.is_some() {
         fastqc::run(

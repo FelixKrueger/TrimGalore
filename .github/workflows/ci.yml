@@ -849,10 +849,11 @@ jobs:
 
       - name: Validate SE uBAM-out — --fastqc produces a report
         # Guards against the uBAM-output path silently skipping FastQC.
-        # fastqc-rust reads BAM natively; the zip must appear alongside the
-        # BAM output, matching the FASTQ path's contract.
+        # fastqc-rust dispatches on file EXTENSION (not content), so this
+        # relies on output paths ending in `.bam`.
         if: ${{ !cancelled() }}
         run: |
+          set -euo pipefail
           mkdir -p /tmp/ubam_out_se_fqc
           ./target/release/trim_galore --output-format ubam --fastqc \
             -o /tmp/ubam_out_se_fqc test_files/ubam_test.bam
@@ -861,20 +862,38 @@ jobs:
           test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.html
           unzip -l /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip | grep -q fastqc_data.txt
 
-      - name: Validate PE uBAM-out — --fastqc produces one report for the interleaved BAM
+      - name: Validate PE uBAM-out (interleaved BAM in) — --fastqc produces one report
         # PE uBAM output is ONE interleaved BAM, so exactly ONE FastQC zip
         # is expected (not two). Regression guard against a "call twice"
         # symmetry mistake with the FASTQ paired path.
         if: ${{ !cancelled() }}
         run: |
+          set -euo pipefail
           mkdir -p /tmp/ubam_out_pe_fqc
           ./target/release/trim_galore --paired --output-format ubam --fastqc \
             -o /tmp/ubam_out_pe_fqc test_files/ubam_paired_test.bam
           test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val.bam
           test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val_fastqc.zip
           # Exactly one zip: guard against accidentally calling fastqc twice.
-          ZIP_COUNT=$(ls /tmp/ubam_out_pe_fqc/*_fastqc.zip 2>/dev/null | wc -l | tr -d ' ')
+          # `|| true` keeps the zero-match branch alive under pipefail so we
+          # can emit the friendly diagnostic instead of aborting silently.
+          ZIP_COUNT=$(ls /tmp/ubam_out_pe_fqc/*_fastqc.zip 2>/dev/null | wc -l | tr -d ' ' || true)
           [ "$ZIP_COUNT" = "1" ] || { echo "Expected 1 fastqc zip, got $ZIP_COUNT"; ls /tmp/ubam_out_pe_fqc; exit 1; }
+
+      - name: Validate PE uBAM-out (FASTQ pair in) — --fastqc produces one report
+        # Covers run_ubam_output_paired_two_files (FASTQ+FASTQ → interleaved BAM),
+        # the driver not exercised by the interleaved-BAM step above.
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ubam_out_pe_fastq_fqc
+          ./target/release/trim_galore --paired --output-format ubam --fastqc \
+            -o /tmp/ubam_out_pe_fastq_fqc \
+            test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+          test -f /tmp/ubam_out_pe_fastq_fqc/BS-seq_10K_R1_val.bam
+          test -f /tmp/ubam_out_pe_fastq_fqc/BS-seq_10K_R1_val_fastqc.zip
+          ZIP_COUNT=$(ls /tmp/ubam_out_pe_fastq_fqc/*_fastqc.zip 2>/dev/null | wc -l | tr -d ' ' || true)
+          [ "$ZIP_COUNT" = "1" ] || { echo "Expected 1 fastqc zip, got $ZIP_COUNT"; ls /tmp/ubam_out_pe_fastq_fqc; exit 1; }
 
       - name: Upload uBAM validation outputs on failure
         if: failure()
