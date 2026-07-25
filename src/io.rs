@@ -317,6 +317,55 @@ pub fn clumped_paired_output_names(
     (dir.join(&f1), dir.join(&f2))
 }
 
+/// Generate the reorder-only (`--clump_only --output-format ubam`) output
+/// filename for single-end mode.
+///
+/// Output: `<stem>_clumped.bam`. Mirrors `hardtrim_bam_output_name`'s
+/// convention — `strip_fastq_extensions` handles both FASTQ and BAM
+/// input extensions (BAM via `file_stem()` fallback). Honors `--basename`.
+pub fn clumped_bam_output_name(
+    input: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+) -> PathBuf {
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input));
+    let filename = format!("{}_clumped.bam", stem);
+
+    match output_dir {
+        Some(dir) => dir.join(&filename),
+        None => input.parent().unwrap_or(Path::new(".")).join(&filename),
+    }
+}
+
+/// Generate the reorder-only output filename for paired-end BAM output.
+///
+/// Returns a SINGLE interleaved BAM path (`<stem>_clumped.bam`) — no
+/// `_1`/`_2` suffix. Matches samtools/Picard/fgbio mate-adjacent
+/// convention and mirrors `paired_bam_output_name` in shape.
+///
+/// The stem derives from `input_r1`'s filename; `_input_r2` is accepted
+/// for API-parity with `paired_bam_output_name` but not used. When
+/// `--basename foo` is set, the path is `foo_clumped.bam`.
+pub fn clumped_paired_bam_output_name(
+    input_r1: &Path,
+    _input_r2: Option<&Path>,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+) -> PathBuf {
+    let stem = basename
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| strip_fastq_extensions(input_r1));
+    let filename = format!("{}_clumped.bam", stem);
+
+    let dir = output_dir
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    dir.join(&filename)
+}
+
 /// Generate the `--clump_only` reorder report filename.
 ///
 /// Deliberately distinct from `report_name`'s `*_trimming_report.txt` so
@@ -678,6 +727,62 @@ mod tests {
         let (o1, o2) = clumped_paired_output_names(r1, r2, None, None, false);
         assert_eq!(o1, PathBuf::from("/data/sample_R1_clumped_1.fq"));
         assert_eq!(o2, PathBuf::from("/data/sample_R2_clumped_2.fq"));
+    }
+
+    // ── BAM-output filename helpers (v2) ──────────────────────────────
+
+    #[test]
+    fn test_clumped_bam_output_name_from_fastq_input() {
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumped_bam_output_name(input, None, None);
+        assert_eq!(out, PathBuf::from("/data/sample_clumped.bam"));
+    }
+
+    #[test]
+    fn test_clumped_bam_output_name_from_bam_input() {
+        let input = Path::new("/data/sample.bam");
+        let out = clumped_bam_output_name(input, None, None);
+        // strip_fastq_extensions falls through to file_stem() for .bam.
+        assert_eq!(out, PathBuf::from("/data/sample_clumped.bam"));
+    }
+
+    #[test]
+    fn test_clumped_bam_output_name_with_basename() {
+        let input = Path::new("/data/sample.bam");
+        let out = clumped_bam_output_name(input, None, Some("archive"));
+        assert_eq!(out, PathBuf::from("/data/archive_clumped.bam"));
+    }
+
+    #[test]
+    fn test_clumped_bam_output_name_with_output_dir() {
+        let input = Path::new("/data/sample.fq.gz");
+        let out = clumped_bam_output_name(input, Some(Path::new("/tmp/out")), None);
+        assert_eq!(out, PathBuf::from("/tmp/out/sample_clumped.bam"));
+    }
+
+    #[test]
+    fn test_clumped_paired_bam_output_name_single_file_per_pair() {
+        // PE-BAM produces ONE interleaved file per pair (samtools convention).
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        let out = clumped_paired_bam_output_name(r1, Some(r2), None, None);
+        assert_eq!(out, PathBuf::from("/data/sample_R1_clumped.bam"));
+    }
+
+    #[test]
+    fn test_clumped_paired_bam_output_name_from_interleaved_bam() {
+        // Shape B: single interleaved uBAM input.
+        let bam = Path::new("/data/interleaved.bam");
+        let out = clumped_paired_bam_output_name(bam, None, None, None);
+        assert_eq!(out, PathBuf::from("/data/interleaved_clumped.bam"));
+    }
+
+    #[test]
+    fn test_clumped_paired_bam_output_name_with_basename() {
+        let r1 = Path::new("/data/sample_R1.fq.gz");
+        let r2 = Path::new("/data/sample_R2.fq.gz");
+        let out = clumped_paired_bam_output_name(r1, Some(r2), None, Some("foo"));
+        assert_eq!(out, PathBuf::from("/data/foo_clumped.bam"));
     }
 
     #[test]
