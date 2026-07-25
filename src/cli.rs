@@ -177,6 +177,36 @@ pub struct Cli {
     #[clap(long = "clumpify")]
     pub clumpify: bool,
 
+    /// Lossless reorder-only specialty mode: reorder FASTQ records by
+    /// canonical 16-mer minimizer for gzip-friendly compression, WITHOUT
+    /// any trimming, filtering, adapter detection, or record modification.
+    /// Every input record appears in the output byte-identically (header,
+    /// sequence, quality); only file-level order changes. Output files use
+    /// the `*_clumped.fq(.gz)` (SE) or `*_clumped_{1,2}.fq(.gz)` (PE) suffix,
+    /// and a short `*_clumping_report.txt` is emitted (distinct from
+    /// `*_trimming_report.txt` to keep downstream nf-core/MultiQC scanners
+    /// unconfused).
+    ///
+    /// Composes with `--compression`, `--memory`, `--cores`, `--paired`,
+    /// `--fastqc`, `--dont_gzip`, and `--basename`. Trimming/filtering flags
+    /// (`-a`, `--length`, `--rrbs`, `--polyA`, `--polyG`, `--trim-n`,
+    /// `--clip_*`, `--nextseq`, `--rename`, `--discard_untrimmed`,
+    /// `--consider_already_trimmed`, other specialty modes, `--passthrough`,
+    /// `--retain_unpaired`, `--output-format ubam`) are rejected. `-q` /
+    /// `--stringency` / `-e` have clap defaults and are silently ignored on
+    /// this path (mode does no trimming; matches how `--hardtrim5` treats
+    /// trim flags today).
+    ///
+    /// Contract-scope note: byte-identity applies to header + sequence +
+    /// quality bytes. The plus-line (line 3 of each record) is normalized
+    /// to bare `+` on output; CRLF line endings are normalized to LF. Both
+    /// normalizations are codebase-wide behaviours, inherited from the
+    /// FASTQ reader/writer.
+    ///
+    /// v1 is FASTQ in / FASTQ out only. uBAM in/out is a natural follow-up.
+    #[clap(long = "clump_only")]
+    pub clump_only: bool,
+
     /// Gzip compression level for output FASTQ (1–9). Default: 1 (fast,
     /// 75% larger files). Pass `--compression 6` for the gzip(1) default
     /// or `--compression 9` for archival use. Most useful in combination
@@ -641,6 +671,164 @@ impl Cli {
             // pool is *large enough* for clumpify to actually run is decided
             // later in main.rs::resolve_clump_layout, which warns and falls
             // back to plain mode if the budget is below the floor.
+            crate::clump::parse_memory_size(&self.memory)
+                .map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
+        }
+
+        // --clump_only: lossless reorder-only specialty mode. Rejection
+        // matrix mirrors --clumpify's exclusion list plus every flag that
+        // would trim, filter, clip, or mutate records — byte-identity is
+        // the mode's load-bearing invariant. `-q` / `--stringency` / `-e`
+        // are silently accepted (non-Option clap defaults; can't distinguish
+        // user-set from default without threading ArgMatches::value_source).
+        // Documented as ignored under --clump_only in the flag's --help text.
+        if self.clump_only {
+            if self.clumpify {
+                anyhow::bail!(
+                    "--clump_only and --clumpify are mutually exclusive \
+                     (--clump_only is a lossless reorder-only variant that supersedes --clumpify's use case)"
+                );
+            }
+            // Note: --clump_only v1 is single-threaded internally (deviation
+            // from --clumpify's `--cores >= 2` requirement). `--cores` is
+            // accepted at any value >= 1 but only affects future parallel
+            // implementations; the byte-identity contract holds regardless.
+            // --paired requires 2 FASTQ files. N=1 under --paired is
+            // reserved elsewhere for interleaved-uBAM input, which
+            // --clump_only doesn't support in v1. Without this early
+            // rejection, `run_specialty_paired`'s pre-flight would panic
+            // on `chunk[1]` when the chunk length is 1 (code-review A C-1).
+            if self.paired && self.input.len() == 1 {
+                anyhow::bail!(
+                    "--clump_only + --paired requires two FASTQ input files. \
+                     Single-file interleaved-uBAM input is not yet supported in v1 \
+                     (see #353 for the v2 follow-up)."
+                );
+            }
+            // Adapter flags
+            if !self.adapter.is_empty() {
+                anyhow::bail!("--clump_only does not trim; -a/--adapter is not compatible");
+            }
+            if !self.adapter2.is_empty() {
+                anyhow::bail!("--clump_only does not trim; -a2/--adapter2 is not compatible");
+            }
+            if self.illumina {
+                anyhow::bail!("--clump_only does not trim; --illumina is not compatible");
+            }
+            if self.nextera {
+                anyhow::bail!("--clump_only does not trim; --nextera is not compatible");
+            }
+            if self.small_rna {
+                anyhow::bail!("--clump_only does not trim; --small_rna is not compatible");
+            }
+            if self.bgiseq {
+                anyhow::bail!("--clump_only does not trim; --bgi/--bgiseq is not compatible");
+            }
+            if self.stranded_illumina {
+                anyhow::bail!("--clump_only does not trim; --stranded_illumina is not compatible");
+            }
+            // Length / filter flags (Option-typed, so user-set is distinguishable)
+            if self.length.is_some() {
+                anyhow::bail!("--clump_only does not filter; --length is not compatible");
+            }
+            if self.max_length.is_some() {
+                anyhow::bail!("--clump_only does not filter; --max_length is not compatible");
+            }
+            if self.max_n.is_some() {
+                anyhow::bail!("--clump_only does not filter; --max_n is not compatible");
+            }
+            // Clip flags
+            if self.trim_n {
+                anyhow::bail!("--clump_only does not trim; --trim-n is not compatible");
+            }
+            if self.clip_r1.is_some() {
+                anyhow::bail!("--clump_only does not clip; --clip_r1 is not compatible");
+            }
+            if self.clip_r2.is_some() {
+                anyhow::bail!("--clump_only does not clip; --clip_r2 is not compatible");
+            }
+            if self.three_prime_clip_r1.is_some() {
+                anyhow::bail!(
+                    "--clump_only does not clip; --three_prime_clip_r1 is not compatible"
+                );
+            }
+            if self.three_prime_clip_r2.is_some() {
+                anyhow::bail!(
+                    "--clump_only does not clip; --three_prime_clip_r2 is not compatible"
+                );
+            }
+            // RRBS
+            if self.rrbs {
+                anyhow::bail!("--clump_only does not trim; --rrbs is not compatible");
+            }
+            if self.non_directional {
+                anyhow::bail!("--clump_only does not trim; --non_directional is not compatible");
+            }
+            // Poly-*
+            if self.poly_a {
+                anyhow::bail!("--clump_only does not trim; --polyA is not compatible");
+            }
+            if self.poly_g {
+                anyhow::bail!("--clump_only does not trim; --polyG is not compatible");
+            }
+            if self.no_poly_g {
+                anyhow::bail!(
+                    "--clump_only does not run poly-G auto-detection; --no_poly_g is not compatible"
+                );
+            }
+            // 2-colour quality
+            if self.nextseq.is_some() {
+                anyhow::bail!("--clump_only does not trim; --nextseq/--2colour is not compatible");
+            }
+            // Renaming / filter-adjacent
+            if self.rename {
+                anyhow::bail!(
+                    "--clump_only preserves record contents byte-identically; --rename would mutate read IDs"
+                );
+            }
+            if self.discard_untrimmed {
+                anyhow::bail!(
+                    "--clump_only does not trim; --discard_untrimmed has no meaning here"
+                );
+            }
+            if self.consider_already_trimmed.is_some() {
+                anyhow::bail!(
+                    "--clump_only does not trim; --consider_already_trimmed is not compatible"
+                );
+            }
+            // Other specialty modes (all mutually exclusive)
+            if self.hardtrim5.is_some() {
+                anyhow::bail!("--clump_only and --hardtrim5 are mutually exclusive");
+            }
+            if self.hardtrim3.is_some() {
+                anyhow::bail!("--clump_only and --hardtrim3 are mutually exclusive");
+            }
+            if self.clock {
+                anyhow::bail!("--clump_only and --clock are mutually exclusive");
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!("--clump_only and --implicon are mutually exclusive");
+            }
+            if self.demux.is_some() {
+                anyhow::bail!("--clump_only and --demux are mutually exclusive");
+            }
+            // Output shape
+            if matches!(self.output_format, OutputFormat::UBam) {
+                anyhow::bail!(
+                    "--clump_only + --output-format ubam is not yet supported in v1 (FASTQ in/out only; uBAM is a follow-up)"
+                );
+            }
+            if self.passthrough.is_some() {
+                anyhow::bail!(
+                    "--clump_only + --passthrough is not compatible (passthrough is a trim-pipeline feature)"
+                );
+            }
+            if self.retain_unpaired {
+                anyhow::bail!(
+                    "--clump_only does not filter; --retain_unpaired has no meaning here"
+                );
+            }
+            // Validate --memory format up front. Same treatment as --clumpify.
             crate::clump::parse_memory_size(&self.memory)
                 .map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
         }

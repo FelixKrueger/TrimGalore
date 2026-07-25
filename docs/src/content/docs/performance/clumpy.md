@@ -7,6 +7,10 @@ description: Reorder reads in the trimmed FASTQ output to make .fq.gz files sign
 
 `--compression <N>` sets the gzip level independently (1–9, default 1). Combine the two for maximum effect: `--clumpify --compression 9` reorders reads **and** runs gzip at its slowest/smallest level.
 
+:::note[Reorder without trimming: `--clump_only`]
+If you want the clumping compression win **without** any trimming — e.g. for lossless archival recompression — see [Clump-only (lossless reorder)](/modes/clump-only/). It uses the same clumping mechanism but skips the trim pipeline entirely, producing output records that are byte-identical to the input (header + sequence + quality untouched; only file order changes).
+:::
+
 ## When to use it
 
 ### Clumpify

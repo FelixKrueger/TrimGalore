@@ -75,6 +75,7 @@ export default defineConfig({
             { label: 'Multiome passthrough', slug: 'modes/passthrough' },
             { label: 'Demultiplexing', slug: 'modes/demux' },
             { label: 'Poly-G / Poly-A', slug: 'modes/poly' },
+            { label: 'Clump-only (lossless reorder)', slug: 'modes/clump-only' },
           ],
         },
         {
