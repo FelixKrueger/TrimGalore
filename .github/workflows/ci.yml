@@ -829,6 +829,10 @@ jobs:
           grep -q "20 .* paired in sequencing" /tmp/ubam_out_pe.flagstat
 
       - name: Validate uBAM-out aux-tag preservation
+        # NOTE: deliberately NOT `set -o pipefail` — the `samtools view | head -1`
+        # below SIGPIPEs the producer, which pipefail would surface as step
+        # failure. Adjacent fastqc steps DO use pipefail; the asymmetry is
+        # intentional.
         if: ${{ !cancelled() }}
         run: |
           # Skip gracefully if the with-tags fixture isn't present (it's
@@ -854,13 +858,25 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/ubam_out_se_fqc
+          rm -rf /tmp/ubam_out_se_fqc && mkdir -p /tmp/ubam_out_se_fqc
           ./target/release/trim_galore --output-format ubam --fastqc \
             -o /tmp/ubam_out_se_fqc test_files/ubam_test.bam
           test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed.bam
           test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip
           test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.html
-          unzip -l /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip | grep -q fastqc_data.txt
+          # Tempfile split rather than `unzip -l | grep -q` — under pipefail,
+          # `grep -q` closes the pipe on first match and SIGPIPEs unzip
+          # (~1% flake rate observed on real fixtures). Listing lands in the
+          # failure artifact for free (globbed by /tmp/ubam_out_*).
+          unzip -l /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip \
+            > /tmp/ubam_out_se_fqc/ziplist.txt
+          grep -q fastqc_data.txt /tmp/ubam_out_se_fqc/ziplist.txt
+          # Content assertion: guard against a structurally-valid but empty
+          # report (e.g. from an upstream regression that yields zero
+          # sequences). The 10-read fixture must produce Total Sequences=10.
+          unzip -p /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip \
+            '*fastqc_data.txt' > /tmp/ubam_out_se_fqc/fastqc_data.txt
+          grep -qE '^Total Sequences\s+10\s*$' /tmp/ubam_out_se_fqc/fastqc_data.txt
 
       - name: Validate PE uBAM-out (interleaved BAM in) — --fastqc produces one report
         # PE uBAM output is ONE interleaved BAM, so exactly ONE FastQC zip
@@ -869,11 +885,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/ubam_out_pe_fqc
+          rm -rf /tmp/ubam_out_pe_fqc && mkdir -p /tmp/ubam_out_pe_fqc
           ./target/release/trim_galore --paired --output-format ubam --fastqc \
             -o /tmp/ubam_out_pe_fqc test_files/ubam_paired_test.bam
           test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val.bam
           test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val_fastqc.zip
+          test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val_fastqc.html
           # Exactly one zip: guard against accidentally calling fastqc twice.
           # `|| true` keeps the zero-match branch alive under pipefail so we
           # can emit the friendly diagnostic instead of aborting silently.
@@ -886,12 +903,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/ubam_out_pe_fastq_fqc
+          rm -rf /tmp/ubam_out_pe_fastq_fqc && mkdir -p /tmp/ubam_out_pe_fastq_fqc
           ./target/release/trim_galore --paired --output-format ubam --fastqc \
             -o /tmp/ubam_out_pe_fastq_fqc \
             test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
           test -f /tmp/ubam_out_pe_fastq_fqc/BS-seq_10K_R1_val.bam
           test -f /tmp/ubam_out_pe_fastq_fqc/BS-seq_10K_R1_val_fastqc.zip
+          test -f /tmp/ubam_out_pe_fastq_fqc/BS-seq_10K_R1_val_fastqc.html
           ZIP_COUNT=$(ls /tmp/ubam_out_pe_fastq_fqc/*_fastqc.zip 2>/dev/null | wc -l | tr -d ' ' || true)
           [ "$ZIP_COUNT" = "1" ] || { echo "Expected 1 fastqc zip, got $ZIP_COUNT"; ls /tmp/ubam_out_pe_fastq_fqc; exit 1; }
 

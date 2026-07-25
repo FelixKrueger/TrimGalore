@@ -30,7 +30,7 @@ use fastqc_rust::{config::FastQCConfig, runner};
 ///                 [`FastQCConfig`] mutations; unknown flags emit a
 ///                 warning and are ignored.
 /// `output_dir`  — where the `*_fastqc.html` / `*_fastqc.zip` artifacts
-///                 land. `None` falls back to the input file's parent
+///                 land. `None` falls back to the analysed file's parent
 ///                 directory (fastqc-rust's default).
 /// `cores`       — threading budget for `fastqc-rust`'s internal rayon
 ///                 pool. Always at least 1.
