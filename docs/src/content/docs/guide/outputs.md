@@ -59,6 +59,8 @@ Gzip-compressed input produces gzip-compressed output by default. Pass `--dont_g
 
 ## FastQC
 
-`--fastqc` runs the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library on the trimmed output files after pair validation, producing FastQC 0.12.1-compatible HTML + ZIP reports alongside the trimmed FASTQ. No Java or external `fastqc` install needed.
+`--fastqc` runs the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library on the trimmed output files after pair validation, producing FastQC 0.12.1-compatible HTML + ZIP reports alongside the trimmed output. Works on both FASTQ output (default) and uBAM output (`--output-format ubam`) — `fastqc-rust` reads `.bam` natively, so no intermediate conversion. No Java or external `fastqc` install needed.
+
+For paired-end runs, FastQC is invoked once per output file — so PE FASTQ produces two reports (one per mate), while PE uBAM produces a **single** report per pair (uBAM PE output is one interleaved BAM, and the report covers both mates pooled).
 
 `--fastqc_args "..."` passes a subset of FastQC flags through. Currently supported: `--nogroup`, `--expgroup`, `--quiet`, `--svg`, `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`. Other flags emit a warning and are ignored.
