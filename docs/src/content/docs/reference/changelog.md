@@ -7,6 +7,643 @@ description: Release history for Trim Galore. The canonical source is CHANGELOG.
 The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.com/FelixKrueger/TrimGalore/blob/master/CHANGELOG.md) in the repo root. The version below is a copy synced with the docs.
 :::
 
+### Unreleased
+
+#### Changes
+
+- **New `--clump_only` specialty mode** — lossless reorder-only mode
+  requested in [#353](https://github.com/FelixKrueger/TrimGalore/issues/353).
+  Reorders FASTQ records by canonical 16-mer minimizer for gzip-friendly
+  compression, without any trimming, filtering, or adapter detection.
+  Output records are byte-identical to input records (header, sequence,
+  quality); only file-level order changes. Composes with `--compression`,
+  `--memory`, `--cores`, `--paired`, `--fastqc`, `--dont_gzip`, and
+  `--basename`. Trim/filter flags (`-a`, `--length`, `--rrbs`, `--polyA`,
+  `--polyG`, `--rename`, `--discard_untrimmed`, other specialty modes,
+  `--passthrough`, `--retain_unpaired`, `--output-format ubam`) are rejected
+  at CLI validation. Produces `*_clumped.fq(.gz)` outputs and a short
+  `*_clumping_report.txt` (deliberately distinct from `*_trimming_report.*`
+  so downstream nf-core/MultiQC pipelines don't scan an empty-of-trim-stats
+  file). Byte-identity + cross-run determinism are enforced by CI (record-
+  multiset diff + md5 cross-run check). FASTQ in/out only in v1; uBAM
+  in/out is a natural follow-up. Contract-scope note: the byte-identity
+  claim covers the three semantic fields — the plus-line (line 3) is
+  normalized to bare `+` on output, and CRLF line endings are normalized
+  to LF, matching existing codebase-wide `FastqReader`/`FastqWriter`
+  behaviour.
+- **`trim_galore` with no arguments now prints the full help and exits 0**,
+  instead of the terse `error: the following required arguments were not
+  provided: <INPUT>...` usage error on stderr with a non-zero status. This
+  matches the convention of most modern CLIs (help to stdout, success exit
+  code). Explicit `--help` / `--version` are unchanged, and genuine usage
+  errors (e.g. an unknown flag, or `--paired` with no input files) still fail
+  loudly on stderr with a non-zero status.
+- **Tidied the `--help` text**: removed developer-internal references (legacy
+  Perl `v0.6.x` version notes and internal `PLAN.md`/`§` pointers) that had
+  leaked into user-facing flag descriptions. No behaviour change.
+
+#### Fixes
+
+- **`--fastqc` now runs on `--output-format ubam` output** for both single-end
+  and paired-end runs. The uBAM-output path previously silently skipped the
+  bundled FastQC pass even when `--fastqc` (or `--fastqc_args`) was requested;
+  the FASTQ-output path already honoured it. `fastqc-rust` reads BAM natively,
+  so the report is generated directly from the trimmed `*_trimmed.bam` (SE) or
+  the single interleaved `*_val.bam` (PE) — one FastQC report per output BAM,
+  covering both mates in the PE case.
+
+
+### Version 2.3.0 (Release on 27 June 2026)
+
+**The Formats Edition.** Both directions of unaligned BAM (uBAM) now ship: TrimGalore reads uBAM transparently (auto-detected by content, paired-interleaved supported via a bounded de-interleaver, BAM aux tags fold into FASTQ headers via `--preserve-tags`) and emits uBAM via `--output-format ubam` (SE → `*_trimmed.bam`, PE → ONE interleaved `*_val.bam` matching samtools/Picard/fgbio convention, aux tags round-trip A/Z/i/f scalars). Pairs with Bismark's uBAM input support ([Bismark#1026](https://github.com/FelixKrueger/Bismark/pull/1026) + [#1027](https://github.com/FelixKrueger/Bismark/pull/1027)) — the cross-tool TrimGalore-emits → Bismark-reads handshake is now first-class, and Bismark's test suite confirms byte-identity between TrimGalore's uBAM output and `samtools fastq` on real BS-seq data (SE + PE), so the transcoder is hermetically guarded at the byte level.
+
+Also ships `--passthrough` for 10X Multiome cell-barcode carrier reads (paired-end + a third inline FASTQ kept in lockstep), and a corrected R2 poly-G trimming behaviour for 2-colour instruments (the artifact is sequencer-side and appears at the 3' end of both reads — was incorrectly trimming 5' poly-C on R2 before; reported by @K81ta in [#321](https://github.com/FelixKrueger/TrimGalore/issues/321)).
+
+#### Fixes
+
+- **`--poly_g` now correctly trims the 3' end of Read 2** (was trimming
+  the 5' end as poly-C — wrong location for the 2-colour artifact).
+  Reported by @K81ta in
+  [#321](https://github.com/FelixKrueger/TrimGalore/issues/321).
+  The 2-colour poly-G artifact is sequencer-induced (the instrument
+  calls "no signal" as a high-quality G when it overruns the template),
+  which happens at the 3' end of every read regardless of strand
+  orientation — unlike poly-A, which is a template feature (mRNA tail
+  on the forward strand) and presents at opposite ends of R1 vs R2 in
+  the reverse-complement orientation. The original code copied the
+  poly-A `revcomp = is_r2` pattern, addressing the wrong location on
+  R2. Stat labels and reports also updated from "R2 poly-C" to "R2
+  poly-G".
+
+  Behaviour change: R2 records with 3' poly-G tails are now trimmed
+  (previously untouched); R2 records that happened to start with a
+  poly-C run on their 5' end are no longer trimmed by `--poly_g` (that
+  was the bug). No effect on `--poly_a` / poly-T handling. No effect on
+  R1 / single-end (only the R2 path changed). v0.6.x Perl byte-identity
+  unaffected (`--poly_g` is a v2.x-only feature, no Perl baseline).
+
+#### New input formats
+
+- **uBAM (unaligned BAM) input support**
+  ([#316](https://github.com/FelixKrueger/TrimGalore/issues/316)). Trim Galore
+  now accepts unaligned BAM (uBAM) alongside FASTQ. Auto-detection is content-
+  based — first byte for plain FASTQ, decompressed-payload `BAM\1` magic for
+  uBAM (so `bgzip x.fq` BGZF-framed FASTQ is correctly classified as FASTQ,
+  not BAM). Works at single-end (`trim_galore sample.bam`) and paired-end
+  with a single interleaved BAM file (`trim_galore --paired interleaved.bam`);
+  the paired-end de-interleaver streams the BAM through a bounded-buffer
+  (per-side cap of 1024 records) and errors loudly with a `samtools collate`
+  remediation pointer on grouped (non-mate-adjacent) input. All standard
+  uBAM-emitting tools — samtools sort `-n` / collate, Picard `FastqToSam`,
+  fgbio `FastqToBam` — produce mate-adjacent output and work transparently.
+
+  Aligned BAM is rejected per-record (not only at the first record) so
+  mixed-aligned inputs cannot silently produce wrong output. The
+  implementation uses the pure-Rust `noodles` 0.88 umbrella crate
+  (exact-pinned, BAM feature only — no async, no tokio) sharing the version
+  already pulled transitively via `fastqc-rust 1.0.1`, so the release-binary
+  size delta is zero. Output defaults to FASTQ; opt-in uBAM output is
+  available via `--output-format ubam` (see below).
+
+#### New output formats
+
+- **uBAM (unaligned BAM) output via `--output-format ubam`**
+  ([#315](https://github.com/FelixKrueger/TrimGalore/issues/315)).
+  Single-threaded in v1; `--cores N` is silently ignored on this path
+  (uBAM-in → uBAM-out is bottlenecked by single-threaded BGZF decompression
+  anyway). Single-end output is `<stem>_trimmed.bam`; paired output is
+  **ONE interleaved BAM** (`<stem>_val.bam`) with `FREAD1`/`FREAD2` flag
+  bits per record, matching samtools/Picard/fgbio/CellRanger convention
+  and TrimGalore's own paired-uBAM-input de-interleaver expectation.
+
+  The input SAM header (`@HD`/`@PG`/`@CO`/`@RG`) is propagated as-is and
+  a `trim_galore @PG VN:<version> CL:<command-line> PP:<prev-pg-id>` line
+  is appended on every run — output is NOT byte-identical to input, but
+  provenance is preserved by adding to history. For FASTQ input, a
+  minimal `@HD VN:1.6` + trim_galore `@PG` header is synthesised.
+
+  Aux tags from uBAM input round-trip through trimming when
+  `--preserve-tags` is set: BamReader folds the tag-list into a textual
+  `\tTAG:TYPE:VALUE` tail on the FastqRecord id; BamWriter parses it
+  back into typed BAM aux fields. Only A (char), Z (string), i (i32),
+  and f (f32) scalar types round-trip; B (array) and H (hex) types are
+  rejected at the writer with an explicit error. BAM `i:` tags originally
+  stored as int8/int16/int64 are re-emitted as int32 (lossless for all
+  biologically meaningful tag values).
+
+  Specialty modes `--hardtrim5/3` are supported with `--output-format ubam`
+  (output: `<stem>.<N>bp_{5,3}prime.bam`). The following are rejected at
+  the CLI layer in v1: `--clumpify`, `--passthrough`, `--clock`,
+  `--implicon`, `--demux`, `--retain_unpaired` — each produces multiple
+  output files or encodes metadata in FASTQ headers in ways that don't
+  translate cleanly to BAM in v1.
+
+#### New flags
+
+- **`--preserve-tags TAG1,TAG2,…` — fold BAM aux tags into the FASTQ header**
+  ([#316](https://github.com/FelixKrueger/TrimGalore/issues/316)). Tab-separated,
+  samtools `-T`-compatible. Each tag must be a valid 2-character SAM tag name
+  (`[A-Za-z][A-Za-z0-9]`); the reserved `ALL` keyword is rejected in v1.
+  Tag order in the output header matches the user-specified order, NOT the
+  BAM file's aux-field order. Missing per-record tags are silently skipped.
+  Ignored for FASTQ input (emits a stderr warning).
+
+- **`--passthrough <FILE>` — Multiome / scATAC cell-barcode carrier mode**
+  ([#305](https://github.com/FelixKrueger/TrimGalore/pull/305)). Adds a third
+  FASTQ input that is carried through unchanged but kept in lockstep with R1
+  and R2 — any pair dropped by length / quality / N filters also drops the
+  matching record from the passthrough output. Designed for 10X Multiome
+  ATAC-seq workflows where the modified ATAC adapter is opaque to Cellranger
+  Arc; users can now trim R1 / R2 against their own `-a` / `-a2` while the
+  cell-barcode (I1 / I2 / R3) read stays aligned to the survivors in a
+  single invocation. Per-record three-way header sync check across the three
+  streams (handles both modern Illumina `@HEADER 1:N:0:CGATCG` and legacy
+  `@read/1` `@read/2` `@read/3` styles), with a row-numbered hard-error on
+  any mid-stream desync. Works at `--cores 1` (serial) and `--cores N`
+  (parallel worker pool). Adds a `=== Passthrough file ===` block to the
+  R2 trimming report and a `"passthrough"` object to the JSON report.
+  Requires `--paired` + exactly one R1/R2 pair; incompatible in v1 with
+  `--retain_unpaired`, `--clumpify`, and all specialty modes (`--clock`,
+  `--implicon`, `--hardtrim5/3`, `--demux`). See
+  [Multiome passthrough](https://www.trimgalore.com/modes/passthrough/) for
+  the full guide.
+
+
+### Version 2.2.0 (Release on 7 May 2026)
+
+**The Clumpify Edition.** Opt-in read-reordering for tighter `.fq.gz` output via canonical 16-mer minimizer sort, with empirically-validated guidance on which data types benefit and which are hurt. Ships alongside a new `--compression` knob that decouples gzip level from reordering, and a new tool-wide `--memory` budget. Co-developed with Phil Ewels (PR [#282](https://github.com/FelixKrueger/TrimGalore/pull/282)) — see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for the full benchmark table and use-case guidance, and [`docs/perf_data/clumpify-{buckberry,rrbs}-2026-05-07/`](https://github.com/FelixKrueger/TrimGalore/tree/master/docs/perf_data) for the WGBS-vs-RRBS contrast that motivated the per-data-type recommendations.
+
+The headline rule of thumb (in `clumpy.md`'s When-to-use section): clumpify helps on **low-complexity** paired-end data where biology produces fragment-level clustering (ATAC, Ribo, RRBS, RNA-seq, WES, MiSeq amplicons — savings ~15–55%), and **hurts** on high-complexity coverage-diverse paired-end data (WGBS PE, scRNA-seq R2 — output grows because R2 follows R1's minimizer order and loses its natural flowcell-cluster locality). The split is driven by the same R2-disruption mechanism that affects 10x scRNA-seq.
+
+#### New flags
+
+- **`--clumpify` opt-in compression mode.** Boolean flag that reorders reads
+  inside each gzip member of the trimmed output by canonical 16-mer
+  minimizer so reads sharing similar sequence land adjacent on disk;
+  gzip's 32 KB dictionary then finds long redundant runs and shrinks the
+  `.fq.gz` by 15–55% depending on data type (see
+  [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for
+  the full benchmark table). No information loss — only the on-disk order
+  of records changes; trimming reports are byte-identical.
+- **`--compression <N>` (1–9, default 1).** New flag that controls the
+  output gzip level independently of `--clumpify`. Use `--compression 6` or
+  `--compression 9` for smaller files at higher CPU cost; combine with
+  `--clumpify` for maximum compression. Replaces the earlier
+  `--clumpy=<LEVEL>` optional-value form, which conflated reordering with
+  level selection.
+- **`--memory <SIZE>` global memory budget** (default `1G`). Currently used
+  only by `--clumpify` for bin buffer sizing. The layout formula now
+  targets predicted peak RSS ≤ `--memory` (bin pool + worker batches +
+  static overhead all accounted), so the budget is honest rather than
+  notional — measured peak matches predicted peak within 1% on
+  31 M-record paired-end runs. A fixed 512 MiB is reserved up front for
+  FastQC + allocator + runtime; the rest funds the bin pool and worker
+  batches. Bigger budgets give bigger per-gzip-member sort runs and
+  better compression. Diminishing returns are sharp — going from 1G to 8G
+  adds only ~4 percentage points of saving on typical short-read data.
+  If `--memory` is below the floor (~552 MiB at `--cores 6`), Trim Galore
+  prints a loud warning and **falls back to plain mode** rather than
+  refusing the job. Replaces the `--clumpy_memory` flag from earlier
+  development branches.
+- **`--high_compression` removed.** Subsumed by the new `--compression <N>`
+  flag. Users who previously passed `--high_compression` for level-6
+  archival output should switch to `--compression 6` (or
+  `--clumpify --compression 6` to also benefit from reordering).
+  `--high_compression` shipped in v2.1.0 GA — this is a real removal,
+  not a pre-release shim. Existing pipelines that pass it will need to
+  swap; the rewrite is a one-line CLI change.
+
+#### Other changes
+
+- **Integer-arithmetic `max_errors` in adapter alignment** ([#287](https://github.com/FelixKrueger/TrimGalore/pull/287), [#262 Item A](https://github.com/FelixKrueger/TrimGalore/issues/262)). Replaced four call sites of `(max_error_rate * len as f64).floor() as usize` in `find_3prime_adapter` and `myers_proves_no_match` with integer math, eliminating a per-read libm `floor()` call that pprof attributed at 0.21% leaf self-time on the Buckberry fixture. Byte-identical to the float form for any non-negative integer length; determinism is *better* (no f64 rounding-mode dependency). Win: ~0.2% wall — small but it's free, and the parity matrix confirms byte-identity across all 19 flag paths.
+- **Memory & I/O reference data added to the [Threading model](https://www.trimgalore.com/performance/threading/) docs page** ([#287](https://github.com/FelixKrueger/TrimGalore/pull/287)). Memory profile section now contextualises TG v2's <100 MB peak vs Cutadapt 100–300 MB / fastp 100+ MB / BBDuk 1–4 GB, plus a new "I/O and cache behaviour" subsection covering disk-bandwidth-comfortable I/O and the L3-cache-pressure mechanism behind the `--cores ≥ 16` diminishing-returns plateau. Audit-trail data captured by [@an-altosian](https://github.com/an-altosian)'s [#263](https://github.com/FelixKrueger/TrimGalore/issues/263) and [#264](https://github.com/FelixKrueger/TrimGalore/issues/264) characterization reports.
+
+
+### Version 2.1.0 (Release on 4 May 2026)
+
+**First stable release of the Oxidized Edition** — a complete Rust rewrite
+of the original Perl Trim Galore. Drop-in compatible with v0.6.x scripts
+and pipelines (same CLI, same output filenames, same report format).
+Single static binary, zero external runtime dependencies — no Python,
+Perl, Cutadapt, Java, igzip, or pigz required.
+
+#### Highlights
+
+- **Built-in FastQC** via the bundled
+  [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library. Pass
+  `--fastqc` and it just works (no external `fastqc` binary, no Java
+  runtime).
+- **Adapter auto-detection** for Illumina, Nextera, Small RNA, and
+  BGI/DNBSEQ on the first 1M reads. Per-pair detection in paired-end
+  mode (intentional improvement over Perl v0.6.x's once-per-run
+  detection).
+- **Multi-adapter support** via repeatable `-a`/`-a2` or
+  `-a "file:adapters.fa"` to load adapter sets from FASTA. Optional
+  multi-round trimming (`-n N`).
+- **Poly-G trimming** for 2-colour instruments (NovaSeq, NextSeq,
+  NovaSeq X), auto-detected from the data; opt-out with `--no_poly_g`.
+- **Generic poly-A trimming** for mRNA-seq libraries (`--poly_a`).
+- **Worker-pool parallelism** via `--cores N` — near-linear speedup up
+  to ~8 cores on Buckberry-scale data; saturation point depends on
+  per-thread compute vs gzip-output I/O bandwidth on your storage.
+- **Reproducible builds** via `SOURCE_DATE_EPOCH`; release binaries are
+  bit-identical when built twice with the same input. CI verifies this.
+- **Byte-identity to Perl v0.6.11** asserted by the CI validation
+  matrix across SE, PE, RRBS, hardtrim5, Clock, and demux flag paths.
+
+#### Performance vs Trim Galore 0.6.11 + Cutadapt 5.2
+
+Headline numbers from the
+[Buckberry-scale benchmarks](https://www.trimgalore.com/performance/benchmarks/)
+on 84M paired-end reads (Intel Xeon 6975P-C, Granite Rapids):
+
+- **5.93× less CPU time at `--cores 8`** (the nf-core `process_high`
+  default) — ~$7 vs ~$41 per 1000-sample cohort at AWS $0.05/vCPU-hour
+- **13.49× less CPU time at single-thread**
+- **4.54× faster wall time at `--cores 8`**: 57s vs 257s on the 84M
+  paired-end fixture
+
+#### Opt-in flags
+
+- `--high_compression` — gzip output level 6 instead of the default
+  level 1 (~75% smaller files, ~2× slower trimming). For archival
+  workflows where trimmed reads are deliberately retained downstream;
+  the dominant nf-core / Snakemake / CWL use case keeps trimmed FASTQs
+  ephemeral and benefits from the faster default level 1.
+
+#### Migration from v0.6.x
+
+The CLI surface is unchanged from v0.6.x for the dominant workflows.
+Most users will see no behavioural changes — the biggest visible change
+is performance. A few minor differences (mostly improvements: brace
+expansion `-a A{N}`, `-r1`/`-r2` short flags now parse cleanly,
+multi-pair specialty modes) are documented in the
+[v2 migration notes](https://www.trimgalore.com/reference/migration/).
+
+#### Cumulative changes from the v2.1.0 beta arc
+
+This GA release ships the cumulative changes from v2.1.0-beta.1 through
+v2.1.0-beta.8. The Buckberry-scale performance audit (#248, co-authored
+with [@an-altosian](https://github.com/an-altosian) — Dongze He, Altos
+Labs) drove the headline performance wins:
+
+- **beta.6**: gzip output level 6 → 1 (~−23% wall, ~−43% CPU at
+  saturation; output bytes ~75% larger; decompressed bytes
+  byte-identical)
+- **beta.6**: single buffered write per FASTQ record (~−10% wall)
+- **beta.7**: Myers' bit-parallel adapter alignment prefilter
+  (~−13% wall, byte-identity-preserving by construction)
+- **beta.8**: `--high_compression` opt-in flag for storage-bound users
+
+See the per-beta release notes below for full per-step detail.
+
+
+### Version 2.1.0-beta.8 (Release on 30 Apr 2026)
+
+#### New feature
+
+- **`--high_compression` opt-in flag.** Sets gzip output level to 6
+  (smaller files, slower trimming) instead of the default level 1
+  (faster trimming, ~75% larger output bytes). Useful when storage
+  cost or transfer bandwidth matters more than runtime — archival
+  workflows, shared object stores. Decompressed output is
+  byte-identical regardless of level (gzip levels 1 and 6 are both
+  lossless; only the framing differs). The flag flows through
+  `TrimConfig`, the worker pool's per-batch `GzEncoder` callsites,
+  the sequential output writer, every specialty mode
+  (`--hardtrim5`/`--hardtrim3`/`--clock`/`--implicon`), and
+  `--demux`. Counter-lever to the v2.1.0-beta.6 default of level 1.
+  Trade quantified by the v2.1.0-beta.7 Buckberry benchmark: at
+  saturation (cores=8) on the 84M-read fixture, lowering level 6 →
+  level 1 saved ~−23% wall and ~−43% CPU; `--high_compression`
+  reverses that trade for users who want the smaller files back.
+
+
+### Version 2.1.0-beta.7 (Release on 29 Apr 2026)
+
+#### Performance (since v2.1.0-beta.6) — third Buckberry-scale win (#248 #4)
+
+- **Myers' bit-parallel adapter alignment prefilter.** Wraps an O(n)
+  bit-vector approximate-matching pass (Hyyrö 2001 formulation) in
+  front of the existing scalar DP in `find_3prime_adapter`. The
+  prefilter is conservative by design — it short-circuits ONLY when
+  it can rigorously prove that no adapter match exists, considering
+  both the full-match (last DP row) and partial-match (last DP
+  column) cases. False positives fall through to the unchanged
+  scalar DP, keeping the byte-identity invariant intact by
+  construction. Limited to adapters ≤ 64 bp (single u64 bit-vector;
+  the project's adapters are all ≤ 32 bp). End-to-end byte-identity
+  verified locally and by the CI validation matrix; Dongze's
+  Buckberry-scale measurement (84M reads, 38% adapter rate, cores=8)
+  was −13.6% wall on his prototype, so this lands the third and
+  final perf win from the #248 audit. Co-authored with @an-altosian
+  (Dongze He). (#258)
+
+#### Documentation (since v2.1.0-beta.6)
+
+- **Migration guide note on `-a 'A{N}'` poly-A divergence.** Closes
+  #245 item B as intentional / not-pursued: brace expansion is
+  byte-identical between Perl and Rust, but the alignment DP's
+  tie-break behaviour on highly-repetitive adapter patterns differs
+  between Cutadapt and our reimplementation. Both produce valid
+  global-best alignments. The dedicated `--poly_a` flag is the
+  right v2 path for poly-A trimming; the `-a 'A{N}'` form remains
+  supported as a v0.6.x compat shim. (#257)
+- **GHCR tag prefix correction.** Docker images carry the `v` prefix
+  (`:v2.1.0-beta.6`), not bare semver — verified against
+  `/v2/.../tags/list`. Docs install table fixed; the prior
+  `:2.1.0-beta.6` example was 404. README Docker example switched
+  from implicit `:latest` (which doesn't exist during prerelease) to
+  `:beta`, with the full tag set documented inline. (#256)
+
+
+### Version 2.1.0-beta.6 (Release on 29 Apr 2026)
+
+#### Performance (since v2.1.0-beta.5) — Buckberry-scale audit (#248)
+
+Profiled, prototyped, and benchmarked by @an-altosian against an
+84M-read single-end Bisulfite-Seq fixture (Buckberry et al. 2023,
+SRR24827373, 2.1 GiB gzipped, 38% adapter rate) using `hyperfine`
+with 10 trials per condition. Two of the three confirmed wins from
+that audit landed here; item #4 (Myers' bit-parallel adapter
+alignment, ~13% additional reduction) is queued for a separate PR
+from @an-altosian.
+
+- **Output gzip compression level lowered 6 → 1.** Compression CPU
+  was the dominant wall-time consumer on saturated workers
+  (cores=8) — at level 6, gzip output dwarfed actual trimming work.
+  Lowering to level 1 (fastest) measured −23.3% wall-clock
+  (69.693 ± 0.200 s → 53.471 ± 2.135 s) and −43% user-CPU
+  (593.9 s → 338.7 s) at Buckberry scale. Trade: output `.fq.gz`
+  files are roughly 75% larger (273 KB → 479 KB on the local
+  BS-seq_10K_R1 smoke). Decompressed content is byte-identical to
+  the previous output — the CI validation matrix's `gzip -dc |
+  md5sum` comparisons against Perl v0.6.11 still pass on every
+  flag path. New `pub const OUTPUT_GZIP_LEVEL` in `src/fastq.rs`
+  centralises the level so a future `--high-compression` opt-in
+  flag is a one-line change for storage-conscious users. (#248 #1)
+- **Single buffered write per FASTQ record.** Pre-format the
+  4-line record into a `Vec<u8>`, then issue one `write_all`
+  instead of four separate `writeln!` calls. Byte-identical output
+  (md5 match verified end-to-end on BS-seq_10K_R1). At Buckberry
+  scale this measured 9.8% wall-clock reduction
+  (69.693 ± 0.200 s → 62.862 ± 0.352 s) by amortising the per-call
+  Write-trait overhead. (#248 #2)
+
+#### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported)
+
+- **`--basename foo --paired` now produces `foo_val_1.fq.gz` /
+  `foo_val_2.fq.gz`, not `foo_R1_val_1.fq.gz` / `foo_R2_val_2.fq.gz`.**
+  The `_R{1,2}` segment was interpolated between the basename and the
+  `_val_{1,2}` suffix in `io::paired_end_output_names` and
+  `io::unpaired_output_names`, breaking the documented Perl v0.6.5+
+  filename contract — every nf-core / Snakemake pipeline globbing
+  the documented `${basename}_val_*` path silently missed outputs
+  under v2.1.0-beta.5. Trimmed read content was unaffected, only the
+  filenames differed. Two regression tests added covering the
+  basename branches of both functions. Reported by @an-altosian
+  during the Phase-1C parity hunt. (#244)
+
+- **Lowercase clip-flag spellings (`--clip_r1`, `--clip_r2`,
+  `--three_prime_clip_r1`, `--three_prime_clip_r2`) are now accepted.**
+  Perl `trim_galore` accepted both lowercase and uppercase spellings;
+  the Rust port matched the uppercase canonical only and rejected the
+  lowercase forms with a clap parse error (exit 2). Every Perl-era
+  pipeline using the documented lowercase spelling broke under v2.x.
+  Added lowercase aliases on all four flags. Reported and diagnosed by
+  @an-altosian during a Phase-1B Perl-parity hunt. (#242)
+
+- **Output gzip compression now mirrors input compression by default.**
+  Plain `.fastq` input → plain `.fq` output; `.fastq.gz` → `.fq.gz`.
+  Restores Perl v0.6.x behaviour. Rust v2.1.0-beta.5 always emitted
+  gzipped output regardless of input, breaking pipelines that globbed
+  `*.fq` (no `.gz`) for outputs from plain-text inputs. `--dont_gzip`
+  still works as the explicit "always plain" override. The first input
+  determines the mode for the whole run; mixing plain and gzipped
+  inputs in one invocation isn't a supported configuration. Reported
+  by @an-altosian via #245 (item A).
+
+- **`--retain_unpaired` now routes both mates independently to their
+  unpaired files when both mates fail the discard `--length` cutoff,
+  if each is individually long enough for the per-side `--length_{1,2}`
+  threshold.** Rust v2.1.0-beta.5 had an extra `!r{1,2}_short` clause in
+  `filters::filter_paired_end` that gated unpaired rescue on the read
+  itself passing the discard cutoff, which silently dropped reads when
+  both mates failed `--length` together but were individually long
+  enough. Matches Perl `master:trim_galore:2325-2343`. Slight caveat:
+  Perl's behaviour diverges from its own user-guide wording ("rescue
+  the surviving mate"); we match the implementation, not the docs, to
+  preserve byte-identity for the documented byte-identity flag paths.
+  Regression test added. Reported by @an-altosian via #245 (item C).
+
+#### Behavioural notes (v2.x intentional widenings, since v2.1.0-beta.5)
+
+- **`--clock` and `--implicon` now imply `--paired`** — passing either
+  flag without `--paired` is no longer rejected. Both modes are
+  inherently paired-end specialty modes; requiring users to pass
+  `--paired` redundantly was noise. Pipelines using the explicit Perl
+  form (`--clock --paired` / `--implicon --paired`) continue to work
+  unchanged. Consistent with the multi-pair widening pattern documented
+  for these specialty modes in beta.4. Surfaced by @an-altosian via
+  #245 (item D).
+
+#### Bug fixes (since v2.1.0-beta.5) — Perl-parity regressions (contributor-reported, continued)
+
+- **`--max_n` fraction-mode now logs the Perl-style notice on entry**
+  ("`--max_n will be interpreted as a fraction of the read length
+  (0.5)`"). Investigating @an-altosian's #243 confirmed the dispatch
+  and filter chain behave correctly: values in `(0.0, 1.0)` already
+  build `MaxNFilter::Fraction` and `n_count/length > threshold`
+  filtering matches Perl v0.6.8+ behaviour byte-for-byte. The
+  reproducer-fixture's max-N fraction (3/153 ≈ 0.02) just doesn't
+  exceed the 0.5 threshold, so neither implementation filters
+  anything — *not* a bug. Adding the same warning Perl prints
+  (`master:trim_galore:3328`) makes the selected mode visible at
+  runtime so users don't have to derive it from output statistics.
+  (#243)
+
+#### Bug fixes (since v2.1.0-beta.5)
+
+- **`-o/--output_dir DIR` no longer hangs when `DIR` doesn't exist.** The
+  parallel paired-end path opened output files via raw `File::create`,
+  which fails immediately on a missing parent — but by then reader and
+  worker threads were already spawned, the `?` exit dropped the receiver
+  channel, and the process deadlocked at near-zero CPU (workers stuck
+  producing into a queue with no consumers). Reported via beta.5 user
+  feedback (24h wall / 4s CPU on a SLURM cluster). Fix: hoist
+  `create_dir_all` into `main()` immediately after CLI parse, covering
+  every downstream code path (parallel, single-threaded, paired,
+  single-end, every specialty mode) in one place. Restores Perl v0.6.x
+  behaviour ("If an output directory which was specified with -o
+  output_directory did not exist, it will be created for you", v0.6.0
+  changelog).
+
+#### Tests (since v2.1.0-beta.5) — coverage gaps closed (#246)
+
+Five new unit tests landed across `report.rs`, `demux.rs`, `fastq.rs`,
+and `adapter.rs`. Closes 5 of the 6 `§5.x` items from the test-coverage
+audit. Total test count: 171 → 177. Items still open from #246:
+parallel/serial stat-tracking parity (§5.2), comprehensive
+`parallel.rs` coverage, optional upstreaming of @an-altosian's
+proptest harness — tracked as separate followups.
+
+- **§5.4 PE param-summary `removed-end:` regression guard**
+  (`report.rs::tests`). Beta.3 fixed a stray `-end` suffix in the
+  paired-end parameter-summary line (`...sequence pair gets
+  removed-end: 20 bp` → `...removed: 20 bp`); MultiQC parsers grep
+  for the literal `removed:` form. Test renders the PE header and
+  asserts both `!contains("removed-end")` and the canonical phrase —
+  any reintroduction of the typo class fails the assertion.
+
+- **§5.5 Demux CRLF samplesheet handling** (`demux.rs::tests`).
+  Windows-authored barcode sheets use `\r\n` line endings; without
+  the `trim_end_matches('\r')` strip in `read_barcode_file`, the
+  trailing `\r` would pollute the parsed barcode and fail the
+  ACGTN-only validator with a confusing "barcode must contain only
+  A, C, T, G, N" error. Test writes a CRLF samplesheet and asserts
+  no stray `\r` survives on any parsed entry.
+
+- **§5.6 Demux short-read NoCode routing** (`demux.rs::tests`).
+  When a trimmed read is shorter than the barcode length,
+  `demultiplex` (`src/demux.rs:178-187`) routes it to the NoCode
+  bucket instead of slicing past the read end. End-to-end test:
+  fixture with one 5 bp read, one non-matching 16 bp read, and one
+  matching 16 bp read; asserts both NoCode-bound reads land in
+  `*_NoCode.fq` (with cleared seq+qual for the too-short one) and
+  the matching read lands in the per-sample bucket. Together with
+  §5.5 closes the `demux.rs` zero-tests module gap.
+
+- **§5.1 Multi-member gzip reader round-trip** (`fastq.rs::tests`).
+  The parallel writer (`--cores N`) emits each worker's chunk as
+  its own gzip member; the concatenated stream is a valid RFC 1952
+  multi-member gzip file. Test crafts a 2-member buffer with
+  `GzEncoder::finish` twice, concatenates, and asserts
+  `FastqReader` (using `MultiGzDecoder`) yields records from BOTH
+  members in order. Originally fixed in `9dcf519` (pre-beta.1) but
+  never had a unit-level regression test.
+
+- **§5.3 Adapter auto-detect `MAX_SCAN_READS` boundary**
+  (`adapter.rs::tests`). The 1M-read scan cap was unverified at the
+  unit level; generating a >1M-read fixture per test run is too
+  slow. Refactored: extracted `autodetect_adapter_with_max_scan`
+  (crate-private) so tests can exercise the same `increment-then-
+  break` control flow at scale 7. Two paired tests: cap-bounded
+  (input has 100 records, max_scan=7, asserts `reads_scanned == 7`
+  and matches < 100) and cap-unbounded (input has 50 records,
+  max_scan=1M, asserts full-file scan). Public `autodetect_adapter`
+  API unchanged.
+
+#### Tests (since v2.1.0-beta.5) — parallel/serial stats parity (#246 §5.2)
+
+- **`parallel::run_single_end_parallel` and `trimmer::run_single_end`
+  must yield field-identical `TrimStats` on the same input.** First
+  unit test in `src/parallel.rs` (closes the zero-tests module gap
+  noted in #246). Beta.0/1 had per-field stat drift between the two
+  paths (commits 82d1e34, 3996fc5 fixed `total_bp_after_trim` /
+  `rrbs_r2_clipped_5prime`); this test locks the invariant down at
+  the unit level. `TrimStats` gained a `PartialEq` derive so a
+  single `assert_eq!` covers every field — any future field added
+  to the struct is automatically covered without test edits.
+  Closes #246 §5.2.
+
+#### Infrastructure (contributor-facing, since v2.1.0-beta.5) — CI hardening (#247)
+
+The five remaining deferred items from the original CI audit landed
+in this round (items 2, 3, 4, 7 — item 8 cargo-nextest deferred
+pending a focused per-test-isolation audit since some existing tests
+share `std::env::temp_dir().join(...)` paths):
+
+- **#247 item 2 — macOS matrix on `rust-tests`.** Job now runs on
+  both `ubuntu-latest` and `macos-latest` (Apple Silicon hosted
+  runner). Catches Apple-Silicon-specific regressions before
+  release-tag time. `fail-fast: false` so an OS-specific failure on
+  one entry doesn't kill the other.
+- **#247 item 3 — release-profile test step.** New `Run tests
+  (release)` step alongside the existing debug-profile run. Catches
+  LTO + `codegen-units=1` interactions that the default debug build
+  doesn't see. Cheap because the next step (`cargo build --release`)
+  was already populating the same target dir.
+- **#247 item 4 — line/branch coverage reporting via
+  `cargo-llvm-cov`.** New `coverage` job emits an LCOV file as a
+  CI artifact (downloadable from the Actions run UI) plus a text
+  summary in the job log. No third-party uploader integration —
+  Codecov / Coveralls is a separate decision.
+- **#247 item 7 — `justfile` for local CI parity.** New top-level
+  `justfile` with targets `fmt`, `clippy`, `test`, `test-release`,
+  `ci`, `reproduce`, `validate-paired-end`, `logos`, `docs`. Run
+  `just` (or `just ci`) to execute the same portable checks CI
+  runs on every push. Pairs cleanly with the contributor docs
+  flow.
+
+
+
+Three CI improvements landed from @an-altosian's audit (#247). Touches
+only `.github/workflows/ci.yml`; no runtime change.
+
+- **Validation outputs uploaded on failure.** When any md5 oracle
+  step fails, the `/tmp/tg`, `/tmp/op*`, and `/tmp/*.log` paths that
+  triggered the mismatch were previously lost when the runner cleaned
+  up. New `if: failure()` step uploads them as a 7-day artifact under
+  `validation-outputs-<run_id>-<attempt>`. Especially useful for
+  reviewing perf PRs that intentionally change output bytes (e.g. a
+  default gzip-level change) — the new artefacts can be diffed
+  against the Perl baseline directly.
+- **Perl Trim Galore source fetched from local `master` instead of
+  `raw.githubusercontent`.** The Perl v0.6.x release line lives at
+  `master:trim_galore` in this repo; replacing the curl with
+  `git fetch --depth=1 origin master && git show
+  origin/master:trim_galore` gives byte-identical content with zero
+  external network dependency, eliminating a class of CI flake.
+- **Cutadapt bioconda revision pinned (`cutadapt=5.2=*_0`).** The
+  validation matrix uses Cutadapt's output as the Perl-side oracle,
+  so an unannounced bioconda revision bump (5.2-1, etc.) could
+  silently shift the md5 baseline. Pin to the first build of 5.2 so
+  any rev bump becomes a visible CI failure rather than invisible
+  drift.
+
+#### Bug fixes (since v2.1.0-beta.5) — surfaced by the nf-core pre-GA validation review
+
+- **RRBS samples: `Total written (filtered)` cutadapt-section line now matches
+  Perl v0.6.x byte-for-byte.** Beta.4's `eedbc66` MultiQC-parity fix introduced
+  `total_bp_after_trim` (incremented after the full per-read trimming pipeline)
+  but didn't account for the `--rrbs` 2 bp 3' truncation. The reported value
+  drifted from v0.6.x by `RRBS-trimmed-reads × 2 bp`. `TrimResult` now carries
+  a `bp_after_cutadapt` field captured immediately after quality + adapter
+  trimming and before RRBS / poly-A/G / N-trim / clipping, and that's what
+  drives `total_bp_after_trim` in both single-end and paired-end pipelines.
+  Trimmed FASTQ output is unchanged — this fix only affects the reported
+  count. (#232)
+- **`RUN STATISTICS` filter-removed lines are now always emitted, even when
+  the count is 0.** The `if stats.too_short > 0` / `too_long` / `too_many_n`
+  guards (and the PE counterpart `pairs_removed_n` line) caused MultiQC's
+  canonical fallback parser to break on samples that pass 100% of reads
+  through length / max-N filters — the parser greps for the exact line and
+  treats absence as a parse failure. v0.6.x always emits the line. Now we do
+  too, with zero-protected percentage display. (#233)
+
+#### Documentation (since v2.1.0-beta.5)
+
+- **Migration notes: trimming-report behaviour changes vs Perl v0.6.x.** The
+  pre-GA review surfaced four intentional report-text changes that were not
+  filed because they match the v2.x reference report attached to MultiQC #3529.
+  Documented for users / parsers expecting the v0.6.x shape:
+  - **RRBS quality-trim line shape** changed from `Sequences were truncated to
+    a varying degree because of deteriorating qualities …: N (P%)` (counts
+    *reads*, v0.6.x RRBS only) to the cutadapt-style `Quality-trimmed: N bp
+    (P%)` (counts *bp*, v2.x both modes). Non-RRBS mode is unchanged in both
+    implementations. v2.x is more consistent across modes, but a regex tuned
+    to one shape won't match the other. (#234)
+  - **Adapter family-name annotation** dropped — v2.x emits the bare
+    sequence (e.g. `'AGATCGGAAGAGC'`) where v0.6.x emitted family names
+    (Illumina TruSeq, Nextera, smallRNA). The family is still tracked
+    internally but not rendered in the report.
+  - **"Bases preceding removed adapters" histogram** omitted from the
+    `=== Adapter N ===` block.
+  - **Per-adapter "Minimum overlap" line** not repeated under each adapter
+    block (the same datum is in the parameter summary at the top).
+  - **Length-distribution `max.err` column** uses the modern Cutadapt formula
+    `floor(L × error_rate)`. v0.6.x's display capped this at 1 in many
+    positions. The `count` column is unchanged byte-for-byte.
 
 
 ### Version 2.1.0-beta.5 (Release on 27 Apr 2026)
@@ -24,7 +661,8 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   filed and merged upstream as
   [ewels/FastQC-Rust#2](https://github.com/ewels/FastQC-Rust/pull/2).
   Detected sequences, counts, and source classification were always
-  correct, this was a cosmetic formatting deviation, not a scientific one.
+  correct — this was a cosmetic formatting deviation, not a scientific
+  one.
 
 
 ### Version 2.1.0-beta.4 (Release on 26 Apr 2026)
@@ -33,7 +671,7 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
 - **Bundled FastQC.** `--fastqc` now uses the
   [fastqc-rust](https://crates.io/crates/fastqc-rust) library directly
   instead of shelling out to an external `fastqc` binary. Removes Java
-  and the FastQC tarball as runtime dependencies, completing the
+  and the FastQC tarball as runtime dependencies — completes the
   "single static binary, zero external runtime deps" story for v2.x.
   Output files (`*_fastqc.html`, `*_fastqc.zip`) are FastQC 0.12.1-
   compatible (the same version we previously bundled in the Docker
@@ -44,7 +682,7 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   - `--fastqc_args` continues to accept the common subset (`--nogroup`,
     `--expgroup`, `--quiet`, `--svg`, `--nano`, `--nofilter`,
     `--casava`, `-t`/`--threads`, `-o`/`--outdir`); other flags emit a
-    warning and are ignored, forward-compat with future fastqc-rust
+    warning and are ignored — forward-compat with future fastqc-rust
     additions.
   - `--help` text for `--fastqc` and `--fastqc_args` refreshed to
     describe the bundled integration and enumerate the translated flag
@@ -55,7 +693,7 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
 - `--clock` and `--implicon` now accept multi-pair input (an even
   number of files as consecutive R1/R2 pairs), restoring v0.6.x
   semantics that the v2.x rewrite had narrowed to "exactly 2 input
-  files". Same widening as the `--paired` fix in beta.2; the two
+  files". Same widening as the `--paired` fix in beta.2 — the two
   specialty run-and-exit modes had their own validation that wasn't
   updated at the time. Each pair gets a per-pair header
   (`=== Clock pair N of M ===` / `=== IMPLICON pair N of M ===`) and
@@ -78,14 +716,14 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   smallRNA on the first 1 M reads. Stranded Illumina stays
   explicit-only (`--stranded_illumina`) because its sequence differs
   from Nextera by a single A-tail base and would produce constant
-  ambiguous ties if probed. Tie-break semantics unchanged. The
+  ambiguous ties if probed. Tie-break semantics unchanged — the
   zero-count fallback is still Illumina.
 - **Repeatable `-a` / `-a2` multi-adapter syntax.** `-a SEQ1 -a SEQ2`
-  now works directly, with no need for the v0.6.x embedded-string
+  now works directly — no need for the v0.6.x embedded-string
   (`-a " SEQ -a SEQ"`) or FASTA file workaround. Embedded-string and
   `file:adapters.fa` forms still work and can be mixed with repeated
   flags in a single invocation (e.g. `-a " SEQ1 -a SEQ2" -a SEQ3`).
-- **Perl-style `A{N}` single-base expansion** for `-a` / `-a2`, e.g.
+- **Perl-style `A{N}` single-base expansion** for `-a` / `-a2` — e.g.
   `-a A{10}` expands to `-a AAAAAAAAAA`, matching Perl v0.6.x syntax.
   Only applied to the single-adapter case (not to multi-adapter or
   FASTA entries), mirroring Perl behaviour.
@@ -149,7 +787,7 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
 #### New features (since v2.1.0-beta.1)
 - `--version` now prints build provenance on a second line: `<git-hash> — <target>
   — built <ISO-8601 UTC timestamp>`. The short form `-V` remains unchanged (one
-  line, matches the original terse format). Useful for bug reports: users can
+  line, matches the original terse format). Useful for bug reports — users can
   paste `trim_galore --version` to pinpoint the exact build.
 - Builds are now **reproducible**: setting `SOURCE_DATE_EPOCH` to a fixed Unix
   timestamp (Debian reproducible-builds spec) produces a bit-identical binary
@@ -176,8 +814,8 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   (header-only peek, dominated by FASTQ I/O). The paired-end loop is now
   symmetrical with the single-end loop, which has always detected per file.
 - Paired-end validation catches when R1 and R2 are the exact same filename
-  (byte-equal path comparison; does not follow symlinks or canonicalise.
-  Matches v0.6.x behaviour).
+  (byte-equal path comparison; does not follow symlinks or canonicalise —
+  matches v0.6.x behaviour).
 - Paired-end invocations pre-flight-check for output-path collisions across
   pairs and abort before writing rather than silently overwriting. Comparison
   is case-insensitive (ASCII) so filenames differing only in letter-case are
@@ -189,13 +827,13 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
     this.
   - On partial failure at pair K, pairs 1..K&#8722;1 retain their complete
     outputs on disk and pair K may have a partial output file; pairs
-    K+1..N are not attempted. Inspect and re-run only the failing pair.
-    Matches v0.6.x Perl behaviour (no rollback across pairs).
+    K+1..N are not attempted. Inspect and re-run only the failing pair —
+    matches v0.6.x Perl behaviour (no rollback across pairs).
 
 
 ### Version 2.1.0 (Beta, Release on 18 Apr 2026)
 
-**Major release: Rust rewrite (Oxidized Edition).** Faithful Rust rewrite of Trim Galore, delivered as a single binary with zero external dependencies and designed as a drop-in replacement for v0.6.x workflows. Outputs match v0.6.x for the core feature set; new capabilities beyond the Perl version include poly-G auto-detection and trimming, a generic poly-A trimmer, per-pair adapter auto-detection, cleaner multi-adapter invocation, a JSON MultiQC-native report, and other extensions. Built from `src/main.rs` (Cargo crate at repo root); the historical Perl script will be preserved at `legacy/trim_galore` once v2.1.0 GA ships (retained in the `0.6.11` tag during the beta window).
+**Major release — Rust rewrite (Oxidized Edition).** Faithful Rust rewrite of Trim Galore, delivered as a single binary with zero external dependencies and designed as a drop-in replacement for v0.6.x workflows. Outputs match v0.6.x for the core feature set; new capabilities beyond the Perl version include poly-G auto-detection and trimming, a generic poly-A trimmer, per-pair adapter auto-detection, cleaner multi-adapter invocation, a JSON MultiQC-native report, and other extensions. Built from `src/main.rs` (Cargo crate at repo root); the historical Perl script will be preserved at `legacy/trim_galore` once v2.1.0 GA ships (retained in the `0.6.11` tag during the beta window).
 
 **Note on v2.0.0:** v2.0.0 was a pre-release cut inadvertently published to crates.io on 13 Apr 2026. It will be yanked when v2.1.0 GA ships. Users should install v2.1.0 or later.
 
@@ -333,7 +971,7 @@ before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATG
 
 * Added multi-threading support with the new option `-j/--cores INT`; many thanks to Frankie James for initiating this. Multi-threading support works effectively if Cutadapt is run with Python 3, and if parallel gzip (`pigz`) is installed:
 
-![Multi-threading benchmark](../../../assets/screenshots/pigz_bench.png)
+<img title="Multi-threading benchmark" style="float:right;margin:20px 20 20 600px" id="Multi-threading support" src="docs/Images/pigz_bench.png" >
 
 For Cutadapt to work with multiple cores, it requires Python 3 as well as parallel gzip (pigz) installed on the system. The version of Python used is detected from the shebang line of the Cutadapt executable (either 'cutadapt', or a specified path). If Python 2 is detected, `--cores` is set to 1 and multi-core processing will be disabled. If `pigz` cannot be detected on your system, Trim Galore reverts to using `gzip` compression. Please note however, that `gzip` compression will slow down multi-core processes so much that it is hardly worthwhile, please see: [here](https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103) for more info).
 
