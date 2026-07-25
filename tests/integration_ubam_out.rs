@@ -597,3 +597,277 @@ fn ubam_out_pe_fastqc_produces_exactly_one_report() {
         "expected exactly 1 FastQC zip for interleaved PE output, got {zips}"
     );
 }
+
+// ─── issue #358: --phred64 quality-encoding guards ──────────────────────
+// Two distinct defects, so two distinct guard families:
+//
+//   Bug 1 (wiring)  the writer must subtract the INPUT's ASCII offset, not a
+//                   hardcoded 33. The unit test in src/bam.rs pins the
+//                   arithmetic; these tests pin the PLUMBING at each writer
+//                   family, which is where the bug actually lived.
+//   Bug 2 (guard)   --phred64 with BAM input must be rejected. Critically this
+//                   includes the uBAM-OUTPUT combinations: once the writer
+//                   honours the offset, an unguarded run would subtract 64
+//                   from the reader's Phred+33 bytes and emit an all-Q0 BAM
+//                   with a zero exit status — silent, and worse than either
+//                   original bug.
+
+/// Raw-Phred qual bytes of every record in `path`.
+fn quals(path: &Path) -> Vec<Vec<u8>> {
+    bam_tuples(path).into_iter().map(|t| t.3).collect()
+}
+
+/// Raw Phred scores the `phred64_test.fastq` fixture must produce once the
+/// writer subtracts the correct offset: 24 x Q40 (`'h'` = 104) then 10 x Q2
+/// (`'B'` = 66), mirroring the B-run tails real Illumina 1.5 data carries.
+///
+/// Pre-fix the writer subtracted 33, giving 71 and 33 respectively.
+fn expected_raw_phred() -> Vec<u8> {
+    let mut v = vec![40u8; 24];
+    v.extend(std::iter::repeat_n(2u8, 10));
+    v
+}
+
+#[test]
+fn phred64_ubam_out_se_stores_true_phred() {
+    // Bug 1, trim SE path (main.rs run_ubam_output_single). Fixture qual is
+    // all 'h' (ASCII 104) = Q40 under Phred+64. Pre-fix this stored raw 71.
+    // `-q 0 --length 0` keeps the low-quality B-run intact so both quality
+    // values reach the writer; without it the Q2 tail is trimmed away and the
+    // test would only exercise a single offset.
+    let dir = fresh_tmpdir("tg_int_p64_se");
+    let status = Command::new(binary())
+        .args([
+            "--phred64",
+            "--output-format",
+            "ubam",
+            "-q",
+            "0",
+            "--length",
+            "0",
+        ])
+        .arg("test_files/phred64_test.fastq")
+        .arg("-o")
+        .arg(&dir)
+        .status()
+        .expect("trim_galore failed to run");
+    assert!(status.success(), "trim_galore exited non-zero");
+
+    let out = dir.join("phred64_test_trimmed.bam");
+    assert!(out.exists(), "output BAM missing: {}", out.display());
+    let qs = quals(&out);
+    assert!(!qs.is_empty(), "no records in output BAM");
+    for q in &qs {
+        assert_eq!(q, &expected_raw_phred(), "raw Phred mismatch: {:?}", q);
+    }
+}
+
+#[test]
+fn phred64_ubam_out_specialty_stores_true_phred() {
+    // Bug 1, specialty path (specialty.rs hardtrim5_to_bam). Reproduced
+    // pre-fix as raw 71, so this is a genuine regression guard.
+    let dir = fresh_tmpdir("tg_int_p64_hardtrim");
+    let status = Command::new(binary())
+        .args(["--hardtrim5", "20", "--phred64", "--output-format", "ubam"])
+        .arg("test_files/phred64_test.fastq")
+        .arg("-o")
+        .arg(&dir)
+        .status()
+        .expect("trim_galore failed to run");
+    assert!(status.success(), "trim_galore exited non-zero");
+
+    let out = dir.join("phred64_test.20bp_5prime.bam");
+    assert!(out.exists(), "output BAM missing: {}", out.display());
+    let qs = quals(&out);
+    // Without this the `for` body could never run and the test would pass
+    // vacuously on a header-only BAM.
+    assert_eq!(qs.len(), 4, "expected all 4 fixture reads in output BAM");
+    for q in &qs {
+        // hardtrim5 20 keeps the first 20 bases, all within the 'h' (Q40) run.
+        assert_eq!(q.len(), 20, "hardtrim5 20 should yield 20 qual bytes");
+        assert!(
+            q.iter().all(|&b| b == 40),
+            "expected raw Phred 40 throughout; got {:?}",
+            q
+        );
+    }
+}
+
+#[test]
+fn phred64_bam_input_rejected_fastq_out() {
+    // Bug 2 guard. BAM input always yields Phred+33 internally, so --phred64
+    // subtracts 64 from +33 data and discards every read as low-quality.
+    let dir = fresh_tmpdir("tg_int_p64_bamin_fq");
+    let output = Command::new(binary())
+        .args(["--phred64", "-q", "20"])
+        .arg("test_files/ubam_test.bam")
+        .arg("-o")
+        .arg(&dir)
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "--phred64 with BAM input should error"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--phred64") && stderr.contains("BAM"),
+        "expected a --phred64/BAM rejection in stderr, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn phred64_bam_input_rejected_ubam_out() {
+    // Bug 2 guard, uBAM-output variant. This is the combination that would
+    // silently emit an all-Q0 BAM if the guard regressed.
+    let dir = fresh_tmpdir("tg_int_p64_bamin_ubam");
+    let output = Command::new(binary())
+        .args(["--phred64", "--output-format", "ubam"])
+        .arg("test_files/ubam_test.bam")
+        .arg("-o")
+        .arg(&dir)
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "--phred64 + BAM input + --output-format ubam should error"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--phred64"),
+        "expected a --phred64 rejection"
+    );
+}
+
+#[test]
+fn phred64_bam_input_rejected_early_returning_mode() {
+    // Bug 2 guard on an early-returning specialty mode. main.rs records
+    // code-review finding B-NIT-2: the uBAM startup NOTEs once "never fired
+    // on the hardtrim BAM paths (which return earlier)". The guard must be
+    // sited ahead of that dispatch, so it gets its own test.
+    let dir = fresh_tmpdir("tg_int_p64_bamin_hardtrim");
+    let output = Command::new(binary())
+        .args(["--hardtrim5", "20", "--phred64"])
+        .arg("test_files/ubam_test.bam")
+        .arg("-o")
+        .arg(&dir)
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "--phred64 + BAM input should error even in hardtrim mode"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--phred64"),
+        "expected a --phred64 rejection"
+    );
+}
+
+#[test]
+fn phred64_mixed_input_rejected() {
+    // Bug 2 guard: `any_bam` covers a mixed FASTQ+BAM run. The offset cannot
+    // be per-input, so the whole run is rejected.
+    //
+    // Deliberately the single-end multi-input shape, NOT `--paired`. Two SE
+    // inputs of mixed format are otherwise a legal run (verified: exits 0
+    // without --phred64), so a non-zero exit here is attributable to the
+    // guard and this fails pre-fix. Under `--paired` the same file pair is
+    // independently rejected by the pre-existing two-BAM check in
+    // run_paired_end_pair, which makes the assertion pass with or without
+    // the guard — worthless as a regression test.
+    let dir = fresh_tmpdir("tg_int_p64_mixed");
+    let output = Command::new(binary())
+        .args(["--phred64"])
+        .arg("test_files/phred64_test.fastq")
+        .arg("test_files/ubam_test.bam")
+        .arg("-o")
+        .arg(&dir)
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "--phred64 with mixed FASTQ+BAM inputs should error"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--phred64") && stderr.contains("BAM"),
+        "expected a --phred64/BAM rejection, got: {stderr}"
+    );
+}
+
+#[test]
+fn phred64_ubam_out_pe_two_file_stores_true_phred() {
+    // Bug 1, PE two-file FASTQ -> ONE interleaved BAM
+    // (main.rs run_ubam_output_paired_two_files). Reviewer B flagged this
+    // writer family as threaded but untested, and it is a realistic user
+    // invocation. The plan's own framing applies: the bug class is faulty
+    // *wiring*, so each writer family needs its own end-to-end pin.
+    let dir = fresh_tmpdir("tg_int_p64_pe");
+    let status = Command::new(binary())
+        .args([
+            "--paired",
+            "--phred64",
+            "--output-format",
+            "ubam",
+            "-q",
+            "0",
+        ])
+        .arg("test_files/phred64_test_R1.fastq")
+        .arg("test_files/phred64_test_R2.fastq")
+        .arg("-o")
+        .arg(&dir)
+        .status()
+        .expect("trim_galore failed to run");
+    assert!(status.success(), "trim_galore exited non-zero");
+
+    let out = dir.join("phred64_test_R1_val.bam");
+    assert!(
+        out.exists(),
+        "interleaved output BAM missing: {}",
+        out.display()
+    );
+
+    let qs = quals(&out);
+    // 4 pairs, interleaved R1/R2 in one BAM.
+    assert_eq!(qs.len(), 8, "expected 8 records (4 pairs interleaved)");
+    for q in &qs {
+        assert_eq!(q, &expected_raw_phred(), "raw Phred mismatch: {:?}", q);
+    }
+}
+
+#[test]
+fn phred64_bam_input_rejected_before_output_dir_created() {
+    // Plan-manager PARTIAL: PLAN §9 check 5 asserted the guard produces "no
+    // output written", which proves it sits ahead of `naming::ensure_output_dir`
+    // — a placement this file has got wrong before (see the B-NIT-2 note at the
+    // uBAM startup NOTE block, where the NOTEs were sited after the
+    // early-returning hardtrim dispatch). No test guarded it, because
+    // `fresh_tmpdir` pre-creates its directory.
+    //
+    // Use a NESTED path the helper has not created, so its absence after the
+    // failed run is attributable to the guard firing early.
+    let parent = fresh_tmpdir("tg_int_p64_no_outdir");
+    let nested = parent.join("should_not_be_created");
+    assert!(
+        !nested.exists(),
+        "precondition: nested dir must not exist yet"
+    );
+
+    let output = Command::new(binary())
+        .args(["--phred64", "-q", "20"])
+        .arg("test_files/ubam_test.bam")
+        .arg("-o")
+        .arg(&nested)
+        .output()
+        .expect("trim_galore failed to run");
+
+    assert!(
+        !output.status.success(),
+        "expected the --phred64 guard to reject"
+    );
+    assert!(
+        !nested.exists(),
+        "guard must fire before ensure_output_dir; {} was created",
+        nested.display()
+    );
+}
