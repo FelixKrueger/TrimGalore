@@ -103,6 +103,11 @@ pub fn hardtrim3(
 ///
 /// Output filename: `<stem>.<keep>bp_5prime.bam` — see
 /// [`hardtrim_bam_output_name`] for the spec deviation rationale.
+///
+/// `input_phred_offset` is forwarded to [`BamWriter::create`]; see its doc for
+/// why it must reflect the input's ASCII offset. Callers pass
+/// `cli.phred_offset()`, which is only safe on BAM-input paths because
+/// `main.rs` rejects `--phred64` there (issue #358).
 pub fn hardtrim5_to_bam(
     input: &Path,
     keep: usize,
@@ -110,6 +115,7 @@ pub fn hardtrim5_to_bam(
     rename: bool,
     preserve_tags: &[String],
     command_line: &str,
+    input_phred_offset: u8,
 ) -> Result<()> {
     let output_path = hardtrim_bam_output_name(input, keep, "5prime", output_dir);
     eprintln!(
@@ -129,6 +135,7 @@ pub fn hardtrim5_to_bam(
         source_header.as_ref(),
         preserve_tags,
         command_line,
+        input_phred_offset,
     )?;
     let mut count: usize = 0;
 
@@ -151,6 +158,8 @@ pub fn hardtrim5_to_bam(
 }
 
 /// uBAM-output counterpart of [`hardtrim3`]. Output: `<stem>.<keep>bp_3prime.bam`.
+///
+/// `input_phred_offset`: see [`hardtrim5_to_bam`].
 pub fn hardtrim3_to_bam(
     input: &Path,
     keep: usize,
@@ -158,6 +167,7 @@ pub fn hardtrim3_to_bam(
     rename: bool,
     preserve_tags: &[String],
     command_line: &str,
+    input_phred_offset: u8,
 ) -> Result<()> {
     let output_path = hardtrim_bam_output_name(input, keep, "3prime", output_dir);
     eprintln!(
@@ -177,6 +187,7 @@ pub fn hardtrim3_to_bam(
         source_header.as_ref(),
         preserve_tags,
         command_line,
+        input_phred_offset,
     )?;
     let mut count: usize = 0;
 

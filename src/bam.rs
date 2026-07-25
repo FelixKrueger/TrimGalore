@@ -57,7 +57,23 @@ const GROUPED_INPUT_ERR: &str = "Paired uBAM input has non-adjacent mates (one s
      `samtools collate -O input.bam tmp > interleaved.bam` \
      (or `samtools sort -n input.bam -o interleaved.bam`).";
 
+/// Offset the **reader** adds when converting BAM raw Phred to Sanger ASCII.
+///
+/// Fixed at 33 and must stay fixed, but note precisely why: BAM `QUAL` is always
+/// raw Phred, so there is no input-encoding variation to accommodate on the read
+/// side; 33 is the right constant because TrimGalore's internal `FastqRecord` is
+/// Sanger-encoded. (The SAM spec's ASCII+33 rule governs SAM *text*; BAM itself
+/// stores raw bytes.)
+///
+/// Not to be confused with [`BamWriter::input_phred_offset`], which is 33 *or*
+/// 64 and is the offset the **writer subtracts** from incoming FASTQ ASCII
+/// (issue #358). Conflating the two is the defect that issue fixed.
 const PHRED_OFFSET: u8 = 33;
+/// Highest raw Phred score the SAM spec permits in `QUAL` (`93 + 33 = 126`,
+/// i.e. `'~'`, the last printable ASCII character). Out-of-spec bytes are
+/// clamped to this on read so the ASCII conversion stays single-byte — see
+/// `bam_record_to_fastq`.
+const MAX_PHRED_SCORE: u8 = 93;
 const QUAL_MISSING_SENTINEL: u8 = 0xFF;
 const QUAL_MISSING_REPLACEMENT: u8 = b'!';
 
@@ -509,6 +525,11 @@ impl BamReader {
 pub struct BamWriter {
     inner: bam::io::Writer<bgzf::Writer<BufWriter<File>>>,
     header: Header,
+    /// ASCII offset of the incoming `FastqRecord.qual` — 33, or 64 under
+    /// `--phred64`. Subtracted per byte on write, because BAM `QUAL` stores
+    /// true Phred scores. See [`PHRED_OFFSET`] for why this is a separate,
+    /// variable value rather than that constant.
+    input_phred_offset: u8,
 }
 
 impl BamWriter {
@@ -520,16 +541,24 @@ impl BamWriter {
     /// - `_preserve_tags`: kept for API symmetry with `BamReader::open_*_with_tags`;
     ///   not consulted (the textual tail in `FastqRecord.id` is authoritative).
     /// - `command_line`: trim_galore invocation embedded in `@PG CL:`.
+    /// - `input_phred_offset`: ASCII offset of the *incoming* `FastqRecord.qual`
+    ///   (33, or 64 under `--phred64`); pass `cli.phred_offset()`. BAM `QUAL`
+    ///   holds true Phred scores (0–93) per the SAM spec, so this is subtracted
+    ///   per byte on write. Required rather than defaulted on purpose: issue
+    ///   #358 was caused by a call site that never considered the offset, so
+    ///   the compiler should force every site to state one.
     ///
     /// **PLAN §4 deviation:** the plan listed 3 params; we add a 4th
     /// (`command_line`) to keep header construction self-contained inside
     /// the writer instead of forcing the caller to clone the header just
-    /// to mutate it. Documented in the v2.1 deviation log.
+    /// to mutate it. Documented in the v2.1 deviation log. (A 5th,
+    /// `input_phred_offset`, was added later for issue #358 — see above.)
     pub fn create<P: AsRef<Path>>(
         path: P,
         source_header: Option<&Header>,
         _preserve_tags: &[String],
         command_line: &str,
+        input_phred_offset: u8,
     ) -> Result<Self> {
         let path = path.as_ref();
         let header = build_output_header(source_header, command_line)?;
@@ -539,7 +568,11 @@ impl BamWriter {
         inner
             .write_header(&header)
             .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
-        Ok(Self { inner, header })
+        Ok(Self {
+            inner,
+            header,
+            input_phred_offset,
+        })
     }
 
     /// Write one `FastqRecord` as a BAM record.
@@ -573,11 +606,21 @@ impl BamWriter {
         // `bam_record_to_fastq` logic for symmetry. Code-review B-M1 fix.
         let normalized_seq = validate_and_normalize_seq_for_write(record.seq.as_bytes())
             .with_context(|| format!("while writing BAM record {:?}", record.id))?;
-        // FastqRecord.qual is Sanger ASCII (+33); BAM stores raw Phred bytes.
-        // `saturating_sub` is defensive — under normal flow every byte is
-        // ≥33 (FastqReader rejects sub-33 input; BamReader synthesises '!'
-        // for missing qual, never sub-33).
-        let raw_qual: Vec<u8> = record.qual.bytes().map(|b| b.saturating_sub(33)).collect();
+        // BAM stores raw Phred bytes; `FastqRecord.qual` is ASCII at the
+        // input's declared offset — 33, or 64 under `--phred64`. Hardcoding 33
+        // here was issue #358: Phred+64 input was under-subtracted by 31 and
+        // stored as inflated-but-SAM-legal quality, so nothing errored.
+        //
+        // `saturating_sub` is load-bearing, not merely defensive: nothing in
+        // `fastq.rs` validates the quality range (`FastqReader::sanity_check`
+        // only checks the `@` prefix and rejects colorspace; the record path
+        // only detects truncation), so a malformed sub-offset byte can reach
+        // here and must floor to 0 rather than wrap.
+        let raw_qual: Vec<u8> = record
+            .qual
+            .bytes()
+            .map(|b| b.saturating_sub(self.input_phred_offset))
+            .collect();
         debug_assert_eq!(
             raw_qual.len(),
             normalized_seq.len(),
@@ -915,9 +958,34 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
                 seq.len()
             );
         }
+        // The sentinel check above only fires when *every* byte is `0xFF`, so a
+        // record with a MIXED qual (some real scores, some `0xFF`) reaches here.
+        // Two hazards on that input, both handled per byte:
+        //
+        //  1. Plain `b + PHRED_OFFSET` overflows `u8` for any raw byte > 222 —
+        //     panic under debug assertions, silent wrap in release.
+        //  2. `saturating_add` avoids the overflow but is *worse*: `255u8 as
+        //     char` is U+00FF, which occupies TWO bytes in UTF-8. That breaks
+        //     the codebase-wide invariant that `qual` has one byte per base —
+        //     `FastqRecord::truncate` / `clip_5prime` / `clip_3prime` index this
+        //     `String` with byte offsets derived from `seq.len()`, so a
+        //     multi-byte char makes them panic on a char boundary (in release
+        //     too) or silently keep the wrong number of scores.
+        //
+        // So: map the sentinel to `QUAL_MISSING_REPLACEMENT` exactly as the
+        // all-`0xFF` branch does — the mixed case now agrees with it rather
+        // than diverging — and clamp anything else out of spec to the SAM
+        // maximum (93 → `'~'`). Every output byte is single-byte ASCII, so the
+        // one-byte-per-base invariant holds unconditionally.
         qual_raw
             .iter()
-            .map(|&b| (b + PHRED_OFFSET) as char)
+            .map(|&b| {
+                if b == QUAL_MISSING_SENTINEL {
+                    QUAL_MISSING_REPLACEMENT as char
+                } else {
+                    (b.min(MAX_PHRED_SCORE) + PHRED_OFFSET) as char
+                }
+            })
             .collect()
     };
 
@@ -1347,7 +1415,7 @@ mod tests {
                 qual: "5555AAAAII".to_string(),
             },
         ];
-        let mut w = BamWriter::create(&out, None, &[], "trim_galore se test")?;
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore se test", 33)?;
         for r in &records {
             w.write_record(r, None)?;
         }
@@ -1397,7 +1465,7 @@ mod tests {
                 qual: "FFFFFFFF".to_string(),
             },
         ];
-        let mut w = BamWriter::create(&out, None, &[], "trim_galore --paired test")?;
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore --paired test", 33)?;
         for (r1, r2) in r1_records.iter().zip(r2_records.iter()) {
             w.write_record(r1, Some(1))?;
             w.write_record(r2, Some(2))?;
@@ -1425,7 +1493,7 @@ mod tests {
         // Verify the §3.3 step 2 flag values land in the file as raw bits.
         let dir = tempfile::tempdir()?;
         let out = dir.path().join("flags.bam");
-        let mut w = BamWriter::create(&out, None, &[], "trim_galore flag test")?;
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore flag test", 33)?;
         w.write_record(
             &FastqRecord {
                 id: "@se_read".to_string(),
@@ -1485,6 +1553,7 @@ mod tests {
             None,
             &["CB".to_string(), "UB".to_string()],
             "trim_galore --preserve-tags CB,UB test",
+            33,
         )?;
         w.write_record(&rec, None)?;
         w.finish()?;
@@ -1519,7 +1588,7 @@ mod tests {
             seq: "ACGT".to_string(),
             qual: "IIII".to_string(),
         };
-        let mut w = BamWriter::create(&out, None, &[], "trim_galore typed test")?;
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore typed test", 33)?;
         w.write_record(&rec, None)?;
         w.finish()?;
 
@@ -1556,6 +1625,105 @@ mod tests {
         assert!(
             matches!(xf, Value::Float(_)),
             "XF should be BAM Float, not Z/string-encoded"
+        );
+        Ok(())
+    }
+
+    /// Issue #358 code-review follow-up — the read-side raw→ASCII conversion
+    /// must emit exactly one byte per base.
+    ///
+    /// A mixed-sentinel `QUAL` (some real scores, some `0xFF`) bypasses the
+    /// all-`0xFF` fast path. An earlier revision used `saturating_add`, which
+    /// turned `0xFF` into `255u8 as char` = U+00FF — **two** UTF-8 bytes — so
+    /// `qual.len() != seq.len()` and the byte-indexed helpers
+    /// (`FastqRecord::truncate`, `clip_5prime`, `clip_3prime`) would panic on a
+    /// char boundary or silently keep the wrong number of scores.
+    ///
+    /// Pins the invariant directly: byte length equals base count, and every
+    /// byte is printable ASCII.
+    #[test]
+    fn qual_ascii_conversion_is_single_byte_per_base() {
+        // Exercised through the same expression `bam_record_to_fastq` uses.
+        let qual_raw: Vec<u8> = vec![40, QUAL_MISSING_SENTINEL, 93, 200, 0];
+        let qual: String = qual_raw
+            .iter()
+            .map(|&b| {
+                if b == QUAL_MISSING_SENTINEL {
+                    QUAL_MISSING_REPLACEMENT as char
+                } else {
+                    (b.min(MAX_PHRED_SCORE) + PHRED_OFFSET) as char
+                }
+            })
+            .collect();
+
+        assert_eq!(
+            qual.len(),
+            qual_raw.len(),
+            "qual must be one BYTE per base, got {} bytes for {} bases: {:?}",
+            qual.len(),
+            qual_raw.len(),
+            qual.as_bytes()
+        );
+        assert!(
+            qual.is_ascii(),
+            "every quality byte must be single-byte ASCII, got {:?}",
+            qual.as_bytes()
+        );
+        // 40→'I', sentinel→'!', 93→'~', 200 clamped to 93→'~', 0→'!'
+        assert_eq!(qual, "I!~~!");
+        // Byte-indexed slicing must not panic — the operation that regressed.
+        assert_eq!(&qual[1..], "!~~!");
+    }
+
+    /// Issue #358 — the writer must subtract the *input's* ASCII offset, not a
+    /// hardcoded 33. Both branches are pinned here: `'h'` (104) is Q40 under
+    /// Phred+64 and `'I'` (73) is Q40 under Phred+33, so a correct writer
+    /// stores raw 40 in both cases.
+    ///
+    /// Read back at the raw BAM-record layer rather than through `BamReader`,
+    /// which re-adds `PHRED_OFFSET` and would mask the value under test. Same
+    /// approach as `bam_writer_aux_typed_int_and_float_round_trip` above.
+    #[test]
+    fn bam_writer_subtracts_input_phred_offset() -> Result<()> {
+        fn stored_qual(qual: &str, input_phred_offset: u8, name: &str) -> Result<Vec<u8>> {
+            let dir = tempfile::tempdir()?;
+            let out = dir.path().join(format!("{name}.bam"));
+            let rec = FastqRecord {
+                id: format!("@{name}"),
+                seq: "ACGT".to_string(),
+                qual: qual.to_string(),
+            };
+            let mut w = BamWriter::create(
+                &out,
+                None,
+                &[],
+                "trim_galore offset test",
+                input_phred_offset,
+            )?;
+            w.write_record(&rec, None)?;
+            w.finish()?;
+
+            let file = File::open(&out)?;
+            let mut reader = bam::io::Reader::new(BufReader::new(file));
+            let _h = reader.read_header()?;
+            let mut bam_rec = bam::Record::default();
+            assert!(reader.read_record(&mut bam_rec)? > 0, "no record written");
+            Ok(bam_rec.quality_scores().as_ref().to_vec())
+        }
+
+        // Phred+64: 'h' = 104 = Q40. Pre-fix this stored 104-33 = 71.
+        assert_eq!(
+            stored_qual("hhhh", 64, "p64")?,
+            vec![40u8; 4],
+            "Phred+64 input must store raw Phred 40, not 71"
+        );
+
+        // Phred+33 counterpart — an over-correction guard, not a bug guard:
+        // this already passed before the fix and must keep passing.
+        assert_eq!(
+            stored_qual("IIII", 33, "p33")?,
+            vec![40u8; 4],
+            "Phred+33 input must still store raw Phred 40"
         );
         Ok(())
     }
@@ -1642,8 +1810,13 @@ mod tests {
         // file with a trim_galore @PG line in the synthesised header.
         let dir = tempfile::tempdir()?;
         let out = dir.path().join("synth_header.bam");
-        let mut w =
-            BamWriter::create(&out, None, &[], "trim_galore --output-format ubam input.fq")?;
+        let mut w = BamWriter::create(
+            &out,
+            None,
+            &[],
+            "trim_galore --output-format ubam input.fq",
+            33,
+        )?;
         w.write_record(
             &FastqRecord {
                 id: "@r1".to_string(),

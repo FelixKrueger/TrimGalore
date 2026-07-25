@@ -739,3 +739,72 @@ fn fastqc_produces_report_on_ubam_out() {
         expected_zip.display()
     );
 }
+
+// ─── issue #358: --phred64 on the clump-only uBAM path ──────────────────
+
+#[test]
+fn phred64_clump_only_ubam_out_stores_true_phred() {
+    // Bug 1, clump-only SE writer (clump_only_single_to_bam). Fixture qual is
+    // all 'h' (ASCII 104) = Q40 under Phred+64; pre-fix this stored raw 71.
+    let dir = fresh_tmpdir("p64_clump_se");
+    let input = fixture("phred64_test.fastq");
+    let status = Command::new(binary())
+        .args([
+            "--clump_only",
+            "--phred64",
+            "--output-format",
+            "ubam",
+            "-o",
+            dir.to_str().unwrap(),
+        ])
+        .arg(&input)
+        .status()
+        .expect("trim_galore failed to run");
+    assert!(status.success(), "trim_galore exited non-zero");
+
+    let out = dir.join("phred64_test_clumped.bam");
+    assert!(out.exists(), "output BAM missing: {}", out.display());
+    let tuples = bam_tuples(&out);
+    assert!(!tuples.is_empty(), "no records in output BAM");
+    // Fixture qual is 24 x 'h' (Q40) then 10 x 'B' (Q2) under Phred+64,
+    // mirroring the B-run tails real Illumina 1.5 data carries. --clump_only
+    // does no trimming, so the full record reaches the writer unchanged.
+    // Pre-fix the writer subtracted 33, giving 71 and 33 respectively.
+    let mut expected = vec![40u8; 24];
+    expected.extend(std::iter::repeat_n(2u8, 10));
+    for t in &tuples {
+        assert_eq!(t.3, expected, "raw Phred mismatch: {:?}", t.3);
+    }
+}
+
+#[test]
+fn phred64_clump_only_bam_input_rejected() {
+    // Bug 2 guard on the clump-only path. This combination is the sharpest
+    // case in issue #358: --clump_only does no quality arithmetic, so it
+    // WORKED correctly before the writer fix (records round-tripped verbatim).
+    // Once the writer honours the offset, an unguarded run would subtract 64
+    // from the reader's Phred+33 bytes and write an all-Q0 BAM while reporting
+    // success — silently breaking the mode's documented lossless-qual
+    // invariant. The guard is what preserves it.
+    let dir = fresh_tmpdir("p64_clump_bamin");
+    let output = Command::new(binary())
+        .args([
+            "--clump_only",
+            "--phred64",
+            "--output-format",
+            "ubam",
+            "-o",
+            dir.to_str().unwrap(),
+        ])
+        .arg(fixture("ubam_test.bam"))
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "--clump_only --phred64 with BAM input should error"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--phred64"),
+        "expected a --phred64 rejection"
+    );
+}

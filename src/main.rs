@@ -188,6 +188,48 @@ fn main() -> Result<()> {
         .iter()
         .any(|f| matches!(f, InputFormat::UnalignedBam));
 
+    // Issue #358 — `--phred64` declares the ASCII offset of the *input*. BAM
+    // has no ASCII encoding to declare: it stores raw Phred (0–93) by spec,
+    // and `BamReader` always yields Phred+33 ASCII internally. So the flag is
+    // meaningless for BAM input in *every* mode, and actively harmful in two
+    // ways: with quality trimming it subtracts 64 from Phred+33 data and
+    // discards every read as low-quality; under `--clump_only` (which does no
+    // quality arithmetic) it would silently zero the output quality once the
+    // writer honours the offset.
+    //
+    // Rejected uniformly rather than per-mode. `--hardtrim5/3` and
+    // `--clump_only` currently accept the flag as an inert no-op, so this does
+    // remove working invocations — but a mode-dependent rule ("rejected unless
+    // you're in hardtrim, or clump-only-to-FASTQ, …") is worse to document,
+    // worse to test, and one refactor away from being wrong.
+    //
+    // Sited here, not in `Cli::validate()` §3.4a: validate() runs before input
+    // format detection and cannot see `any_bam`. Same reason §3.4b below lives
+    // in main.rs. Placed ahead of every dispatch branch — including the
+    // early-returning specialty and clump-only paths — and ahead of
+    // `ensure_output_dir`, so a rejected run creates nothing.
+    if cli.phred64 && any_bam {
+        anyhow::bail!(
+            "--phred64 cannot be used with unaligned BAM input. BAM stores raw \
+             Phred scores directly, so there is no ASCII encoding to declare — \
+             the reader always yields Phred+33 internally. Passing --phred64 \
+             here subtracts 64 from Phred+33 data, reducing every score by 31 \
+             — which discards effectively the whole library as low-quality, or, \
+             in modes that do no quality trimming such as --clump_only, silently \
+             degrades the output quality instead. Drop --phred64 for BAM input."
+        );
+    }
+
+    // INVARIANT ESTABLISHED HERE, RELIED ON FAR BELOW: past this point,
+    // `cli.phred_offset()` is guaranteed to be 33 whenever any input is uBAM.
+    // Every `cli.phred_offset()` call that feeds `BamWriter::create` depends on
+    // it — the trim drivers (`run_ubam_output_*`), the specialty hardtrim
+    // drivers, and the `--clump_only` BAM writers. Without this guard, a uBAM
+    // input under `--phred64` would have 64 subtracted from Phred+33 data,
+    // reducing every score by 31: read loss when quality trimming is active,
+    // and a silent breach of `--clump_only`'s documented lossless-qual
+    // invariant when it is not. Do not relax this to a warning.
+
     if !cli.preserve_tags.is_empty() && !any_bam {
         // PLAN v2.1 §3.4b — format-detection-time rule. With --output-format
         // ubam, --preserve-tags + all-FASTQ-inputs is a hard error because
@@ -257,6 +299,22 @@ fn main() -> Result<()> {
                  ('!' × seq_len) on output instead of the 0xFF sentinel."
             );
         }
+        if cli.phred64 {
+            // Issue #358 O-3 — make the encoding assumption visible. Without
+            // this, a Phred+33 file mistakenly run with --phred64 produces an
+            // all-Phred-0 BAM that is indistinguishable downstream from
+            // legitimate Q0 data. Also disambiguates the trimming report,
+            // which prints "Quality encoding type selected: ASCII+64" (a
+            // statement about the INPUT) next to a BAM holding raw scores.
+            eprintln!(
+                "NOTE: input is Phred+64 (ASCII+64); output BAM QUAL stores true \
+                 Phred scores (0–93) per the SAM spec, not ASCII. Verify the input \
+                 really is Phred+64 — running Phred+33 data with --phred64 reduces \
+                 every score by 31 (floored at 0), turning typical Q2–Q41 into \
+                 Q0–Q10. The result reads as plausible poor-quality data rather \
+                 than obviously empty, so it is easy to miss downstream."
+            );
+        }
     }
 
     // Specialty modes — bypass normal trimming pipeline entirely
@@ -279,6 +337,7 @@ fn main() -> Result<()> {
                     cli.rename,
                     &cli.preserve_tags,
                     &command_line,
+                    cli.phred_offset(),
                 )?,
             }
         }
@@ -303,6 +362,7 @@ fn main() -> Result<()> {
                     cli.rename,
                     &cli.preserve_tags,
                     &command_line,
+                    cli.phred_offset(),
                 )?,
             }
         }
@@ -468,6 +528,7 @@ fn main() -> Result<()> {
                             cli.fastqc,
                             cli.fastqc_args.as_deref(),
                             cli.no_report_file,
+                            cli.phred_offset(),
                         )?;
                     } else {
                         // Shape A: two-file paired (multi-pair supported for N=2, 4, 6, …).
@@ -534,6 +595,7 @@ fn main() -> Result<()> {
                                 cli.fastqc,
                                 cli.fastqc_args.as_deref(),
                                 cli.no_report_file,
+                                cli.phred_offset(),
                             )
                             .with_context(|| {
                                 format!(
@@ -565,6 +627,7 @@ fn main() -> Result<()> {
                             cli.fastqc,
                             cli.fastqc_args.as_deref(),
                             cli.no_report_file,
+                            cli.phred_offset(),
                         )?;
                     }
                 }
@@ -1799,6 +1862,7 @@ fn run_ubam_output_single(
         source_header.as_ref(),
         &cli.preserve_tags,
         command_line,
+        cli.phred_offset(),
     )?;
     let stats = trimmer::run_single_end_to_bam(reader.as_mut(), &mut writer, config)?;
     writer.finish()?;
@@ -1940,6 +2004,7 @@ fn run_ubam_output_paired_two_files(
         source_header.as_ref(),
         &cli.preserve_tags,
         command_line,
+        cli.phred_offset(),
     )?;
     let (stats_r1, stats_r2, pair_stats) = trimmer::run_paired_end_to_bam(
         reader_r1.as_mut(),
@@ -2071,6 +2136,7 @@ fn run_ubam_output_paired_single_file(
         Some(&source_header),
         &cli.preserve_tags,
         command_line,
+        cli.phred_offset(),
     )?;
     let (stats_r1, stats_r2, pair_stats) =
         trimmer::run_paired_end_to_bam(&mut r1, &mut r2, &mut writer, config)?;

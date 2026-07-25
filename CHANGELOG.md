@@ -21,6 +21,35 @@
 - **`--dont_gzip` + `--output-format ubam` now rejected at CLI
   validation** — closes a pre-existing gap on the trim uBAM path
   where the combination was silently accepted (BAM is always BGZF).
+- **`--phred64` is now rejected with unaligned BAM input**
+  ([#358](https://github.com/FelixKrueger/TrimGalore/issues/358)). BAM
+  stores raw Phred scores by spec, so there is no ASCII encoding to
+  declare, and the reader always yields Phred+33 internally. The flag was
+  therefore never meaningful for BAM input — and was actively harmful:
+  combined with quality trimming it subtracted 64 from Phred+33 data,
+  collapsing every score by 31, which discarded effectively the whole
+  library as low-quality.
+
+  This removes invocations that previously worked — any BAM-input run in
+  which quality trimming was inert, so the flag had nothing to act on:
+  the `--clump_only` and `--hardtrim5/3` modes (which perform no quality
+  arithmetic at all), and `-q 0` on the ordinary trim path:
+
+  ```
+  trim_galore --clump_only --phred64 <input.bam>
+  trim_galore --hardtrim5 N --phred64 <input.bam>
+  trim_galore --phred64 -q 0 <input.bam>
+  ```
+
+  Drop `--phred64` from those commands; their output is unchanged. A
+  trimming run with `-q > 0` now produces the result it should have
+  produced all along.
+
+  The rejection is uniform across modes rather than mode-dependent,
+  because a conditional rule would be one refactor away from being wrong
+  — and, post-fix, an unguarded `--clump_only --phred64 <bam>` would
+  reduce every quality score by 31 while reporting success, breaking that
+  mode's documented lossless guarantee.
 - **New `--clump_only` specialty mode** — lossless reorder-only mode
   requested in [#353](https://github.com/FelixKrueger/TrimGalore/issues/353).
   Reorders FASTQ records by canonical 16-mer minimizer for gzip-friendly
@@ -61,6 +90,43 @@
   so the report is generated directly from the trimmed `*_trimmed.bam` (SE) or
   the single interleaved `*_val.bam` (PE) — one FastQC report per output BAM,
   covering both mates in the PE case.
+- **`--phred64` now writes correct quality scores to uBAM output**
+  ([#358](https://github.com/FelixKrueger/TrimGalore/issues/358)). The BAM
+  writer subtracted a hardcoded 33 regardless of the input encoding, so
+  Phred+64 input was stored under-subtracted by 31 — a `'h'` (ASCII 104,
+  Q40 under Phred+64) was written as raw 71 instead of 40. Because 71 is
+  inside the SAM-legal 0–93 range, no consumer errored; quality was
+  silently inflated. Affected every uBAM-output path: normal trimming,
+  `--hardtrim5/3`, and `--clump_only`.
+
+  `--fastqc` on uBAM output was **mislabelled rather than misplotted**: the
+  inflated `QUAL` pushed every byte above ASCII 64, so FastQC's encoding
+  heuristic guessed `Illumina 1.5` and subtracted 64, cancelling the
+  writer's 31-point inflation. The plotted means were therefore coincidentally
+  correct while the reported `Encoding` was wrong. Consumers that read BAM
+  `QUAL` as raw Phred — samtools, aligners, Bismark — saw the inflated values
+  directly, with no cancellation.
+
+  **Archived output is recoverable**, though not in a single invocation
+  (`--phred64` is now rejected for BAM input). Round-trip through
+  `samtools fastq`, which reproduces the original Phred+64 ASCII verbatim,
+  then re-run:
+
+  ```bash
+  samtools fastq -n affected.bam > recovered.fq
+  trim_galore --phred64 --output-format ubam recovered.fq
+  ```
+
+  This yields output byte-identical to a correct first run, and needs no
+  access to the original FASTQ.
+
+  Also hardens the read side: converting BAM raw Phred to ASCII used
+  unchecked `+`, which overflowed `u8` for any raw byte above 222 — the
+  plausible instance being the `0xFF` missing-quality sentinel in a record
+  that mixes real scores with sentinels, since the existing sentinel check
+  only fires when *every* byte is `0xFF`. Such bytes are now mapped to
+  `'!'` per byte, matching the all-`0xFF` path, and any other out-of-spec
+  value is clamped to the SAM maximum of 93.
 
 
 ### Version 2.3.0 (Release on 27 June 2026)

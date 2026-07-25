@@ -730,6 +730,13 @@ fn flush_bin_paired_to_bam(bin: &mut PairedBin, writer: &mut BamWriter) -> Resul
 /// input `@HD`/`@PG` chain preserved verbatim. Cross-run byte-identity of
 /// the whole file is NOT guaranteed (the `@PG.CL` field varies with the
 /// invocation string), but record-body byte-identity IS.
+///
+/// **The `R.qual` half of that invariant depends on `input_phred_offset`
+/// matching the input's actual ASCII offset.** For uBAM input the reader always
+/// yields Phred+33, so the offset must be 33; passing 64 would reduce every
+/// score by 31 and silently break losslessness. That cannot happen because
+/// `main.rs` rejects `--phred64` for BAM input (issue #358) — the guard is what
+/// keeps this invariant true, and it is enforced there rather than here.
 #[allow(clippy::too_many_arguments)]
 pub fn clump_only_single_to_bam(
     input: &Path,
@@ -742,6 +749,7 @@ pub fn clump_only_single_to_bam(
     fastqc: bool,
     fastqc_args: Option<&str>,
     no_report_file: bool,
+    input_phred_offset: u8,
 ) -> Result<ClumpOnlyStats> {
     let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
 
@@ -768,6 +776,7 @@ pub fn clump_only_single_to_bam(
         source_header.as_ref(),
         preserve_tags,
         command_line,
+        input_phred_offset,
     )
     .with_context(|| format!("Failed to create BAM output: {}", output_path.display()))?;
 
@@ -890,6 +899,7 @@ pub fn clump_only_paired_to_bam_one_pair(
     fastqc: bool,
     fastqc_args: Option<&str>,
     no_report_file: bool,
+    input_phred_offset: u8,
 ) -> Result<ClumpOnlyStats> {
     if inputs.is_empty() || inputs.len() > 2 {
         bail!(
@@ -983,6 +993,7 @@ pub fn clump_only_paired_to_bam_one_pair(
         source_header.as_ref(),
         preserve_tags,
         command_line,
+        input_phred_offset,
     )
     .with_context(|| format!("Failed to create BAM output: {}", output_path.display()))?;
 
@@ -1539,6 +1550,7 @@ mod tests {
             false,
             None,
             false,
+            33,
         )?;
 
         assert_eq!(

@@ -30,6 +30,16 @@ trim_galore --2colour 20 input.fastq.gz
 
 Trim Galore defaults to Phred+33 encoding (Sanger / standard Illumina 1.8+). For very old data in Phred+64, pass `--phred64`.
 
+`--phred64` describes the encoding of the **input**. FASTQ-to-FASTQ runs preserve it, so Phred+64 in gives Phred+64 out. A round trip through unaligned BAM does not: the BAM boundary stores raw Phred scores and discards the ASCII encoding by design, so `Phred+64 → uBAM → FASTQ` emits Phred+33. That is correct behaviour, not data loss — the scores are unchanged, only their textual representation differs.
+
+The flag applies to FASTQ input only, and is **rejected for unaligned BAM input**. BAM stores raw Phred scores directly rather than ASCII-offset characters, so there is no encoding to declare — the reader always yields Phred+33 internally. Passing `--phred64` alongside a `.bam` input therefore has no correct interpretation. Before it was rejected, a run with quality trimming (`-q > 0`) discarded effectively the whole library as low-quality, while `--hardtrim5/3` and `--clump_only` ignored the flag entirely. Drop it for BAM input: those modes' output is unchanged, and a trimming run now produces the result it should have produced all along.
+
+With `--output-format ubam`, `--phred64` is honoured for FASTQ input: the output BAM's `QUAL` field stores true Phred scores (0–93) as the SAM specification requires, not the input's ASCII bytes. Note that the trimming report's `Quality encoding type selected: ASCII+64` line describes the input, not the BAM.
+
+:::caution
+Confirm the input encoding before using `--phred64` — Phred+64 was retired with Illumina 1.8 (2011). Running Phred+33 data with the flag reduces every score by 31 and floors at zero, so a typical Q2–Q41 range becomes Q0–Q10. The result looks like plausible poor-quality data rather than obviously empty output, which makes it easy to miss; Trim Galore prints a `NOTE:` when `--phred64` is combined with uBAM output for that reason.
+:::
+
 ## What's logged
 
 The chosen cutoff and encoding are recorded in the trimming report:
