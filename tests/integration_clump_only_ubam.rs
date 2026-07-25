@@ -76,6 +76,46 @@ fn sorted_bam_tuples(path: &Path) -> Vec<RecordTuple> {
     t
 }
 
+/// Extract `(name, CB:Z value, UB:Z value)` per record, sorted for multiset
+/// comparison. Decoded via noodles rather than shelling out to `samtools`
+/// so the test stays hermetic — `samtools` is only installed in the
+/// `validation-ubam` CI job, not in `rust-tests`.
+#[allow(clippy::type_complexity)]
+fn sorted_cb_ub_tuples(path: &Path) -> Vec<(String, Option<String>, Option<String>)> {
+    use noodles::sam::alignment::record::data::field::Value;
+
+    let file = std::fs::File::open(path)
+        .unwrap_or_else(|e| panic!("failed to open {}: {}", path.display(), e));
+    let mut reader = bam::io::Reader::new(std::io::BufReader::new(file));
+    let _header = reader.read_header().expect("BAM header parse");
+
+    let mut out = Vec::new();
+    let mut rec = bam::Record::default();
+    while reader.read_record(&mut rec).expect("BAM record read") > 0 {
+        let name = rec
+            .name()
+            .map(|bn| String::from_utf8_lossy(AsRef::<[u8]>::as_ref(bn)).into_owned())
+            .unwrap_or_default();
+        let mut cb = None;
+        let mut ub = None;
+        for field in rec.data().iter() {
+            let Ok((tag, value)) = field else { continue };
+            // Only `Z` (string) values are expected for CB/UB; anything
+            // else means the fixture or the writer changed shape.
+            let Value::String(s) = value else { continue };
+            let text = String::from_utf8_lossy(s.as_ref()).into_owned();
+            match tag.as_ref() {
+                b"CB" => cb = Some(text),
+                b"UB" => ub = Some(text),
+                _ => {}
+            }
+        }
+        out.push((name, cb, ub));
+    }
+    out.sort();
+    out
+}
+
 /// Count `@PG` records in a BAM header. Used to verify the input `@PG` chain
 /// is preserved (existing @PG lines) AND our TrimGalore `@PG` is appended.
 fn count_pg_lines(path: &Path) -> usize {
@@ -490,35 +530,7 @@ fn ubam_aux_tag_roundtrip_via_preserve_tags() {
     let input = fixture("ubam_test_with_tags.bam");
     assert!(input.exists(), "tagged uBAM fixture missing");
 
-    // Collect input `(name, CB, UB)` tuples via samtools view — cheap
-    // baseline that doesn't depend on noodles' internal aux representation.
-    let baseline = std::process::Command::new("samtools")
-        .args(["view", input.to_str().unwrap()])
-        .output()
-        .expect("samtools view failed on input fixture");
-    assert!(baseline.status.success(), "samtools view failed");
-    let baseline_stdout = String::from_utf8_lossy(&baseline.stdout);
-    // Extract (name, CB:Z:..., UB:Z:...) per line.
-    let extract_tags = |sam_line: &str| -> (String, Option<String>, Option<String>) {
-        let mut fields = sam_line.split('\t');
-        let name = fields.next().unwrap_or("").to_string();
-        let mut cb = None;
-        let mut ub = None;
-        for f in fields {
-            if let Some(rest) = f.strip_prefix("CB:Z:") {
-                cb = Some(rest.to_string());
-            } else if let Some(rest) = f.strip_prefix("UB:Z:") {
-                ub = Some(rest.to_string());
-            }
-        }
-        (name, cb, ub)
-    };
-    let mut input_tags: Vec<_> = baseline_stdout
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(extract_tags)
-        .collect();
-    input_tags.sort();
+    let mut input_tags = sorted_cb_ub_tuples(&input);
     // Sanity: the fixture should have some CB tags. If this assertion
     // fails, the fixture changed and this test needs updating.
     assert!(
@@ -549,19 +561,7 @@ fn ubam_aux_tag_roundtrip_via_preserve_tags() {
     let out = dir.join("ubam_test_with_tags_clumped.bam");
     assert!(out.exists(), "output BAM missing: {}", out.display());
 
-    // Extract output tags via samtools view.
-    let out_view = std::process::Command::new("samtools")
-        .args(["view", out.to_str().unwrap()])
-        .output()
-        .expect("samtools view failed on output");
-    assert!(out_view.status.success());
-    let out_stdout = String::from_utf8_lossy(&out_view.stdout);
-    let mut output_tags: Vec<_> = out_stdout
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(extract_tags)
-        .collect();
-    output_tags.sort();
+    let mut output_tags = sorted_cb_ub_tuples(&out);
 
     // Load-bearing invariant: after reorder + tag round-trip, the multiset
     // of (name, CB, UB) tuples must be identical.
@@ -570,6 +570,8 @@ fn ubam_aux_tag_roundtrip_via_preserve_tags() {
         output_tags.len(),
         "record count mismatch after aux-tag round-trip"
     );
+    input_tags.sort();
+    output_tags.sort();
     assert_eq!(
         input_tags, output_tags,
         "aux-tag multiset diverged — round-trip broken"
