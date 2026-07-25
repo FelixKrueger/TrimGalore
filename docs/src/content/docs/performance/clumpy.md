@@ -8,7 +8,7 @@ description: Reorder reads in the trimmed FASTQ output to make .fq.gz files sign
 `--compression <N>` sets the gzip level independently (1–9, default 1). Combine the two for maximum effect: `--clumpify --compression 9` reorders reads **and** runs gzip at its slowest/smallest level.
 
 :::note[Reorder without trimming: `--clump_only`]
-If you want the clumping compression win **without** any trimming — e.g. for lossless archival recompression — see [Clump-only (lossless reorder)](/modes/clump-only/). It uses the same clumping mechanism but skips the trim pipeline entirely, producing output records that are byte-identical to the input (header + sequence + quality untouched; only file order changes).
+For the clumping compression benefit **without** any trimming — for example, lossless archival recompression — see [Clump-only (lossless reorder)](/modes/clump-only/). It uses the same clumping mechanism but skips the trim pipeline entirely, producing output records that are byte-identical to the input (header + sequence + quality untouched; only file order changes).
 :::
 
 ## When to use it
@@ -16,7 +16,7 @@ If you want the clumping compression win **without** any trimming — e.g. for l
 ### Clumpify
 
 - ✅ Low complexity data: yes (ATAC-seq, ChIP-seq, Ribo-Seq, RNA-Seq, RRBS, high sequencing depth WES)
-- ❌ High complexity data: no (whole-genome sequencing, WGBS) - may have detrimental impact (flowcell ordering wins)
+- ❌ High complexity data: no (whole-genome sequencing, WGBS) - may degrade compression, since the native flowcell ordering already groups similar reads more effectively
 - ❌ Long reads: no (Oxford Nanopore) - has no effect
 - ❌ Unusual paired-end formats: no - can have deleterious effect
 
@@ -26,7 +26,7 @@ Whether to push up `--compression` level or not depends on what the trimmed FAST
 
 - **Pipeline intermediates** (trimmed FASTQ is ephemeral, deleted after the pipeline finishes)
     - Leave as compression level 1, but can still use `--clumpify`.
-    - The reorder is essentially free (1.0–1.4× slowdown on most data) and the smaller output makes the *next* step (typically an aligner) read less from disk — net I/O win for the whole pipeline.
+    - The reorder is essentially free (1.0–1.4× slowdown on most data) and the smaller output makes the *next* step (typically an aligner) read less from disk — a net I/O reduction across the pipeline.
 - **Long-term storage or disk-constrained workdirs**
     - Add `--compression 6` (or `--compression 9` for archival)
     - `--clumpify --compression 6` can halve output file sizes (15–50% less) but makes the run time 4–6× slower.
@@ -40,11 +40,11 @@ Whether to push up `--compression` level or not depends on what the trimmed FAST
 | **Ribo-seq (paired)** | ~45% | ✅ **Strong yes**: short ribosome-protected fragments are highly clustered |
 | **MiSeq amplicon / CRISPR / sgRNA** | 30–37% | ✅ **Strong yes**: explicit amplification produces lots of duplicates |
 | **RRBS (paired)** | ~24% at default `--memory 1G`; up to ~31% at `--memory 4G+` | ✅ **Yes**: MspI cut sites concentrate reads at fragment ends; minimizer co-clusters them. Bigger `--memory` budget gives substantial extra saving — atypical for paired-end data (most types saturate at default memory). |
-| **WGBS (paired)** | +9% — but plain `--compression 6` alone gets +19% | ❌ **No**: coverage-diverse reads, no fragment-level clustering. R2 disruption beats the R1 win at every gzip level — same mechanism as 10x scRNA-seq. Use `--compression 6` without `--clumpify` for ~19% saving |
+| **WGBS (paired)** | +9% — but plain `--compression 6` alone gets +19% | ❌ **No**: coverage-diverse reads, no fragment-level clustering. the R2 disruption outweighs the R1 gain at every gzip level — same mechanism as 10x scRNA-seq. Use `--compression 6` without `--clumpify` for ~19% saving |
 | **ChIP-seq (single-end)** | ~24% | ✅ **Yes**: peaks generate clustered reads |
 | **RNA-seq (paired)** | 16–30% | ✅ **Yes**: highly-expressed transcripts create dense clusters; bigger savings at higher gzip levels |
 | **WES / WGS (paired)** | 6–22% | 🟡 **Modest**: diverse coverage gives less clustering |
-| **scRNA-seq (10x Chromium)** | negative — output grows | ❌ **No**: R1 (cell barcode + UMI) reorders cleanly, but R2 (cDNA) follows R1's order to preserve pair lockstep and ends up scrambled vs the natural flowcell-cluster order. R2 disruption beats the R1 win. Use `--compression 6` without `--clumpify` for ~17% saving |
+| **scRNA-seq (10x Chromium)** | negative — output grows | ❌ **No**: R1 (cell barcode + UMI) reorders cleanly, but R2 (cDNA) follows R1's order to preserve pair lockstep and ends up scrambled vs the natural flowcell-cluster order. The R2 disruption outweighs the R1 gain. Use `--compression 6` without `--clumpify` for ~17% saving |
 | **Long-read (ONT, PacBio)** | ~0% | ❌ **No**: long reads are mostly unique fragments; clumpify doesn't help and adds wall time |
 | **Variable-length / mixed amplicon** | ~0% | ❌ **Skip**: diversity defeats minimizer clustering |
 
@@ -60,7 +60,7 @@ trim_galore --clumpify --compression 9 <input>
 # Compose for archival storage: max compression with extra memory
 trim_galore --clumpify --compression 9 --memory 4G <input>
 
-# Higher gzip without reordering (gzip-only win, no clumping cost)
+# Higher gzip without reordering (gzip-only saving, no clumping cost)
 trim_galore --compression 6 <input>
 ```
 
