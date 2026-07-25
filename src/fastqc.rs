@@ -8,10 +8,13 @@
 //! runtime dependencies, completing the "single static binary, zero
 //! deps" story for the v2.x rewrite.
 //!
-//! Public entry point: [`run`]. The two callers in `src/main.rs` (one
-//! per single-end output, two per paired-end output) invoke it with the
-//! trimmed FASTQ path; output `*_fastqc.html` and `*_fastqc.zip` land
-//! in the trim-galore `--output_dir` (or current dir if unset).
+//! Public entry point: [`run`]. Callers in `src/main.rs` invoke it with a
+//! trimmed output path — FASTQ on the default path, BAM on the
+//! `--output-format ubam` path (`fastqc-rust` dispatches on file
+//! extension and reads `.bam` natively). Output `*_fastqc.html` and
+//! `*_fastqc.zip` land in the trim-galore `--output_dir` (or, when unset,
+//! the parent directory of the input file, which is where the trimmed
+//! output already lives).
 
 use std::path::Path;
 
@@ -20,14 +23,15 @@ use fastqc_rust::{config::FastQCConfig, runner};
 
 /// Run FastQC on a single trimmed output file.
 ///
-/// `output_path` — the FASTQ to analyse (one of the trimmed outputs).
+/// `output_path` — the trimmed output to analyse (FASTQ, or BAM when
+///                 `--output-format ubam` is in effect).
 /// `fastqc_args` — raw user-supplied `--fastqc_args` string. A subset
 ///                 of common FastQC CLI flags is translated to
 ///                 [`FastQCConfig`] mutations; unknown flags emit a
 ///                 warning and are ignored.
 /// `output_dir`  — where the `*_fastqc.html` / `*_fastqc.zip` artifacts
-///                 land. `None` means current directory (FastQC's
-///                 default).
+///                 land. `None` falls back to the analysed file's parent
+///                 directory (fastqc-rust's default).
 /// `cores`       — threading budget for `fastqc-rust`'s internal rayon
 ///                 pool. Always at least 1.
 pub fn run(

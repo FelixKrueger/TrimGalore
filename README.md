@@ -131,6 +131,9 @@ trim_galore --preserve-tags CB,UB sample.bam
 # input `@HD`/`@PG` chain is propagated and a trim_galore `@PG` line is
 # appended. Paired output is ONE interleaved BAM (`<stem>_val.bam`) with
 # FREAD1/FREAD2 flag bits per record (samtools/Picard/fgbio convention).
+# `--fastqc` works on uBAM output too; paired mode produces ONE report per
+# pair covering both mates pooled (a consequence of the interleaved shape —
+# you lose the per-mate R1 vs R2 quality curve you'd get from FASTQ output).
 trim_galore --output-format ubam sample.bam
 trim_galore --paired --output-format ubam interleaved.bam
 

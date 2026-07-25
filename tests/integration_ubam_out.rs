@@ -534,3 +534,66 @@ fn ubam_out_preserve_tags_all_fastq_rejected() {
         stderr
     );
 }
+
+// ─── --fastqc regression guards ─────────────────────────────────────────
+// The uBAM-output drivers previously skipped fastqc::run silently; these
+// tests portable-guard the fix at the cargo-test layer so a regression is
+// caught locally, not only in CI. fastqc-rust reads .bam natively (it
+// dispatches on file extension), so the report is produced directly from
+// the trimmed BAM output.
+
+#[test]
+fn ubam_out_se_fastqc_produces_report() {
+    let dir = fresh_tmpdir("tg_int_ubam_out_se_fastqc");
+    let status = Command::new(binary())
+        .args(["--output-format", "ubam", "--fastqc"])
+        .arg("test_files/ubam_test.bam")
+        .arg("-o")
+        .arg(&dir)
+        .status()
+        .expect("trim_galore failed to run");
+    assert!(status.success(), "trim_galore exited non-zero");
+
+    assert!(
+        dir.join("ubam_test_trimmed.bam").exists(),
+        "output BAM missing"
+    );
+    assert!(
+        dir.join("ubam_test_trimmed_fastqc.zip").exists(),
+        "FastQC zip missing — --fastqc silently skipped on the uBAM-output path"
+    );
+    assert!(
+        dir.join("ubam_test_trimmed_fastqc.html").exists(),
+        "FastQC html missing"
+    );
+}
+
+#[test]
+fn ubam_out_pe_fastqc_produces_exactly_one_report() {
+    // PE uBAM output is a SINGLE interleaved BAM, so exactly ONE FastQC
+    // report is expected (not two, as in the FASTQ paired path).
+    let dir = fresh_tmpdir("tg_int_ubam_out_pe_fastqc");
+    let status = Command::new(binary())
+        .args(["--paired", "--output-format", "ubam", "--fastqc"])
+        .arg("test_files/ubam_paired_test.bam")
+        .arg("-o")
+        .arg(&dir)
+        .status()
+        .expect("trim_galore failed to run");
+    assert!(status.success(), "trim_galore exited non-zero");
+
+    assert!(
+        dir.join("ubam_paired_test_val_fastqc.zip").exists(),
+        "FastQC zip missing"
+    );
+
+    let zips = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with("_fastqc.zip"))
+        .count();
+    assert_eq!(
+        zips, 1,
+        "expected exactly 1 FastQC zip for interleaved PE output, got {zips}"
+    );
+}

@@ -36,6 +36,16 @@
   Perl `v0.6.x` version notes and internal `PLAN.md`/`§` pointers) that had
   leaked into user-facing flag descriptions. No behaviour change.
 
+#### Fixes
+
+- **`--fastqc` now runs on `--output-format ubam` output** for both single-end
+  and paired-end runs. The uBAM-output path previously silently skipped the
+  bundled FastQC pass even when `--fastqc` (or `--fastqc_args`) was requested;
+  the FASTQ-output path already honoured it. `fastqc-rust` reads BAM natively,
+  so the report is generated directly from the trimmed `*_trimmed.bam` (SE) or
+  the single interleaved `*_val.bam` (PE) — one FastQC report per output BAM,
+  covering both mates in the PE case.
+
 
 ### Version 2.3.0 (Release on 27 June 2026)
 
