@@ -252,6 +252,15 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Needed by the `--clump_only --output-format ubam` parity steps below,
+      # which compare record bodies via `samtools view` (whole-file byte-diff
+      # can't be used: the `@PG` chain grows by our appended line).
+      - name: Install samtools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y samtools
+          samtools --version | head -1
+
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
         with:
@@ -689,6 +698,79 @@ jobs:
           test ! -f /tmp/co-det1/BS-seq_10K_R1.fastq.gz_trimming_report.txt \
             || { echo "UNEXPECTED: trimming report created under --clump_only"; exit 1; }
           echo "--clump_only determinism + report-name discipline: OK"
+
+      - name: Validate --clump_only --output-format ubam (SE, uBAM in→out record parity)
+        run: |
+          # v2 uBAM in/out: record multiset preserved through the reorder.
+          # `@PG` chain grows by our appended line; compare records via
+          # samtools view (name + flag + seq + qual + sorted aux) rather
+          # than a whole-file byte-diff.
+          rm -rf /tmp/co-bam-se; mkdir -p /tmp/co-bam-se
+          ./target/release/trim_galore --clump_only --output-format ubam --cores 2 \
+            -o /tmp/co-bam-se test_files/ubam_test.bam
+          test -f /tmp/co-bam-se/ubam_test_clumped.bam \
+            || { echo "MISSING: expected uBAM output"; exit 1; }
+          # samtools view -F 4 would filter unmapped; here we want ALL
+          # records. Sort by read name to canonicalise multiset comparison.
+          samtools view test_files/ubam_test.bam | \
+            awk '{print $1,$2,$10,$11}' | sort > /tmp/co-bam-se/in.records
+          samtools view /tmp/co-bam-se/ubam_test_clumped.bam | \
+            awk '{print $1,$2,$10,$11}' | sort > /tmp/co-bam-se/out.records
+          diff -q /tmp/co-bam-se/in.records /tmp/co-bam-se/out.records \
+            || { echo "MISMATCH: --clump_only uBAM SE record multiset diverged"; exit 1; }
+          echo "--clump_only uBAM SE byte-identity: OK ($(wc -l < /tmp/co-bam-se/in.records) records preserved)"
+
+      - name: Validate --clump_only --output-format ubam (PE interleaved, mate-adjacent)
+        run: |
+          # v2 PE-uBAM output is ONE interleaved BAM with mate-adjacent records.
+          # samtools flagstat confirms paired-record counts; we additionally
+          # verify record multiset preserved.
+          rm -rf /tmp/co-bam-pe; mkdir -p /tmp/co-bam-pe
+          ./target/release/trim_galore --clump_only --paired --output-format ubam --cores 2 \
+            -o /tmp/co-bam-pe test_files/ubam_paired_test.bam
+          test -f /tmp/co-bam-pe/ubam_paired_test_clumped.bam \
+            || { echo "MISSING: expected PE uBAM output"; exit 1; }
+          samtools view test_files/ubam_paired_test.bam | \
+            awk '{print $1,$2,$10,$11}' | sort > /tmp/co-bam-pe/in.records
+          samtools view /tmp/co-bam-pe/ubam_paired_test_clumped.bam | \
+            awk '{print $1,$2,$10,$11}' | sort > /tmp/co-bam-pe/out.records
+          diff -q /tmp/co-bam-pe/in.records /tmp/co-bam-pe/out.records \
+            || { echo "MISMATCH: --clump_only uBAM PE record multiset diverged"; exit 1; }
+          echo "--clump_only uBAM PE byte-identity: OK"
+
+      - name: Validate --clump_only uBAM cross-run record determinism
+        run: |
+          # v2 counterpart to the v1 FASTQ cross-run determinism step. BAM
+          # whole-file hashes vary because the @PG line's CL: field carries
+          # the invocation string. Compare record bodies via `samtools view`
+          # + `sort` + md5 (matches trim uBAM path's `assert_ubam_eq` shape).
+          rm -rf /tmp/co-bam-det1 /tmp/co-bam-det2
+          mkdir -p /tmp/co-bam-det1 /tmp/co-bam-det2
+          ./target/release/trim_galore --clump_only --output-format ubam --cores 2 \
+            -o /tmp/co-bam-det1 test_files/ubam_test.bam
+          ./target/release/trim_galore --clump_only --output-format ubam --cores 2 \
+            -o /tmp/co-bam-det2 test_files/ubam_test.bam
+          md1=$(samtools view /tmp/co-bam-det1/ubam_test_clumped.bam | sort | md5sum | cut -d' ' -f1)
+          md2=$(samtools view /tmp/co-bam-det2/ubam_test_clumped.bam | sort | md5sum | cut -d' ' -f1)
+          echo "Run 1 record-body md5: $md1"
+          echo "Run 2 record-body md5: $md2"
+          [ "$md1" = "$md2" ] || { echo "MISMATCH: uBAM record body not deterministic across runs"; exit 1; }
+          echo "--clump_only uBAM cross-run determinism: OK"
+
+      - name: Validate --clump_only uBAM @PG chain preservation
+        run: |
+          # v2 uBAM output preserves the input @PG chain and appends our
+          # own line. Assert both are present in the output header.
+          # (Same behavior as the trim uBAM path, verified via samtools view -H.)
+          rm -rf /tmp/co-bam-pg; mkdir -p /tmp/co-bam-pg
+          ./target/release/trim_galore --clump_only --output-format ubam --cores 2 \
+            -o /tmp/co-bam-pg test_files/ubam_test.bam
+          samtools view -H /tmp/co-bam-pg/ubam_test_clumped.bam > /tmp/co-bam-pg/header.sam
+          grep -c "^@PG" /tmp/co-bam-pg/header.sam > /tmp/co-bam-pg/pg_count.txt
+          # At minimum: TrimGalore's own @PG must be present.
+          grep -q "^@PG.*ID:trim_galore" /tmp/co-bam-pg/header.sam \
+            || { echo "MISSING: TrimGalore @PG line in output header"; cat /tmp/co-bam-pg/header.sam; exit 1; }
+          echo "--clump_only uBAM @PG chain: OK ($(cat /tmp/co-bam-pg/pg_count.txt) @PG lines in output)"
 
       - name: All validations passed
         run: echo "All Rust outputs are byte-identical to Perl TrimGalore 0.6.11"

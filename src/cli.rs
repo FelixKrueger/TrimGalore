@@ -544,6 +544,16 @@ impl Cli {
         // (no file I/O); enforced here. The §3.4b rule (preserve-tags + all
         // FASTQ inputs) requires format detection and lives in main.rs.
         if matches!(self.output_format, OutputFormat::UBam) {
+            // v2 addition: --dont_gzip is meaningless with BAM output (BAM is
+            // always BGZF-compressed). Rejecting here in the shared UBam block
+            // covers both the trim uBAM path (which previously accepted this
+            // silently — a real gap) and the new --clump_only uBAM path.
+            if self.dont_gzip {
+                anyhow::bail!(
+                    "--dont_gzip is not compatible with --output-format ubam \
+                     (BAM is always BGZF-compressed)"
+                );
+            }
             if self.clumpify {
                 anyhow::bail!(
                     "--clumpify is for gzip output; not applicable with --output-format ubam"
@@ -693,18 +703,12 @@ impl Cli {
             // from --clumpify's `--cores >= 2` requirement). `--cores` is
             // accepted at any value >= 1 but only affects future parallel
             // implementations; the byte-identity contract holds regardless.
-            // --paired requires 2 FASTQ files. N=1 under --paired is
-            // reserved elsewhere for interleaved-uBAM input, which
-            // --clump_only doesn't support in v1. Without this early
-            // rejection, `run_specialty_paired`'s pre-flight would panic
-            // on `chunk[1]` when the chunk length is 1 (code-review A C-1).
-            if self.paired && self.input.len() == 1 {
-                anyhow::bail!(
-                    "--clump_only + --paired requires two FASTQ input files. \
-                     Single-file interleaved-uBAM input is not yet supported in v1 \
-                     (see #353 for the v2 follow-up)."
-                );
-            }
+            // v2: --paired + N=1 is now legal when the single input is an
+            // interleaved uBAM (Shape B). The format check for "N=1 but not
+            // a BAM" runs in main.rs::dispatch (needs `detect_input_format`,
+            // which reads the file), matching how the trim uBAM path handles
+            // the same distinction. If the file is a FASTQ, dispatch bails
+            // with a clear error before opening any reader.
             // Adapter flags
             if !self.adapter.is_empty() {
                 anyhow::bail!("--clump_only does not trim; -a/--adapter is not compatible");
@@ -812,12 +816,10 @@ impl Cli {
             if self.demux.is_some() {
                 anyhow::bail!("--clump_only and --demux are mutually exclusive");
             }
-            // Output shape
-            if matches!(self.output_format, OutputFormat::UBam) {
-                anyhow::bail!(
-                    "--clump_only + --output-format ubam is not yet supported in v1 (FASTQ in/out only; uBAM is a follow-up)"
-                );
-            }
+            // Output shape (v2: --output-format ubam is now accepted; uBAM in/out
+            // is dispatched to the BAM variant functions in main.rs. Format-guards
+            // for two-BAM Shape A, non-BAM Shape B, and mixed-format Shape A live
+            // in main.rs::dispatch (they need format detection).)
             if self.passthrough.is_some() {
                 anyhow::bail!(
                     "--clump_only + --passthrough is not compatible (passthrough is a trim-pipeline feature)"

@@ -80,6 +80,28 @@ type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, 
 /// resolved values. Returns `None` if clumpify is off — or if the budget
 /// is below the floor, in which case we print a loud warning and fall back
 /// to plain mode rather than refusing to run.
+/// Case-folded (APFS/NTFS-safe) output-path collision pre-flight for the
+/// v2 uBAM output paths. Hashes each prospective path via `naming::norm_path`;
+/// bails on the first duplicate. Mirrors the SE FASTQ pre-flight pattern from
+/// the FASTQ path — same error message shape.
+fn preflight_collision_bam(paths: &[std::path::PathBuf]) -> Result<()> {
+    let mut seen: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    for p in paths {
+        if let Some(existing) = seen.insert(naming::norm_path(p), p.clone()) {
+            anyhow::bail!(
+                "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                 {} and {} would be written to the same file. \
+                 Check that inputs produce distinct output paths \
+                 (e.g., different source directories or `--output_dir`).",
+                existing.display(),
+                p.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     if !cli.clumpify {
         return Ok(None);
@@ -326,64 +348,226 @@ fn main() -> Result<()> {
     }
     if cli.clump_only {
         // --clump_only: lossless reorder-only specialty mode. Feature #353.
-        // uBAM input is rejected inside clump_only::* at format-detection time.
+        // v1: FASTQ in/out. v2: uBAM in/out via --output-format ubam.
         let memory_bytes =
             clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
         let basename = cli.basename.as_deref();
-        if cli.paired {
-            run_specialty_paired(
-                &cli,
-                "--clump_only",
-                |r1, r2| naming::clumped_paired_output_names(r1, r2, output_dir, basename, gzip),
-                |r1, r2| {
-                    clump_only::clump_only_paired(
-                        r1,
-                        r2,
-                        output_dir,
-                        basename,
-                        gzip,
-                        cli.cores,
-                        memory_bytes,
-                        cli.compression,
-                        cli.fastqc,
-                        cli.fastqc_args.as_deref(),
-                        cli.no_report_file,
-                    )
-                    .map(|_| ())
-                },
-            )?;
-        } else {
-            // SE pre-flight: two inputs with the same stem in different dirs
-            // would collide on the output path (case-folded per issue #216).
-            // --basename multi-input is already rejected by Cli::validate.
-            let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
-                std::collections::HashMap::new();
-            for input in &cli.input {
-                let out = naming::clumped_output_name(input, output_dir, basename, gzip);
-                if let Some(existing) = out_paths.insert(naming::norm_path(&out), out.clone()) {
+        match cli.output_format {
+            trim_galore::cli::OutputFormat::Fastq => {
+                // v1 FASTQ dispatch, unchanged except for one v2 guard.
+                // Guard against B-C1 PANIC: --clump_only --paired with N=1
+                // (single BAM) reaches `run_specialty_paired`, which does
+                // `chunk[1]` on a length-1 chunk → index-out-of-bounds. The
+                // general N=1 carve-out at the top of main.rs allows this
+                // through because it exists for the trim uBAM path; here it
+                // must be rejected because the FASTQ output arm can't handle
+                // uBAM input (would drop aux tags) and no other N=1 shape
+                // makes sense under --paired.
+                if cli.paired && cli.input.len() == 1 {
                     anyhow::bail!(
-                        "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                         {} and {} would be written to the same file. \
-                         Check that inputs produce distinct output paths \
-                         (e.g., different source directories or `--output_dir`).",
-                        existing.display(),
-                        out.display()
+                        "--clump_only --paired requires two FASTQ input files. \
+                         Single-file interleaved uBAM input needs --output-format ubam \
+                         (add `--output-format ubam` to the command line)."
                     );
                 }
+                if cli.paired {
+                    run_specialty_paired(
+                        &cli,
+                        "--clump_only",
+                        |r1, r2| {
+                            naming::clumped_paired_output_names(r1, r2, output_dir, basename, gzip)
+                        },
+                        |r1, r2| {
+                            clump_only::clump_only_paired(
+                                r1,
+                                r2,
+                                output_dir,
+                                basename,
+                                gzip,
+                                cli.cores,
+                                memory_bytes,
+                                cli.compression,
+                                cli.fastqc,
+                                cli.fastqc_args.as_deref(),
+                                cli.no_report_file,
+                            )
+                            .map(|_| ())
+                        },
+                    )?;
+                } else {
+                    // SE FASTQ pre-flight (case-folded per issue #216).
+                    let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
+                        std::collections::HashMap::new();
+                    for input in &cli.input {
+                        let out = naming::clumped_output_name(input, output_dir, basename, gzip);
+                        if let Some(existing) =
+                            out_paths.insert(naming::norm_path(&out), out.clone())
+                        {
+                            anyhow::bail!(
+                                "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                                 {} and {} would be written to the same file. \
+                                 Check that inputs produce distinct output paths \
+                                 (e.g., different source directories or `--output_dir`).",
+                                existing.display(),
+                                out.display()
+                            );
+                        }
+                    }
+                    for input in &cli.input {
+                        clump_only::clump_only_single(
+                            input,
+                            output_dir,
+                            basename,
+                            gzip,
+                            cli.cores,
+                            memory_bytes,
+                            cli.compression,
+                            cli.fastqc,
+                            cli.fastqc_args.as_deref(),
+                            cli.no_report_file,
+                        )?;
+                    }
+                }
             }
-            for input in &cli.input {
-                clump_only::clump_only_single(
-                    input,
-                    output_dir,
-                    basename,
-                    gzip,
-                    cli.cores,
-                    memory_bytes,
-                    cli.compression,
-                    cli.fastqc,
-                    cli.fastqc_args.as_deref(),
-                    cli.no_report_file,
-                )?;
+            trim_galore::cli::OutputFormat::UBam => {
+                // v2 uBAM dispatch. Format-guards for PE input shapes + explicit
+                // multi-pair iteration + collision pre-flight before opening any
+                // reader. Design details: PLAN_v2_ubam.md §Implementation outline
+                // step 2 + §Behavior "PE steps".
+                if cli.paired {
+                    if cli.input.len() == 1 {
+                        // Shape B: single interleaved uBAM. Cli::validate allowed
+                        // N=1 through; enforce "must be BAM" here at dispatch time.
+                        if !matches!(
+                            detect_input_format(&cli.input[0])?,
+                            InputFormat::UnalignedBam
+                        ) {
+                            anyhow::bail!(
+                                "--clump_only --paired --output-format ubam with a single \
+                                 input file requires an interleaved uBAM. Got a FASTQ file \
+                                 at {}. For two-file paired-end FASTQ input, pass R1 and R2 \
+                                 as separate arguments.",
+                                cli.input[0].display()
+                            );
+                        }
+                        let planned = naming::clumped_paired_bam_output_name(
+                            &cli.input[0],
+                            None,
+                            output_dir,
+                            basename,
+                        );
+                        preflight_collision_bam(&[planned])?;
+                        clump_only::clump_only_paired_to_bam_one_pair(
+                            &cli.input,
+                            output_dir,
+                            basename,
+                            cli.cores,
+                            memory_bytes,
+                            &cli.preserve_tags,
+                            &command_line,
+                            cli.fastqc,
+                            cli.fastqc_args.as_deref(),
+                            cli.no_report_file,
+                        )?;
+                    } else {
+                        // Shape A: two-file paired (multi-pair supported for N=2, 4, 6, …).
+                        // Reject two-BAM Shape A + mixed-format Shape A up-front.
+                        for chunk in cli.input.chunks(2) {
+                            let fmt_r1 = detect_input_format(&chunk[0])?;
+                            let fmt_r2 = detect_input_format(&chunk[1])?;
+                            let r1_is_bam = matches!(fmt_r1, InputFormat::UnalignedBam);
+                            let r2_is_bam = matches!(fmt_r2, InputFormat::UnalignedBam);
+                            if r1_is_bam && r2_is_bam {
+                                anyhow::bail!(
+                                    "--clump_only --paired with two BAM files is not supported. \
+                                     uBAM paired mode expects a single interleaved file: \
+                                     `trim_galore --clump_only --paired --output-format ubam \
+                                     interleaved.bam`. Got two BAM files; one of them is {}.",
+                                    chunk[0].display()
+                                );
+                            }
+                            if r1_is_bam != r2_is_bam {
+                                anyhow::bail!(
+                                    "--clump_only --paired requires both input files to be the \
+                                     same format. Got mixed: {} and {}.",
+                                    chunk[0].display(),
+                                    chunk[1].display()
+                                );
+                            }
+                        }
+                        // Multi-pair collision pre-flight (case-folded per issue #216).
+                        let mut planned: Vec<std::path::PathBuf> = Vec::new();
+                        for chunk in cli.input.chunks(2) {
+                            planned.push(naming::clumped_paired_bam_output_name(
+                                &chunk[0],
+                                Some(&chunk[1]),
+                                output_dir,
+                                basename,
+                            ));
+                        }
+                        preflight_collision_bam(&planned)?;
+                        // Per-pair iteration. Mirrors the trim FASTQ multi-pair
+                        // shape (main.rs:651-669) with pair-progress banner +
+                        // per-pair sanity-checks + `.with_context()` error
+                        // wrapping so a failure at pair 3/5 identifies the pair.
+                        let total_pairs = cli.input.len() / 2;
+                        for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
+                            if total_pairs > 1 {
+                                eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
+                            }
+                            // Sanity-check each input before opening any reader.
+                            // R1 of pair 0 was already sanity-checked at main
+                            // entry (main.rs:153); skip that. R2 of pair 0 and
+                            // both files of every later pair need checking.
+                            if pair_idx > 0 {
+                                sanity_check_any(&chunk[0])?;
+                            }
+                            sanity_check_any(&chunk[1])?;
+                            clump_only::clump_only_paired_to_bam_one_pair(
+                                chunk,
+                                output_dir,
+                                basename,
+                                cli.cores,
+                                memory_bytes,
+                                &cli.preserve_tags,
+                                &command_line,
+                                cli.fastqc,
+                                cli.fastqc_args.as_deref(),
+                                cli.no_report_file,
+                            )
+                            .with_context(|| {
+                                format!(
+                                    "pair {} of {} ({} + {})",
+                                    pair_idx + 1,
+                                    total_pairs,
+                                    chunk[0].display(),
+                                    chunk[1].display()
+                                )
+                            })?;
+                        }
+                    }
+                } else {
+                    // SE BAM. Case-folded collision pre-flight across inputs.
+                    let mut planned: Vec<std::path::PathBuf> = Vec::new();
+                    for input in &cli.input {
+                        planned.push(naming::clumped_bam_output_name(input, output_dir, basename));
+                    }
+                    preflight_collision_bam(&planned)?;
+                    for input in &cli.input {
+                        clump_only::clump_only_single_to_bam(
+                            input,
+                            output_dir,
+                            basename,
+                            cli.cores,
+                            memory_bytes,
+                            &cli.preserve_tags,
+                            &command_line,
+                            cli.fastqc,
+                            cli.fastqc_args.as_deref(),
+                            cli.no_report_file,
+                        )?;
+                    }
+                }
             }
         }
         return Ok(());

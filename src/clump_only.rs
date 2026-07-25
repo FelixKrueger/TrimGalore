@@ -41,14 +41,16 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use crate::bam::{BamReader, BamWriter, peek_header};
 use crate::clump::{
     self, MinimizerKey, canonical_minimizer, estimated_record_bytes, sort_paired_by_key,
     sort_single_by_key,
 };
-use crate::fastq::{FastqReader, FastqRecord};
+use crate::fastq::{FastqReader, FastqRecord, RecordSource};
 use crate::fastqc;
 use crate::format::{InputFormat, detect_input_format};
 use crate::io as naming;
+use noodles::sam::Header as BamHeader;
 
 /// Reorder-only statistics — deliberately narrower than `TrimStats`.
 ///
@@ -63,9 +65,19 @@ pub struct ClumpOnlyStats {
     pub output_bytes: u64,
     pub n_bins: usize,
     pub peak_bin_occupancy: usize,
+    /// Numeric gzip compression level (1–9). Zero for BAM output (BGZF
+    /// picks its own level internally); rendered as "BGZF" in the report.
     pub compression_level: u32,
     pub input_compressed: bool,
     pub output_compressed: bool,
+    /// v2: human-readable input format label. One of:
+    /// `"FASTQ (plain)"`, `"FASTQ (gzip)"`, `"uBAM"`, or `""` (unset — v1 default).
+    pub input_format_label: String,
+    /// v2: human-readable output format label. One of:
+    /// `"FASTQ (plain)"`, `"FASTQ (gzip level N)"`, `"uBAM (BGZF)"`, or `""` (v1 default).
+    pub output_format_label: String,
+    /// v2: preserved aux-tag names (only populated on the uBAM path).
+    pub preserved_tags: Vec<String>,
 }
 
 /// Per-bin buffer for the single-end dispatcher.
@@ -228,20 +240,6 @@ fn write_records_member<W: Write>(
     }
 }
 
-/// Reject uBAM input for `--clump_only` (v1 is FASTQ in/out only; uBAM
-/// in/out is deferred to v2 per PLAN §Resolved decisions).
-fn reject_ubam(input: &Path) -> Result<()> {
-    match detect_input_format(input)? {
-        InputFormat::FastqPlain | InputFormat::FastqGz => Ok(()),
-        InputFormat::UnalignedBam => bail!(
-            "uBAM input is not yet supported under --clump_only \
-             (v1 is FASTQ in / FASTQ out only; see #353 for the v2 follow-up). \
-             Input: {}",
-            input.display()
-        ),
-    }
-}
-
 /// Run `--clump_only` on a single-end FASTQ input.
 ///
 /// Byte-identity: every record R in the input file appears in the output
@@ -261,7 +259,17 @@ pub fn clump_only_single(
     fastqc_args: Option<&str>,
     no_report_file: bool,
 ) -> Result<ClumpOnlyStats> {
-    reject_ubam(input)?;
+    // uBAM input on the FASTQ-output path would drop aux tags and produce
+    // a semantically lossy result. Route users to the uBAM-output path
+    // instead. (v2: uBAM input IS supported via clump_only_single_to_bam.)
+    if matches!(detect_input_format(input)?, InputFormat::UnalignedBam) {
+        bail!(
+            "uBAM input under --clump_only requires --output-format ubam \
+             (using the FASTQ output path with uBAM input would drop aux tags). \
+             Input: {}",
+            input.display()
+        );
+    }
 
     // Layout sizing uses a floor of 1 core (v1 is single-threaded).
     let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
@@ -388,8 +396,18 @@ pub fn clump_only_paired(
     fastqc_args: Option<&str>,
     no_report_file: bool,
 ) -> Result<ClumpOnlyStats> {
-    reject_ubam(input_r1)?;
-    reject_ubam(input_r2)?;
+    // uBAM input on the FASTQ-output PE path: same rejection as SE, for
+    // the same tag-loss reason. Route to --output-format ubam instead.
+    for input in [input_r1, input_r2] {
+        if matches!(detect_input_format(input)?, InputFormat::UnalignedBam) {
+            bail!(
+                "uBAM input under --clump_only requires --output-format ubam \
+                 (using the FASTQ output path with uBAM input would drop aux tags). \
+                 Input: {}",
+                input.display()
+            );
+        }
+    }
 
     let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
 
@@ -551,6 +569,9 @@ fn stats_shape_from(src: &ClumpOnlyStats) -> ClumpOnlyStats {
         compression_level: src.compression_level,
         input_compressed: src.input_compressed,
         output_compressed: src.output_compressed,
+        input_format_label: src.input_format_label.clone(),
+        output_format_label: src.output_format_label.clone(),
+        preserved_tags: src.preserved_tags.clone(),
     }
 }
 
@@ -567,26 +588,41 @@ pub fn write_clump_only_report(
     let mut w = BufWriter::new(File::create(txt_path)?);
     writeln!(w, "Trim Galore version: {}", env!("CARGO_PKG_VERSION"))?;
     writeln!(w, "Mode: --clump_only (lossless reorder)")?;
-    writeln!(
-        w,
-        "Input:  {} ({}, {} bytes)",
-        input.display(),
+    // Format labels: v2 populates `input_format_label` / `output_format_label`
+    // with a full descriptor ("uBAM", "FASTQ (gzip)", etc.). v1 (FASTQ path)
+    // left them empty; fall back to the boolean-derived label in that case
+    // to preserve v1 report shape byte-identically on the FASTQ path.
+    let input_label = if stats.input_format_label.is_empty() {
         if stats.input_compressed {
             "gzip"
         } else {
             "plain"
-        },
+        }
+        .to_string()
+    } else {
+        stats.input_format_label.clone()
+    };
+    let output_label = if stats.output_format_label.is_empty() {
+        if stats.output_compressed {
+            format!("gzip level {}", stats.compression_level)
+        } else {
+            "plain".to_string()
+        }
+    } else {
+        stats.output_format_label.clone()
+    };
+    writeln!(
+        w,
+        "Input:  {} ({}, {} bytes)",
+        input.display(),
+        input_label,
         stats.input_bytes,
     )?;
     writeln!(
         w,
         "Output: {} ({}, {} bytes)",
         output.display(),
-        if stats.output_compressed {
-            format!("gzip level {}", stats.compression_level)
-        } else {
-            "plain".to_string()
-        },
+        output_label,
         stats.output_bytes,
     )?;
     writeln!(w, "Records: {}", stats.total_records)?;
@@ -595,13 +631,19 @@ pub fn write_clump_only_report(
         "Bins: {} (peak occupancy {} records)",
         stats.n_bins, stats.peak_bin_occupancy,
     )?;
-    // Compression ratio only when both sides are gzip AND the on-disk
-    // input bytes aren't a proxy for something else. When --dont_gzip
-    // flipped output to plain, the ratio would be misleading; when input
-    // was plain, likewise.
+    // Compression ratio: emit only when BOTH sides are compressed (any of
+    // gzip / BGZF). v2 rule per §Resolved decision 2 — BGZF and gzip both
+    // use deflate underneath, so cross-family ratios (FASTQ.gz → uBAM) are
+    // meaningful for measuring the clumping win. Ratio is omitted when
+    // either side is plain (would be measuring compression-vs-plain, not
+    // the clumping win) or when output_bytes is zero (empty input).
     if stats.input_compressed && stats.output_compressed && stats.output_bytes > 0 {
         let ratio = stats.input_bytes as f64 / stats.output_bytes as f64;
         writeln!(w, "Compression ratio: {:.2}x", ratio)?;
+    }
+    // v2 preserved-tags line: uBAM path with --preserve-tags populates this.
+    if !stats.preserved_tags.is_empty() {
+        writeln!(w, "Preserved tags: {}", stats.preserved_tags.join(","))?;
     }
     w.flush()?;
     Ok(())
@@ -628,6 +670,404 @@ pub fn expected_output_paths_paired(
     gzip_output: bool,
 ) -> (PathBuf, PathBuf) {
     naming::clumped_paired_output_names(input_r1, input_r2, output_dir, basename, gzip_output)
+}
+
+// ────────────────────────── uBAM output variants (v2) ─────────────────────
+//
+// Mirror hardtrim5_to_bam's pattern: peek input header, open reader via
+// format::open_sync_reader (dispatches by content type), create BamWriter
+// with the source header + preserve_tags + command_line (which handles the
+// @PG chain preservation + append), stream records into the same bin
+// dispatcher as v1, and on flush write mate-adjacent records via
+// paired_side=None (SE) or paired_side=Some(1)/Some(2) (PE interleaved).
+
+/// Format label for the report (`"FASTQ (plain)"` / `"FASTQ (gzip)"` / `"uBAM"`).
+fn input_format_label(fmt: InputFormat) -> &'static str {
+    match fmt {
+        InputFormat::FastqPlain => "FASTQ (plain)",
+        InputFormat::FastqGz => "FASTQ (gzip)",
+        InputFormat::UnalignedBam => "uBAM",
+    }
+}
+
+/// True iff the input format is compression-quantifiable (`gzip` or `BGZF`).
+fn input_is_compressed(fmt: InputFormat) -> bool {
+    matches!(fmt, InputFormat::FastqGz | InputFormat::UnalignedBam)
+}
+
+/// Flush one SE bin as sorted BAM records via `BamWriter::write_record(rec, None)`.
+fn flush_bin_single_to_bam(bin: &mut SingleBin, writer: &mut BamWriter) -> Result<()> {
+    let (mut records, mut keys) = bin.take();
+    sort_single_by_key(&mut records, &mut keys);
+    for rec in &records {
+        writer.write_record(rec, None)?;
+    }
+    Ok(())
+}
+
+/// Flush one PE bin as sorted mate-adjacent BAM records. Writes each pair
+/// with `write_record(R1, Some(1))` followed by `write_record(R2, Some(2))`
+/// — the interleaved output shape that samtools/Picard/fgbio expect.
+fn flush_bin_paired_to_bam(bin: &mut PairedBin, writer: &mut BamWriter) -> Result<()> {
+    let (mut r1, mut r2, mut keys) = bin.take();
+    sort_paired_by_key(&mut r1, &mut r2, &mut keys);
+    for i in 0..r1.len() {
+        writer.write_record(&r1[i], Some(1))?;
+        writer.write_record(&r2[i], Some(2))?;
+    }
+    Ok(())
+}
+
+/// Run `--clump_only --output-format ubam` on a single-end input (FASTQ or uBAM).
+///
+/// Load-bearing invariant: every input record R appears in the output BAM
+/// with `R.id` (name + preserved aux tags), `R.seq`, `R.qual` byte-identical
+/// through the FASTQ-record intermediate. Only A/Z/i/f scalar aux tags
+/// round-trip; B (array) and H (hex) rejected at BAM-read time per existing
+/// `bam.rs` constraint.
+///
+/// `@PG` line appended to output header (see `bam::build_output_header`);
+/// input `@HD`/`@PG` chain preserved verbatim. Cross-run byte-identity of
+/// the whole file is NOT guaranteed (the `@PG.CL` field varies with the
+/// invocation string), but record-body byte-identity IS.
+#[allow(clippy::too_many_arguments)]
+pub fn clump_only_single_to_bam(
+    input: &Path,
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+    cores: usize,
+    memory_budget_bytes: u64,
+    preserve_tags: &[String],
+    command_line: &str,
+    fastqc: bool,
+    fastqc_args: Option<&str>,
+    no_report_file: bool,
+) -> Result<ClumpOnlyStats> {
+    let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
+
+    let input_fmt = detect_input_format(input)?;
+    let source_header = if matches!(input_fmt, InputFormat::UnalignedBam) {
+        Some(peek_header(input)?)
+    } else {
+        None
+    };
+
+    let output_path = naming::clumped_bam_output_name(input, output_dir, basename);
+
+    eprintln!(
+        "clump-only (uBAM out): reordering '{}' -> '{}' ({} bins × {} MB budget, BGZF)",
+        input.display(),
+        output_path.display(),
+        layout.n_bins,
+        layout.bin_byte_budget / (1024 * 1024),
+    );
+
+    let mut reader = crate::format::open_sync_reader(input, preserve_tags)?;
+    let mut writer = BamWriter::create(
+        &output_path,
+        source_header.as_ref(),
+        preserve_tags,
+        command_line,
+    )
+    .with_context(|| format!("Failed to create BAM output: {}", output_path.display()))?;
+
+    let mut bins: Vec<SingleBin> = (0..layout.n_bins)
+        .map(|_| SingleBin::with_budget(layout.bin_byte_budget))
+        .collect();
+
+    let mut stats = ClumpOnlyStats {
+        n_bins: layout.n_bins,
+        compression_level: 0, // BGZF; label carries the story
+        input_compressed: input_is_compressed(input_fmt),
+        output_compressed: true, // BAM is always BGZF
+        input_format_label: input_format_label(input_fmt).to_string(),
+        output_format_label: "uBAM (BGZF)".to_string(),
+        preserved_tags: preserve_tags.to_vec(),
+        ..Default::default()
+    };
+
+    while let Some(record) = reader.next_record()? {
+        let key = canonical_minimizer(record.seq.as_bytes());
+        let bin_idx = clump::bin_for(key, layout.n_bins);
+        bins[bin_idx].push(record, key);
+        stats.total_records += 1;
+
+        if bins[bin_idx].raw_bytes >= layout.bin_byte_budget {
+            let occ = bins[bin_idx].records.len();
+            if occ > stats.peak_bin_occupancy {
+                stats.peak_bin_occupancy = occ;
+            }
+            flush_bin_single_to_bam(&mut bins[bin_idx], &mut writer)?;
+        }
+    }
+
+    for bin in bins.iter_mut() {
+        if !bin.is_empty() {
+            let occ = bin.records.len();
+            if occ > stats.peak_bin_occupancy {
+                stats.peak_bin_occupancy = occ;
+            }
+            flush_bin_single_to_bam(bin, &mut writer)?;
+        }
+    }
+
+    // Empty-input case: BamWriter::finish handles zero records via the
+    // noodles bam::io::Writer contract — a Writer whose write_record was
+    // never called still produces a valid BAM (BAM magic + header + BGZF
+    // end-of-file terminator). No explicit empty-record path needed here
+    // (unlike the FASTQ path's empty-gzip-member workaround). Verified by
+    // the `test_empty_bam_input_produces_valid_bam` unit test below.
+    writer.finish()?;
+
+    stats.input_bytes = std::fs::metadata(input)
+        .with_context(|| format!("Failed to stat input {}", input.display()))?
+        .len();
+    stats.output_bytes = std::fs::metadata(&output_path)?.len();
+
+    eprintln!(
+        "clump-only (uBAM out): wrote {} records in {} bins (peak {} records/bin), {} bytes -> {} bytes",
+        stats.total_records,
+        stats.n_bins,
+        stats.peak_bin_occupancy,
+        stats.input_bytes,
+        stats.output_bytes,
+    );
+
+    if !no_report_file {
+        let report_path = naming::clumping_report_name(input, output_dir);
+        write_clump_only_report(&stats, &report_path, input, &output_path)
+            .with_context(|| format!("Failed to write report: {}", report_path.display()))?;
+    }
+
+    if fastqc {
+        // fastqc-rust reads BAM natively (verified against fastqc-rust-1.0.1
+        // src/runner.rs — accepts .bam/.ubam extensions + --format bam).
+        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
+    }
+
+    Ok(stats)
+}
+
+/// Bundled setup for the PE-BAM function: readers + header + output-path
+/// and labels. Extracted to a struct to sidestep `clippy::type_complexity`
+/// on the underlying 6-tuple.
+struct PairedInputSetup {
+    reader_r1: Box<dyn RecordSource>,
+    reader_r2: Box<dyn RecordSource>,
+    source_header: Option<BamHeader>,
+    input_fmt_for_label: InputFormat,
+    output_path: PathBuf,
+    input_bytes_total: u64,
+}
+
+/// Run `--clump_only --paired --output-format ubam` on ONE input pair.
+///
+/// `inputs` accepts two shapes:
+/// - `len == 1` (Shape B): a single interleaved uBAM file. Reader is
+///   `BamReader::open_paired_interleaved_with_tags` (de-interleaves into
+///   R1/R2 streams via a bounded per-side buffer).
+/// - `len == 2` (Shape A): two FASTQ files (or two uBAM — but format-guards
+///   in `main.rs::dispatch` reject the two-BAM Shape A case with a clear
+///   error, matching the trim uBAM path at `main.rs:1502-1514`).
+///
+/// Output is ONE interleaved BAM (`<stem>_clumped.bam`) with records written
+/// mate-adjacent (R1[i], R2[i], R1[i+1], R2[i+1], …) per samtools/Picard/fgbio
+/// convention. Pair lockstep is preserved by construction (single call to
+/// `sort_paired_by_key`).
+///
+/// **Caller drives multi-pair iteration.** For Shape A with N=4, 6, … files,
+/// `main.rs::dispatch` iterates `cli.input.chunks(2)` and calls this function
+/// once per pair. Restores v1's multi-pair PE support.
+#[allow(clippy::too_many_arguments)]
+pub fn clump_only_paired_to_bam_one_pair(
+    inputs: &[PathBuf],
+    output_dir: Option<&Path>,
+    basename: Option<&str>,
+    cores: usize,
+    memory_budget_bytes: u64,
+    preserve_tags: &[String],
+    command_line: &str,
+    fastqc: bool,
+    fastqc_args: Option<&str>,
+    no_report_file: bool,
+) -> Result<ClumpOnlyStats> {
+    if inputs.is_empty() || inputs.len() > 2 {
+        bail!(
+            "clump_only_paired_to_bam_one_pair requires 1 (interleaved uBAM) or 2 (paired) inputs, got {}",
+            inputs.len()
+        );
+    }
+
+    let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
+
+    // Open readers + peek header + compute output path + input-format label
+    // according to the input shape. Returns via `PairedInputSetup` to avoid
+    // the type-complexity clippy warning on a 6-tuple.
+    let setup = if inputs.len() == 1 {
+        // Shape B: single interleaved uBAM.
+        let input = &inputs[0];
+        let fmt = detect_input_format(input)?;
+        // Belt-and-braces guard: main.rs::dispatch should have caught this;
+        // return a clear error if a caller ever slips a non-BAM N=1 through.
+        if !matches!(fmt, InputFormat::UnalignedBam) {
+            bail!(
+                "--clump_only --paired with N=1 requires a uBAM interleaved input; \
+                 got a FASTQ file at {}",
+                input.display()
+            );
+        }
+        let header = peek_header(input)?;
+        let (r1, r2) = BamReader::open_paired_interleaved_with_tags(input, preserve_tags)?;
+        let out = naming::clumped_paired_bam_output_name(input, None, output_dir, basename);
+        let in_bytes = std::fs::metadata(input)?.len();
+        PairedInputSetup {
+            reader_r1: Box::new(r1),
+            reader_r2: Box::new(r2),
+            source_header: Some(header),
+            input_fmt_for_label: fmt,
+            output_path: out,
+            input_bytes_total: in_bytes,
+        }
+    } else {
+        // Shape A: two files. Format-guards in main.rs::dispatch reject
+        // two-BAM Shape A and mixed-format Shape A; this function assumes
+        // both files share a compatible format (both FASTQ, or both uBAM
+        // — though the latter is currently rejected upstream).
+        let r1_path = &inputs[0];
+        let r2_path = &inputs[1];
+        let fmt = detect_input_format(r1_path)?;
+        let header = if matches!(fmt, InputFormat::UnalignedBam) {
+            Some(peek_header(r1_path)?)
+        } else {
+            None
+        };
+        let r1 = crate::format::open_sync_reader(r1_path, preserve_tags)?;
+        let r2 = crate::format::open_sync_reader(r2_path, preserve_tags)?;
+        let out =
+            naming::clumped_paired_bam_output_name(r1_path, Some(r2_path), output_dir, basename);
+        let in_bytes = std::fs::metadata(r1_path)?.len() + std::fs::metadata(r2_path)?.len();
+        PairedInputSetup {
+            reader_r1: r1,
+            reader_r2: r2,
+            source_header: header,
+            input_fmt_for_label: fmt,
+            output_path: out,
+            input_bytes_total: in_bytes,
+        }
+    };
+
+    let PairedInputSetup {
+        mut reader_r1,
+        mut reader_r2,
+        source_header,
+        input_fmt_for_label,
+        output_path,
+        input_bytes_total,
+    } = setup;
+
+    let input_display: String = if inputs.len() == 1 {
+        inputs[0].display().to_string()
+    } else {
+        format!("{} + {}", inputs[0].display(), inputs[1].display())
+    };
+    eprintln!(
+        "clump-only (uBAM out, paired): '{}' -> '{}' ({} bins × {} MB budget, BGZF)",
+        input_display,
+        output_path.display(),
+        layout.n_bins,
+        layout.bin_byte_budget / (1024 * 1024),
+    );
+
+    let mut writer = BamWriter::create(
+        &output_path,
+        source_header.as_ref(),
+        preserve_tags,
+        command_line,
+    )
+    .with_context(|| format!("Failed to create BAM output: {}", output_path.display()))?;
+
+    let mut bins: Vec<PairedBin> = (0..layout.n_bins)
+        .map(|_| PairedBin::with_budget(layout.bin_byte_budget))
+        .collect();
+
+    let mut stats = ClumpOnlyStats {
+        n_bins: layout.n_bins,
+        compression_level: 0,
+        input_compressed: input_is_compressed(input_fmt_for_label),
+        output_compressed: true,
+        input_format_label: input_format_label(input_fmt_for_label).to_string(),
+        output_format_label: "uBAM (BGZF)".to_string(),
+        preserved_tags: preserve_tags.to_vec(),
+        ..Default::default()
+    };
+
+    loop {
+        let rec1 = reader_r1.next_record()?;
+        let rec2 = reader_r2.next_record()?;
+        match (rec1, rec2) {
+            (Some(r1), Some(r2)) => {
+                let key = canonical_minimizer(r1.seq.as_bytes());
+                let bin_idx = clump::bin_for(key, layout.n_bins);
+                bins[bin_idx].push(r1, r2, key);
+                stats.total_records += 1;
+                if bins[bin_idx].raw_bytes >= layout.bin_byte_budget {
+                    let occ = bins[bin_idx].r1.len();
+                    if occ > stats.peak_bin_occupancy {
+                        stats.peak_bin_occupancy = occ;
+                    }
+                    flush_bin_paired_to_bam(&mut bins[bin_idx], &mut writer)?;
+                }
+            }
+            (None, None) => break,
+            (Some(_), None) => bail!(
+                "Read 2 stream is truncated — R1 has more records than R2. \
+                 Please check your paired-end input(s)."
+            ),
+            (None, Some(_)) => bail!(
+                "Read 1 stream is truncated — R2 has more records than R1. \
+                 Please check your paired-end input(s)."
+            ),
+        }
+    }
+
+    for bin in bins.iter_mut() {
+        if !bin.is_empty() {
+            let occ = bin.r1.len();
+            if occ > stats.peak_bin_occupancy {
+                stats.peak_bin_occupancy = occ;
+            }
+            flush_bin_paired_to_bam(bin, &mut writer)?;
+        }
+    }
+
+    writer.finish()?;
+
+    stats.input_bytes = input_bytes_total;
+    stats.output_bytes = std::fs::metadata(&output_path)?.len();
+
+    eprintln!(
+        "clump-only (uBAM out, paired): wrote {} pairs in {} bins (peak {} pairs/bin), {} bytes -> {} bytes",
+        stats.total_records,
+        stats.n_bins,
+        stats.peak_bin_occupancy,
+        stats.input_bytes,
+        stats.output_bytes,
+    );
+
+    // Report — one per pair, filename derived from the first (Shape A R1
+    // or Shape B interleaved) input's stem.
+    if !no_report_file {
+        let report_input = &inputs[0];
+        let report_path = naming::clumping_report_name(report_input, output_dir);
+        write_clump_only_report(&stats, &report_path, report_input, &output_path)
+            .with_context(|| format!("Failed to write report: {}", report_path.display()))?;
+    }
+
+    if fastqc {
+        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
+    }
+
+    Ok(stats)
 }
 
 // ────────────────────────────── Tests ──────────────────────────────
@@ -1040,6 +1480,86 @@ mod tests {
             !trimming_report.exists(),
             "trimming report must NOT be created (nf-core scan protection)"
         );
+        Ok(())
+    }
+
+    // ── v2 uBAM-output unit tests ─────────────────────────────────────
+    //
+    // Note on scope: PLAN_v2_ubam.md §Impl step 7 called for four unit
+    // tests here (permutation, PE lockstep, deterministic records, tag
+    // round-trip). All four are exercised at the integration layer today
+    // (tests/integration_clump_only_ubam.rs — se_ubam_out_from_fastq_in,
+    // pe_ubam_out_interleaved_from_fastq_pair, cross-run determinism CI
+    // step, ubam_aux_tag_roundtrip_via_preserve_tags). Adding parallel
+    // unit tests would give localization value on failure (unit fails →
+    // implicates clump_only_single_to_bam alone; integration fails →
+    // implicates CLI + dispatch + core) but add no new invariant coverage.
+    // The empty-input test below is the one the integration layer cannot
+    // cheaply cover (needs an in-process BAM writer/reader dance). This
+    // deviation from PLAN §Impl step 7 is documented in PROGRESS.md.
+
+    #[test]
+    fn test_empty_bam_input_produces_valid_bam() -> Result<()> {
+        use noodles::sam::header::record::value::{Map, map::ReferenceSequence};
+        use std::num::NonZeroUsize;
+
+        // Construct an empty BAM (header only, zero records) in-process,
+        // run --clump_only --output-format ubam on it, and verify the
+        // output decodes as a valid BAM with zero records. Regression
+        // guard for Resolved Decision 4: `BamWriter::finish` handles the
+        // zero-record case natively.
+        let dir = tempdir("empty_bam");
+        let input = dir.join("empty.bam");
+
+        // Write an empty BAM (header + BGZF EOF terminator).
+        {
+            let file = File::create(&input)?;
+            let mut writer = noodles::bam::io::Writer::new(BufWriter::new(file));
+            // Minimal SAM header: @HD version. No @SQ / @PG.
+            let mut header = noodles::sam::Header::default();
+            let _ = header.reference_sequences_mut().insert(
+                b"chr1".into(),
+                Map::<ReferenceSequence>::new(NonZeroUsize::MIN),
+            );
+            // Actually, keep it truly minimal — remove the SQ we just added.
+            header.reference_sequences_mut().clear();
+            writer.write_header(&header)?;
+            // No write_record calls → zero records.
+            drop(writer);
+        }
+
+        let stats = clump_only_single_to_bam(
+            &input,
+            Some(&dir),
+            None,
+            1,
+            small_memory_budget(),
+            &[],
+            "test",
+            false,
+            None,
+            false,
+        )?;
+
+        assert_eq!(
+            stats.total_records, 0,
+            "empty BAM input should yield zero records"
+        );
+
+        let out_path = naming::clumped_bam_output_name(&input, Some(&dir), None);
+        assert!(
+            out_path.exists(),
+            "output BAM missing: {}",
+            out_path.display()
+        );
+
+        // Round-trip: reader should open the output and yield zero records.
+        let out_file = File::open(&out_path)?;
+        let mut reader = noodles::bam::io::Reader::new(std::io::BufReader::new(out_file));
+        let _out_header = reader.read_header()?;
+        let mut rec = noodles::bam::Record::default();
+        let n = reader.read_record(&mut rec)?;
+        assert_eq!(n, 0, "empty BAM output should decode zero records, got {n}");
         Ok(())
     }
 

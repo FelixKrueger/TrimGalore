@@ -5,6 +5,22 @@
 
 #### Changes
 
+- **`--clump_only` now supports uBAM in/out** — extending the mode with
+  unaligned BAM support via `--output-format ubam` (input auto-detected
+  by content). Aux-tag round-trip via `--preserve-tags TAG1,TAG2,…`
+  (A/Z/i/f scalars; B/H tags rejected at BAM-read time, same as trim
+  path). PE-uBAM output is ONE interleaved BAM per pair (mate-adjacent,
+  matching samtools/Picard/fgbio). Multi-pair input under `--paired`
+  supported (N=4, 6, … FASTQ inputs → one output per pair). Output
+  BAM's `@PG` line records the invocation; input `@PG` chain preserved.
+  `--fastqc` runs on BAM output (fastqc-rust reads BAM natively).
+  Byte-identity preserved for record contents (id + seq + qual +
+  preserved tags); cross-run byte-identity of the whole file uses
+  `@PG`-ignoring comparison (identical to the trim uBAM path's CI
+  treatment).
+- **`--dont_gzip` + `--output-format ubam` now rejected at CLI
+  validation** — closes a pre-existing gap on the trim uBAM path
+  where the combination was silently accepted (BAM is always BGZF).
 - **New `--clump_only` specialty mode** — lossless reorder-only mode
   requested in [#353](https://github.com/FelixKrueger/TrimGalore/issues/353).
   Reorders FASTQ records by canonical 16-mer minimizer for gzip-friendly

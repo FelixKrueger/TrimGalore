@@ -301,13 +301,13 @@ fn rejects_adapter_flag() -> Result<()> {
 }
 
 #[test]
-fn rejects_ubam_input() -> Result<()> {
-    // uBAM in/out is deferred to v2 per PLAN §Resolved decisions. Input
-    // detection routes through `format::detect_input_format`; the
-    // `reject_ubam` helper in `clump_only.rs` bails with a clear error
-    // before any FASTQ reader is opened. Regression guard so a future
-    // format-detection refactor doesn't silently accept BAM input.
-    let dir = tempdir("rej_ubam");
+fn rejects_ubam_input_without_ubam_output() -> Result<()> {
+    // v2: uBAM input IS supported under `--clump_only`, but only when
+    // paired with `--output-format ubam`. On the plain FASTQ-output path
+    // (the default), uBAM input would drop aux tags — so it's rejected
+    // with a message pointing the user at the uBAM-output path. See
+    // tests/integration_clump_only_ubam.rs for the positive-path tests.
+    let dir = tempdir("rej_ubam_no_output_fmt");
     let input = fixture("ubam_test.bam");
     assert!(input.exists(), "uBAM fixture missing: {}", input.display());
     let out = Command::new(binary())
@@ -316,12 +316,12 @@ fn rejects_ubam_input() -> Result<()> {
         .output()?;
     assert!(
         !out.status.success(),
-        "--clump_only on uBAM must be rejected"
+        "--clump_only on uBAM input (without --output-format ubam) must be rejected"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("uBAM") && stderr.contains("--clump_only"),
-        "stderr should explain the uBAM rejection; got: {stderr}"
+        stderr.contains("--output-format ubam"),
+        "stderr should route the user to --output-format ubam; got: {stderr}"
     );
     Ok(())
 }
