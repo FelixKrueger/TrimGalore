@@ -847,6 +847,35 @@ jobs:
             echo "SKIP: ubam_test_with_tags.bam not committed; aux-tag round-trip covered by lib tests"
           fi
 
+      - name: Validate SE uBAM-out — --fastqc produces a report
+        # Guards against the uBAM-output path silently skipping FastQC.
+        # fastqc-rust reads BAM natively; the zip must appear alongside the
+        # BAM output, matching the FASTQ path's contract.
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/ubam_out_se_fqc
+          ./target/release/trim_galore --output-format ubam --fastqc \
+            -o /tmp/ubam_out_se_fqc test_files/ubam_test.bam
+          test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed.bam
+          test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip
+          test -f /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.html
+          unzip -l /tmp/ubam_out_se_fqc/ubam_test_trimmed_fastqc.zip | grep -q fastqc_data.txt
+
+      - name: Validate PE uBAM-out — --fastqc produces one report for the interleaved BAM
+        # PE uBAM output is ONE interleaved BAM, so exactly ONE FastQC zip
+        # is expected (not two). Regression guard against a "call twice"
+        # symmetry mistake with the FASTQ paired path.
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/ubam_out_pe_fqc
+          ./target/release/trim_galore --paired --output-format ubam --fastqc \
+            -o /tmp/ubam_out_pe_fqc test_files/ubam_paired_test.bam
+          test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val.bam
+          test -f /tmp/ubam_out_pe_fqc/ubam_paired_test_val_fastqc.zip
+          # Exactly one zip: guard against accidentally calling fastqc twice.
+          ZIP_COUNT=$(ls /tmp/ubam_out_pe_fqc/*_fastqc.zip 2>/dev/null | wc -l | tr -d ' ')
+          [ "$ZIP_COUNT" = "1" ] || { echo "Expected 1 fastqc zip, got $ZIP_COUNT"; ls /tmp/ubam_out_pe_fqc; exit 1; }
+
       - name: Upload uBAM validation outputs on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1634,6 +1634,16 @@ fn run_ubam_output_single(
         eprintln!("JSON report: {}", json_path.display());
     }
 
+    // Run FastQC if requested (bundled fastqc-rust reads BAM natively).
+    if cli.fastqc || cli.fastqc_args.is_some() {
+        fastqc::run(
+            &output_path,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
+        )?;
+    }
+
     Ok(())
 }
 
@@ -1760,6 +1770,17 @@ fn run_ubam_output_paired_two_files(
         )?;
     }
 
+    // Run FastQC if requested (bundled fastqc-rust reads BAM natively).
+    // PE uBAM output is a single interleaved BAM, so one call covers both mates.
+    if cli.fastqc || cli.fastqc_args.is_some() {
+        fastqc::run(
+            &output_path,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
+        )?;
+    }
+
     Ok(())
 }
 
@@ -1867,6 +1888,17 @@ fn run_ubam_output_paired_single_file(
             adapters_r1,
             adapters_r2,
             None,
+        )?;
+    }
+
+    // Run FastQC if requested (bundled fastqc-rust reads BAM natively).
+    // PE uBAM output is a single interleaved BAM, so one call covers both mates.
+    if cli.fastqc || cli.fastqc_args.is_some() {
+        fastqc::run(
+            &output_path,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
         )?;
     }
 
