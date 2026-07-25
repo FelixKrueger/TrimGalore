@@ -252,6 +252,15 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Needed by the `--clump_only --output-format ubam` parity steps below,
+      # which compare record bodies via `samtools view` (whole-file byte-diff
+      # can't be used: the `@PG` chain grows by our appended line).
+      - name: Install samtools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y samtools
+          samtools --version | head -1
+
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
         with:
