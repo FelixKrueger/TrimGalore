@@ -49,6 +49,51 @@ Specialty modes write to mode-specific filenames and exit before the main pipeli
 
 Gzip-compressed input produces gzip-compressed output by default. Pass `--dont_gzip` to write plain FASTQ.
 
+## uBAM output (`--output-format ubam`)
+
+Emit records as unaligned BAM (uBAM) instead of FASTQ. Useful for pipelines that carry BAM downstream (10X single-cell, methylation callers, anything that wants to preserve BAM aux tags through the trim step).
+
+| Input | uBAM output |
+|------|-------------|
+| Single-end | `INPUT_trimmed.bam` |
+| Paired-end | `INPUT_val.bam` — **one** interleaved BAM per pair |
+
+Paired output follows the samtools/Picard/fgbio convention: R1 and R2 records interleave in a single BAM with `FREAD1` (`0x40`) / `FREAD2` (`0x80`) flag bits. No separate `_val_1.bam` / `_val_2.bam` files.
+
+uBAM output is currently single-threaded — `--cores N` is ignored for BAM writing; FastQC (when `--fastqc` is requested) still uses the value.
+
+### `@PG` chain preservation
+
+The input `@HD` / `@PG` header chain is propagated verbatim, and a trim_galore `@PG` line is appended:
+
+```
+@PG	ID:trim_galore	VN:<version>	CL:<command-line>
+```
+
+uBAM-in → uBAM-out is therefore **not** byte-identical to the input — provenance is preserved by *adding* to history, same treatment as samtools / Picard. The output records themselves round-trip losslessly.
+
+### Aux-tag round-trip with `--preserve-tags`
+
+`--preserve-tags TAG1,TAG2,...` (samtools `-T`-compatible, comma-separated) carries listed aux tags from input records through trimming into output records. Supports `A` / `Z` / `i` / `f` scalar types; array (`B`) and hex (`H`) types are rejected because the FASTQ intermediate cannot textually encode them.
+
+Typical uses:
+
+- `--preserve-tags CB,UB` — 10X cell / UMI barcodes for single-cell
+- `--preserve-tags RG,LB,BC` — read-group and library metadata
+
+FASTQ input silently ignores `--preserve-tags` (there are no source tags to carry).
+
+### Feature compatibility
+
+Most FASTQ-shaped features work with uBAM output. Rejected at CLI-validate time (v1 scope):
+
+- `--dont_gzip` — gzip flag is FASTQ-output-specific; uBAM is BGZF-framed unconditionally
+- `--clock`, `--implicon` — specialty modes encode UMI in the FASTQ header, which can't round-trip through the BAM record
+- `--demux` — one output file per barcode; uBAM demux is a planned follow-up
+- `--passthrough` — carrier FASTQ shape is FASTQ-specific
+- `--retain_unpaired` — would produce singleton BAMs; not in v1
+- `--clumpify` — in-place reorder is FASTQ-shape-specific (note: `--clump_only --output-format ubam` **is** supported — see [Clump-only](/modes/clump-only/))
+
 ## Output directory
 
 `--output_dir DIR` writes outputs to `DIR/` instead of the current working directory. The trimmed FASTQ filename stem is unchanged; only the parent directory differs.

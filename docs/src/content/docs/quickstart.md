@@ -3,7 +3,7 @@ title: Quick start
 description: Run your first Trim Galore command. Single-end, paired-end, and RRBS examples.
 ---
 
-Trim Galore reads FASTQ files (plain or gzip-compressed), trims adapters and low-quality bases, and writes trimmed FASTQ plus a per-file trimming report. The defaults work for most Illumina libraries.
+Trim Galore reads FASTQ files (plain or gzip-compressed) or unaligned BAM (auto-detected by content), trims adapters and low-quality bases, and writes trimmed FASTQ — or uBAM with `--output-format ubam` — plus a per-file trimming report. The defaults work for most Illumina libraries.
 
 ## Single-end
 
@@ -50,7 +50,22 @@ For non-directional libraries, add `--non_directional`. See the [Bisulfite & RRB
 trim_galore --fastqc input.fastq.gz
 ```
 
-FastQC is built in via the bundled `fastqc-rust` library: no Java or external `fastqc` install needed. Outputs are FastQC 0.12.1-compatible HTML + ZIP files.
+FastQC is built in via the bundled `fastqc-rust` library: no Java or external `fastqc` install needed. Outputs are FastQC 0.12.1-compatible HTML + ZIP files. Works on both FASTQ and uBAM output paths.
+
+## Unaligned BAM (uBAM)
+
+uBAM input is auto-detected — no flag needed. Paired reads may come as two BAM files or a single interleaved BAM (samtools `sort -n` / `collate` / Picard / fgbio order):
+
+```bash
+# uBAM in → FASTQ out (default)
+trim_galore sample.bam
+trim_galore --paired interleaved.bam
+
+# uBAM in → uBAM out, preserving CB/UB aux tags (10X single-cell shape)
+trim_galore --output-format ubam --preserve-tags CB,UB sample.bam
+```
+
+Paired uBAM output is a single interleaved BAM (`<stem>_val.bam`), matching samtools/Picard/fgbio convention. See [Output files](/guide/outputs/#ubam-output---output-format-ubam) for the full contract.
 
 ## Common combinations
 
