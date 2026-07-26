@@ -54,7 +54,7 @@ FastQC is built in via the bundled `fastqc-rust` library: no Java or external `f
 
 ## Unaligned BAM (uBAM)
 
-uBAM input is auto-detected — no flag needed. Paired reads may come as two BAM files or a single interleaved BAM (samtools `sort -n` / `collate` / Picard / fgbio order):
+uBAM input is auto-detected — no flag needed. Paired reads must arrive as a single interleaved BAM with mates adjacent (samtools `sort -n` / `collate` / Picard / fgbio all produce this order). Two separate BAM files are not supported and are rejected before any output is written:
 
 ```bash
 # uBAM in → FASTQ out (default)

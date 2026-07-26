@@ -127,6 +127,46 @@
   only fires when *every* byte is `0xFF`. Such bytes are now mapped to
   `'!'` per byte, matching the all-`0xFF` path, and any other out-of-spec
   value is clamped to the SAM maximum of 93.
+- **A `--paired` pair containing one FASTQ and one uBAM is now diagnosed
+  correctly** ([#363](https://github.com/FelixKrueger/TrimGalore/issues/363)).
+  The guard reported *"--paired with two BAM files is not supported"* for any
+  pair containing at least one BAM, and offered the single-interleaved-file
+  remediation. For a mixed pair both statements were false, and the advice was
+  misdirection: the cause is usually a mis-typed filename or an intent to pass
+  two FASTQ files, neither of which is fixed by interleaving. Mixed pairs now
+  report which input is which format and are not offered that remediation; a
+  genuine two-BAM pair keeps the message, now naming both files.
+
+  The check also moved into input validation, ahead of dispatch. Three
+  consequences on rejected runs, all improvements but all observable:
+
+  - `--output_dir` is no longer created. This applies to every affected mode.
+  - On the ordinary trimming path, adapter auto-detection no longer runs
+    first. It previously scanned up to 1 M reads per input before the
+    guaranteed rejection. The `--output-format ubam` and `--clump_only` paths
+    already rejected before detection, or perform none at all.
+  - **Multi-pair runs on the trimming and `--clump_only` FASTQ paths now fail
+    before any pair is processed.** The check previously sat inside the
+    per-pair loop there, so pairs preceding the offending one were fully
+    trimmed and their `*_val_{1,2}.fq.gz` files and trimming reports written
+    to disk. A pipeline that consumed whatever pairs succeeded before the
+    failure now gets nothing. The `--output-format ubam` paths already
+    validated every pair up-front.
+
+  The two-BAM message now also names a command that combines the two files:
+  `samtools merge -n -o interleaved.bam r1.bam r2.bam`, verified to produce a
+  mate-adjacent file TrimGalore accepts. Previously the message said only that
+  an interleaved file was expected, without saying how to make one. Note that
+  `samtools collate` is not the tool for this — it takes a single input and
+  treats its second argument as a temp-file prefix, so `collate -O r1.bam
+  r2.bam` exits successfully having written only the first file's records.
+
+  `--clump_only` on the FASTQ-output path keeps its own diagnosis (uBAM input
+  requires `--output-format ubam`, because the FASTQ output path would drop
+  aux tags): there the fix is a flag, not a re-shaped input. Behaviour is
+  unchanged for `--hardtrim5/3`, which process each input independently and so
+  are unaffected by a mixed pair, and for `--clock` / `--implicon`, which
+  continue to report their own (separate) error on such input.
 
 
 ### Version 2.3.0 (Release on 27 June 2026)
