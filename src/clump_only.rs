@@ -48,7 +48,7 @@ use crate::clump::{
 };
 use crate::fastq::{FastqReader, FastqRecord, RecordSource};
 use crate::fastqc;
-use crate::format::{InputFormat, detect_input_format};
+use crate::format::{InputFormat, detect_input_format, input_format_label};
 use crate::io as naming;
 use noodles::sam::Header as BamHeader;
 
@@ -681,15 +681,6 @@ pub fn expected_output_paths_paired(
 // dispatcher as v1, and on flush write mate-adjacent records via
 // paired_side=None (SE) or paired_side=Some(1)/Some(2) (PE interleaved).
 
-/// Format label for the report (`"FASTQ (plain)"` / `"FASTQ (gzip)"` / `"uBAM"`).
-fn input_format_label(fmt: InputFormat) -> &'static str {
-    match fmt {
-        InputFormat::FastqPlain => "FASTQ (plain)",
-        InputFormat::FastqGz => "FASTQ (gzip)",
-        InputFormat::UnalignedBam => "uBAM",
-    }
-}
-
 /// True iff the input format is compression-quantifiable (`gzip` or `BGZF`).
 fn input_is_compressed(fmt: InputFormat) -> bool {
     matches!(fmt, InputFormat::FastqGz | InputFormat::UnalignedBam)
@@ -939,13 +930,34 @@ pub fn clump_only_paired_to_bam_one_pair(
             input_bytes_total: in_bytes,
         }
     } else {
-        // Shape A: two files. Format-guards in main.rs::dispatch reject
-        // two-BAM Shape A and mixed-format Shape A; this function assumes
-        // both files share a compatible format (both FASTQ, or both uBAM
-        // — though the latter is currently rejected upstream).
+        // Shape A: two files. `format::reject_bam_format_mismatch_in_pair`,
+        // called from main() before dispatch, rejects two-BAM Shape A and
+        // mixed-format Shape A, so both files share a compatible format here.
+        //
+        // Internal-invariant backstop (#363): the header below comes from R1
+        // alone while each side is opened by its own per-file detection, so any
+        // BAM reaching this two-file branch is wrong output rather than an error.
+        // A mixed pair would emit a BAM silently mixing FASTQ-derived records
+        // (no aux tags, no source header) with BAM-derived ones; a two-BAM pair
+        // would silently discard R2's @HD/@PG chain and tag dictionary. The
+        // enforced predicate is therefore "no BAM at all", matching the invariant
+        // main()'s guard actually establishes for Shape A — and matching the
+        // breadth of the code this replaced. Interleaved single-BAM input is
+        // legal and takes the Shape B branch above, not this one.
         let r1_path = &inputs[0];
         let r2_path = &inputs[1];
         let fmt = detect_input_format(r1_path)?;
+        let fmt_r2 = detect_input_format(r2_path)?;
+        if matches!(fmt, InputFormat::UnalignedBam) || matches!(fmt_r2, InputFormat::UnalignedBam) {
+            bail!(
+                "internal error: uBAM input reached clump_only_paired_to_bam_one_pair \
+                 Shape A ({} and {}); the paired format guard in main() should have \
+                 rejected it. Please report this at \
+                 https://github.com/FelixKrueger/TrimGalore/issues",
+                r1_path.display(),
+                r2_path.display()
+            );
+        }
         let header = if matches!(fmt, InputFormat::UnalignedBam) {
             Some(peek_header(r1_path)?)
         } else {

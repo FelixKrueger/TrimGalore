@@ -13,7 +13,9 @@ use trim_galore::demux;
 use trim_galore::fastq::{FastqReader, FastqWriter, RecordSource};
 use trim_galore::fastqc;
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
-use trim_galore::format::{InputFormat, detect_input_format};
+use trim_galore::format::{
+    InputFormat, PairedShape, detect_input_format, reject_bam_format_mismatch_in_pair,
+};
 use trim_galore::io as naming;
 use trim_galore::parallel;
 use trim_galore::report;
@@ -262,6 +264,42 @@ fn main() -> Result<()> {
         );
     }
 
+    // Issue #363 — both inputs of a `--paired` pair must agree on being BAM.
+    //
+    // Sited here for the same reason as the `--phred64` guard above: the
+    // decision needs `input_formats`, which `Cli::validate()` cannot see. The
+    // position matters beyond that, though — this is the last point before
+    // `ensure_output_dir` (below), the three output-collision pre-flights, and
+    // every dispatch branch. The three guards this replaces all sat *past* that
+    // line: the trim-path one fired only after adapter auto-detection had
+    // scanned up to 1M reads, the banner had printed, the output directory
+    // existed, and on multi-pair input earlier pairs had already been written.
+    //
+    // Specialty modes are exempt: `--hardtrim5/3` never consult `cli.paired`
+    // (each file is processed independently, so a mixed pair is genuinely
+    // harmless there), and `--clock`/`--implicon` are left alone only because
+    // changing them is out of scope for #363 — they pair for real and today
+    // report a misleading read-count error on mixed input.
+    //
+    // N == 1 is excluded: that is single-file interleaved uBAM, validated
+    // directly above.
+    if cli.paired
+        && cli.input.len() > 1
+        && cli.hardtrim5.is_none()
+        && cli.hardtrim3.is_none()
+        && !cli.clock
+        && cli.implicon.is_none()
+    {
+        let ubam_out = matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam);
+        let shape = match (cli.clump_only, ubam_out) {
+            (true, true) => PairedShape::ClumpOnlyUbamOut,
+            (true, false) => PairedShape::ClumpOnlyFastqOut,
+            (false, true) => PairedShape::TrimUbamOut,
+            (false, false) => PairedShape::Trim,
+        };
+        reject_bam_format_mismatch_in_pair(&cli.input, &input_formats, shape)?;
+    }
+
     // Output gzip mode. Mirror Perl: by default the output's compression
     // matches the input's (plain `.fastq` → plain `.fq`, gzipped `.fastq.gz`
     // → gzipped `.fq.gz`). `--dont_gzip` overrides to always-plain. The
@@ -496,20 +534,11 @@ fn main() -> Result<()> {
                 // step 2 + §Behavior "PE steps".
                 if cli.paired {
                     if cli.input.len() == 1 {
-                        // Shape B: single interleaved uBAM. Cli::validate allowed
-                        // N=1 through; enforce "must be BAM" here at dispatch time.
-                        if !matches!(
-                            detect_input_format(&cli.input[0])?,
-                            InputFormat::UnalignedBam
-                        ) {
-                            anyhow::bail!(
-                                "--clump_only --paired --output-format ubam with a single \
-                                 input file requires an interleaved uBAM. Got a FASTQ file \
-                                 at {}. For two-file paired-end FASTQ input, pass R1 and R2 \
-                                 as separate arguments.",
-                                cli.input[0].display()
-                            );
-                        }
+                        // Shape B: single interleaved uBAM. The "must be BAM"
+                        // check that used to live here was already unreachable —
+                        // its condition is a strict subset of the `--paired`
+                        // N=1 non-BAM guard in main() — and was retired with
+                        // #363. Retained note so the absence is intentional.
                         let planned = naming::clumped_paired_bam_output_name(
                             &cli.input[0],
                             None,
@@ -532,30 +561,13 @@ fn main() -> Result<()> {
                         )?;
                     } else {
                         // Shape A: two-file paired (multi-pair supported for N=2, 4, 6, …).
-                        // Reject two-BAM Shape A + mixed-format Shape A up-front.
-                        for chunk in cli.input.chunks(2) {
-                            let fmt_r1 = detect_input_format(&chunk[0])?;
-                            let fmt_r2 = detect_input_format(&chunk[1])?;
-                            let r1_is_bam = matches!(fmt_r1, InputFormat::UnalignedBam);
-                            let r2_is_bam = matches!(fmt_r2, InputFormat::UnalignedBam);
-                            if r1_is_bam && r2_is_bam {
-                                anyhow::bail!(
-                                    "--clump_only --paired with two BAM files is not supported. \
-                                     uBAM paired mode expects a single interleaved file: \
-                                     `trim_galore --clump_only --paired --output-format ubam \
-                                     interleaved.bam`. Got two BAM files; one of them is {}.",
-                                    chunk[0].display()
-                                );
-                            }
-                            if r1_is_bam != r2_is_bam {
-                                anyhow::bail!(
-                                    "--clump_only --paired requires both input files to be the \
-                                     same format. Got mixed: {} and {}.",
-                                    chunk[0].display(),
-                                    chunk[1].display()
-                                );
-                            }
-                        }
+                        // Two-BAM and mixed-format Shape A are rejected by
+                        // `reject_bam_format_mismatch_in_pair` in main(), which
+                        // runs before this dispatch (and before the pre-flight
+                        // below). This branch previously carried its own copy of
+                        // that check — the only one of the three that got the
+                        // two-BAM-vs-mixed distinction right, and the model for
+                        // the shared helper (#363).
                         // Multi-pair collision pre-flight (case-folded per issue #216).
                         let mut planned: Vec<std::path::PathBuf> = Vec::new();
                         for chunk in cli.input.chunks(2) {
@@ -1263,15 +1275,21 @@ fn run_paired(
         (None, None)
     };
 
-    // Two-file paired-uBAM is rejected per PLAN §3.3 — paired uBAM expects
-    // a single interleaved file (handled in main() before this fn is called).
+    // Internal-invariant backstop, NOT the user-facing rejection. Any BAM in a
+    // two-file pair is rejected by `reject_bam_format_mismatch_in_pair` in
+    // main(), which produces the shape-appropriate message (#363).
+    //
+    // This stays as an enforced check rather than a comment because the
+    // sequential path below hard-codes `FastqReader::open` — and `--cores 1` is
+    // the default. A BGZF BAM handed to `FastqReader` decompresses to binary and
+    // parses as FASTQ, i.e. silent wrong output rather than an error. Deliberately
+    // worded so it cannot be mistaken for the user-facing message.
     for p in [input_r1, input_r2] {
         if matches!(detect_input_format(p)?, InputFormat::UnalignedBam) {
             anyhow::bail!(
-                "--paired with two BAM files is not supported. \
-                 uBAM paired mode expects a single interleaved file: \
-                 `trim_galore --paired interleaved.bam`. \
-                 Got two BAM files; one of them is {}.",
+                "internal error: uBAM input reached run_paired ({}); the paired \
+                 format guard in main() should have rejected it. Please report this at \
+                 https://github.com/FelixKrueger/TrimGalore/issues",
                 p.display()
             );
         }
@@ -1306,8 +1324,12 @@ fn run_paired(
             clump_layout,
         )?
     } else {
-        // Sequential path (--cores 1) — paired-BAM rejected above, so both
-        // are FastqReader.
+        // Sequential path (--cores 1, the default) — hard-codes FastqReader,
+        // which is safe only because uBAM input is rejected by
+        // `reject_bam_format_mismatch_in_pair` in main() and re-checked by the
+        // internal-invariant backstop at the top of this function. Do not
+        // remove that backstop: a BGZF BAM handed to FastqReader parses as
+        // FASTQ rather than erroring.
         let mut reader_r1 = FastqReader::open(input_r1)?;
         let mut reader_r2 = FastqReader::open(input_r2)?;
         let level = config.gzip_level;
@@ -1742,24 +1764,11 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
     }
 
     if cli.paired {
-        // Two-file paired-BAM input is rejected per PLAN §3.3 — uBAM paired
-        // mode expects a single interleaved file (handled in the
-        // input.len() == 1 branch above). Mirror the FASTQ-path rejection
-        // and fail up-front BEFORE the collision pre-flight runs.
-        // Code-review round-2 B-NIT-1 consolidation.
-        for chunk in cli.input.chunks(2) {
-            for p in [&chunk[0], &chunk[1]] {
-                if matches!(detect_input_format(p)?, InputFormat::UnalignedBam) {
-                    anyhow::bail!(
-                        "--paired with two BAM files is not supported. \
-                         uBAM paired mode expects a single interleaved file: \
-                         `trim_galore --paired interleaved.bam`. \
-                         Got two BAM files; one of them is {}.",
-                        p.display()
-                    );
-                }
-            }
-        }
+        // Two-file paired-BAM input (and mixed FASTQ+BAM pairs) are rejected by
+        // `reject_bam_format_mismatch_in_pair` in main(), which runs before this
+        // dispatch and before the pre-flight below, and which distinguishes the
+        // two-BAM case from the mixed case (#363). The per-pair loop that used to
+        // stand here emitted the two-BAM message for either.
         // Pre-flight: one BAM output per pair; collision on case-folded path.
         let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
             std::collections::HashMap::new();
@@ -1979,10 +1988,6 @@ fn run_ubam_output_paired_two_files(
     let output_path =
         naming::paired_bam_output_name(input_r1, input_r2, output_dir, cli.basename.as_deref());
 
-    // Two-file paired-BAM rejection lives up-front in `run_ubam_output`
-    // (code-review round-2 B-NIT-1) — both inputs are guaranteed FASTQ
-    // here.
-
     eprintln!("Trimming (paired-end, interleaved uBAM):");
     eprintln!("  R1:     {}", input_r1.display());
     eprintln!("  R2:     {}", input_r2.display());
@@ -1990,9 +1995,30 @@ fn run_ubam_output_paired_two_files(
 
     // Source header from R1 if it's uBAM; R2's header is ignored (R1's @PG
     // chain is the canonical lineage — R2 is just the mate stream).
-    // (At this point both inputs are FASTQ; the BAM-input case is handled
-    // separately by run_ubam_output_paired_single_file.)
-    let source_header = match detect_input_format(input_r1)? {
+    //
+    // Internal-invariant backstop (#363). Because the header comes from R1 alone
+    // while each side is opened by its own per-file detection below, any BAM
+    // reaching this two-file path is wrong output rather than an error: a mixed
+    // pair would emit a BAM silently mixing FASTQ-derived records (no aux tags,
+    // no source header) with BAM-derived ones, and a two-BAM pair would silently
+    // discard R2's @HD/@PG chain and tag dictionary. So the enforced predicate is
+    // "no BAM at all", matching the invariant that
+    // `reject_bam_format_mismatch_in_pair` in main() actually establishes for
+    // this shape — the guard is ~1700 lines away, hence enforcing rather than
+    // documenting. (The code this replaced also rejected any BAM; narrowing it
+    // to a mismatch check would have half-met the stated intent.)
+    let fmt_r1 = detect_input_format(input_r1)?;
+    let fmt_r2 = detect_input_format(input_r2)?;
+    if matches!(fmt_r1, InputFormat::UnalignedBam) || matches!(fmt_r2, InputFormat::UnalignedBam) {
+        anyhow::bail!(
+            "internal error: uBAM input reached run_ubam_output_paired_two_files \
+             ({} and {}); the paired format guard in main() should have rejected it. \
+             Please report this at https://github.com/FelixKrueger/TrimGalore/issues",
+            input_r1.display(),
+            input_r2.display()
+        );
+    }
+    let source_header = match fmt_r1 {
         InputFormat::UnalignedBam => Some(trim_galore::bam::peek_header(input_r1)?),
         InputFormat::FastqPlain | InputFormat::FastqGz => None,
     };
