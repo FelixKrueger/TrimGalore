@@ -814,8 +814,11 @@ fn main() -> Result<()> {
 /// adapters_r1, adapters_r2, TrimConfig).
 fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
     // Determine adapter
-    let (adapter_label, adapters_r1, adapters_r2, autodetect_poly_g) =
+    let (adapter_label, adapters_r1, mut adapters_r2, autodetect_poly_g) =
         resolve_adapter(cli, input_file)?;
+
+    // #369 — a user -a2 wins over the preset/auto-detected Read 2 candidate.
+    let displaced_r2 = apply_adapter2_override(cli, &adapters_r1, &mut adapters_r2)?;
 
     // Display adapter info
     if adapters_r1.len() == 1 {
@@ -830,7 +833,8 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
             eprintln!("  {}: {}", name, seq);
         }
     }
-    if !adapters_r2.is_empty() {
+    // Read 2 adapters are only used in paired mode.
+    if cli.paired && !adapters_r2.is_empty() {
         if adapters_r2.len() == 1 {
             eprintln!("Adapter 2 (Read 2): {}", adapters_r2[0].1);
         } else {
@@ -839,6 +843,11 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
                 eprintln!("  {}: {}", name, seq);
             }
         }
+    }
+    if let Some(seq) = &displaced_r2 {
+        eprintln!(
+            "NOTE: Read 2 adapter taken from -a2; the {adapter_label} default ({seq}) is not used."
+        );
     }
     if cli.times > 1 {
         eprintln!("Adapter trimming rounds per read (-n): {}", cli.times);
@@ -976,8 +985,40 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
     Ok((adapter_label, adapters_r1, adapters_r2, config))
 }
 
+/// Apply a user `-a2` over the preset/auto-detected Read 2 candidate (#369).
+///
+/// Returns the displaced default sequence, if the candidate was non-empty, so the
+/// caller can report it. The override is skipped under `--consider_already_trimmed`
+/// suppression: trimming R2 while R1 is left alone would be asymmetric, and the
+/// mode announces that only quality trimming will happen.
+fn apply_adapter2_override(
+    cli: &Cli,
+    adapters_r1: &AdapterList,
+    adapters_r2: &mut AdapterList,
+) -> Result<Option<String>> {
+    // Not paired: `Cli::validate` has already warned, and Read 2 does not exist.
+    if cli.adapter2.is_empty() || !cli.paired {
+        return Ok(None);
+    }
+
+    // Suppression is the only way an R1 adapter reaches here with an empty sequence.
+    let suppressed = adapters_r1.len() == 1 && adapters_r1[0].1.is_empty();
+    if suppressed {
+        eprintln!(
+            "WARNING: -a2/--adapter2 not applied — adapter trimming is suppressed for this \
+             library (--consider_already_trimmed). Ignoring."
+        );
+        return Ok(None);
+    }
+
+    let displaced = adapters_r2.first().map(|(_, seq)| seq.clone());
+    *adapters_r2 = adapter::parse_adapter_specs(&cli.adapter2)?;
+    Ok(displaced)
+}
+
 /// Returns (adapter_label, adapters_r1, adapters_r2, poly_g_from_autodetect).
 /// `adapter_label` is for display purposes (e.g., "Illumina", "user-specified").
+/// `adapters_r2` is a *candidate* — `apply_adapter2_override` may replace it with `-a2`.
 /// `adapters_r1`/`adapters_r2` are `(name, sequence)` pairs; r2 is empty if not set.
 /// The last element is Some((poly_g_count, reads_scanned)) when auto-detection ran,
 /// None when the adapter was user-specified or preset-selected (poly-G must be
@@ -985,9 +1026,8 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
 fn resolve_adapter(cli: &Cli, input_file: &Path) -> ResolvedAdapter {
     if !cli.adapter.is_empty() {
         let adapters_r1 = adapter::parse_adapter_specs(&cli.adapter)?;
-        let adapters_r2 = adapter::parse_adapter_specs(&cli.adapter2)?;
         let label = "user-specified".to_string();
-        return Ok((label, adapters_r1, adapters_r2, None));
+        return Ok((label, adapters_r1, Vec::new(), None));
     }
 
     // Presets: single-adapter, use AdapterPreset methods

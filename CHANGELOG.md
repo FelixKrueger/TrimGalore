@@ -83,6 +83,61 @@
 
 #### Fixes
 
+- **`-a2`/`--adapter2` is no longer ignored unless `-a` is also given**
+  ([#369](https://github.com/FelixKrueger/TrimGalore/issues/369), reported by
+  @MathieuUm). Adapter resolution was an early-return chain in which only the
+  explicit-`-a` branch read `-a2`. Every preset (`--illumina`, `--nextera`,
+  `--stranded_illumina`, `--small_rna`, `--bgiseq`) and the **default
+  auto-detection path** returned a hardcoded Read 2 adapter and silently
+  discarded the flag. Read 2 then fell back to Read 1's adapter, so
+  `--illumina -a2 SEQ` trimmed Read 2 with `AGATCGGAAGAGC` instead of `SEQ`.
+
+  Restores the v0.6.11 contract: a user-supplied `-a2` always determines the
+  Read 2 adapter, and presets or auto-detection supply a default only in its
+  absence.
+
+  **This affects every v2 release** (v2.1.0 through v2.3.0), not only v2.3.0, so
+  downgrading within v2 is not a workaround. The reporter measured a ~20% drop
+  in mapping rate and properly-paired alignments after moving from 0.6.11 —
+  consistent with a pair-retention change, since trimming Read 2 correctly also
+  alters which pairs survive the joint `--length` filter.
+
+  **Trimmed output changes for affected invocations, on both reads.** Read 1's
+  per-read trimming is untouched, but the joint pair-length filter retains a
+  different set of pairs once Read 2 is trimmed correctly, so `_val_1.fq.gz`
+  differs too. Invocations that already passed `-a` are unchanged, as are all
+  invocations that do not pass `-a2`.
+
+  Also in this fix:
+
+  - `-a2` is now validated on every path, so a malformed value (invalid
+    characters, an empty string, a missing `file:` FASTA) is **rejected** rather
+    than silently discarded. Previously only the `-a` path checked it.
+  - `-a2` given where it cannot apply — single-end input, or `--hardtrim5/3`,
+    `--clock`, `--implicon`, which perform no adapter trimming — now warns
+    instead of being silently dropped. A malformed `-a2` is *not* fatal in those
+    modes: a value the run has already announced it will ignore should not fail
+    the run.
+  - Single-end runs no longer print an `Adapter 2 (Read 2):` line for an adapter
+    they will not use. This also applies to single-end `--small_rna` and
+    `--bgiseq` runs that pass no `-a2` at all, since those presets set a Read 2
+    default regardless of pairing.
+  - Displacing a preset's own Read 2 default (`--small_rna`, `--bgiseq`) prints
+    a NOTE naming the default that was not used.
+  - `--consider_already_trimmed` keeps precedence: when it suppresses adapter
+    trimming, `-a2` is not applied either, so both reads stay untrimmed and the
+    mode's "only quality trimming" statement remains true.
+  - `A{N}` brace expansion, repeated `-a2`, and `-a2 file:adapters.fa` now work
+    on every path; the documentation had described these as supported since v2,
+    but they only ever worked alongside `-a`. Two documented examples in the
+    adapter guide were consequently no-ops and are correct as written from this
+    release.
+
+  The Perl-parity CI matrix never passed `-a2`, which is why byte-identity
+  checks did not catch this. A validation case covering `-a2` with a preset and
+  with auto-detection is added, and was confirmed to fail against a pre-fix
+  binary.
+
 - **`--fastqc` now runs on `--output-format ubam` output** for both single-end
   and paired-end runs. The uBAM-output path previously silently skipped the
   bundled FastQC pass even when `--fastqc` (or `--fastqc_args`) was requested;

@@ -9,7 +9,7 @@ Run `trim_galore --help` for the complete list of options with one-line descript
 
 A few combinations are worth knowing about:
 
-- **`--small_rna`** lowers the `--length` default to 18 bp (from 20) and auto-sets `--adapter2` to the Illumina small RNA 5' adapter (`GATCGTCGGACT`) for paired-end data.
+- **`--small_rna`** lowers the `--length` default to 18 bp (from 20) and auto-sets `--adapter2` to the Illumina small RNA 5' adapter (`GATCGTCGGACT`) for paired-end data, unless the user provides their own `--adapter2` value. The same holds for `--bgiseq`, which auto-sets the BGISEQ-500 Read 2 adapter.
 - **`--rrbs`** in paired-end directional mode auto-sets `--clip_R2 2` to mask the 2 bp end-repair bias at the start of Read 2, unless the user provides their own `--clip_R2` value. `--non_directional` intentionally skips this auto-clip.
 - **`--paired` + `--length`** discards the whole read pair unless *both* reads pass the length cutoff. To rescue the surviving read when only one becomes too short, add `--retain_unpaired`; the per-side cutoff is governed by `--length_1`/`--length_2` (default 35 bp each).
 - **`--trim-n`** is suppressed under `--rrbs` (matches Perl v0.6.x; N-trimming interacts poorly with RRBS end-repair masking).
