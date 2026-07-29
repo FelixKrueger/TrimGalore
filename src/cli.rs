@@ -54,8 +54,8 @@ pub struct Cli {
     #[clap(short = 'a', long = "adapter")]
     pub adapter: Vec<String>,
 
-    /// Optional adapter sequence for Read 2 (paired-end only).
-    /// Auto-set by --small_rna and --bgiseq presets.
+    /// Optional adapter sequence for Read 2 (paired-end only). Takes precedence
+    /// over the Read 2 default that --small_rna and --bgiseq otherwise set.
     /// Supports A{N} shorthand for repeated single bases (e.g., -a2 T{150} → 150 T's).
     /// For multiple adapters, repeat -a2 (e.g., -a2 SEQ1 -a2 SEQ2) or use "file:adapters.fa".
     #[clap(long = "adapter2", alias = "a2")]
@@ -70,7 +70,7 @@ pub struct Cli {
     pub nextera: bool,
 
     /// Use Illumina Small RNA adapter (TGGAATTCTCGG).
-    /// Also lowers --length default to 18 and sets --adapter2 (GATCGTCGGACT, Illumina small RNA 5').
+    /// Also lowers --length default to 18 and sets --adapter2 (GATCGTCGGACT, Illumina small RNA 5') unless given.
     #[clap(long = "small_rna", conflicts_with_all = &["illumina", "nextera", "stranded_illumina", "bgiseq"])]
     pub small_rna: bool,
 
@@ -79,7 +79,7 @@ pub struct Cli {
     #[clap(long = "stranded_illumina", conflicts_with_all = &["illumina", "nextera", "small_rna", "bgiseq"])]
     pub stranded_illumina: bool,
 
-    /// Use BGI/DNBSEQ adapter. Sets --adapter2 for Read 2. Also probed by auto-detection.
+    /// Use BGI/DNBSEQ adapter. Sets --adapter2 for Read 2 unless given. Also probed by auto-detection.
     #[clap(long = "bgiseq", conflicts_with_all = &["illumina", "nextera", "small_rna", "stranded_illumina"])]
     pub bgiseq: bool,
 
@@ -932,6 +932,31 @@ impl Cli {
         for path in &self.input {
             if !path.exists() {
                 anyhow::bail!("Input file not found: {}", path.display());
+            }
+        }
+
+        // #369 — say when -a2 cannot be used, otherwise validate it up front so a
+        // malformed value fails before the auto-detection scan. A value the run is
+        // about to ignore is not worth failing on.
+        if !self.adapter2.is_empty() {
+            let unusable_reason = if self.hardtrim5.is_some() || self.hardtrim3.is_some() {
+                Some("--hardtrim5/--hardtrim3 perform no adapter trimming")
+            } else if self.clock {
+                Some("--clock performs no adapter trimming")
+            } else if self.implicon.is_some() {
+                Some("--implicon performs no adapter trimming")
+            } else if !self.paired {
+                Some("it applies to Read 2 of a pair, and this is a single-end run")
+            } else {
+                None
+            };
+            match unusable_reason {
+                Some(reason) => eprintln!(
+                    "WARNING: -a2/--adapter2 was given but is not used in this mode ({reason}). Ignoring."
+                ),
+                None => {
+                    crate::adapter::parse_adapter_specs_quiet(&self.adapter2)?;
+                }
             }
         }
 

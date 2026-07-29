@@ -331,6 +331,29 @@ jobs:
             [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
           done
 
+      - name: Validate -a2 with a preset and with auto-detection (#369)
+        run: |
+          # Guards the #369 bug class: -a2 used to be honoured only alongside -a,
+          # so every preset and the default auto-detect path silently discarded it.
+          # Perl 0.6.11 accepts -a2 with a preset (it rejects only -a + preset), so
+          # both invocations are directly comparable.
+          for mode in "--illumina" ""; do
+            rm -rf /tmp/tg_a2 /tmp/rust_a2; mkdir -p /tmp/tg_a2 /tmp/rust_a2
+            conda run -n perl_tg trim_galore_perl --paired $mode -a2 AAATCAAAAAAAC \
+              -o /tmp/tg_a2 test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+            ./target/release/trim_galore --paired $mode -a2 AAATCAAAAAAAC \
+              -o /tmp/rust_a2 test_files/BS-seq_10K_R1.fastq.gz test_files/BS-seq_10K_R2.fastq.gz
+            for f in BS-seq_10K_R1_val_1.fq.gz BS-seq_10K_R2_val_2.fq.gz; do
+              TG_MD5=$(gzip -dc /tmp/tg_a2/$f | md5sum | cut -d' ' -f1)
+              RUST_MD5=$(gzip -dc /tmp/rust_a2/$f | md5sum | cut -d' ' -f1)
+              echo "[mode='${mode:-autodetect}'] $f: TG=$TG_MD5 RUST=$RUST_MD5"
+              [ "$TG_MD5" = "$RUST_MD5" ] || { echo "MISMATCH: $f differs!"; exit 1; }
+            done
+            # The R2 adapter must be the -a2 sequence, not a preset default.
+            grep -q 'a AAATCAAAAAAAC' /tmp/rust_a2/BS-seq_10K_R2.fastq.gz_trimming_report.txt \
+              || { echo "R2 was not trimmed with the -a2 sequence!"; exit 1; }
+          done
+
       - name: Validate multi-pair paired-end (regression guard — beta-1 reporter scenario)
         run: |
           rm -rf /tmp/rust_multi; mkdir -p /tmp/rust_multi

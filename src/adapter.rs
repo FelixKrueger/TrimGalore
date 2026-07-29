@@ -300,6 +300,16 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
 ///   - Embedded multi: `" SEQ1 -a SEQ2 -a SEQ3"` → 3 entries (leading space + `-a` separators)
 ///   - FASTA file: `"file:path/to/adapters.fa"` → entries from FASTA
 pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
+    parse_adapter_spec_inner(raw, true)
+}
+
+/// As [`parse_adapter_spec`], but silent — for validating a spec without
+/// re-announcing a brace expansion the trimming run will announce itself.
+pub fn parse_adapter_spec_quiet(raw: &str) -> Result<Vec<(String, String)>> {
+    parse_adapter_spec_inner(raw, false)
+}
+
+fn parse_adapter_spec_inner(raw: &str, announce: bool) -> Result<Vec<(String, String)>> {
     // Case 1: FASTA file reference
     if let Some(path) = raw.strip_prefix("file:") {
         return read_fasta_adapters(path.trim());
@@ -338,7 +348,9 @@ pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
                 seq
             );
         }
-        eprintln!("Adapter sequence {} expanded to {}", seq, expanded);
+        if announce {
+            eprintln!("Adapter sequence {} expanded to {}", seq, expanded);
+        }
         seq = expanded;
     }
     validate_adapter_sequence(&seq)?;
@@ -354,9 +366,19 @@ pub fn parse_adapter_spec(raw: &str) -> Result<Vec<(String, String)>> {
 /// `-a SEQ -a "file:adapters.fa"` all work and produce a flat,
 /// renumbered list.
 pub fn parse_adapter_specs(specs: &[String]) -> Result<Vec<(String, String)>> {
+    parse_adapter_specs_inner(specs, true)
+}
+
+/// As [`parse_adapter_specs`], but silent. Used to reject a malformed `-a2`
+/// during CLI validation without duplicating the expansion notice.
+pub fn parse_adapter_specs_quiet(specs: &[String]) -> Result<Vec<(String, String)>> {
+    parse_adapter_specs_inner(specs, false)
+}
+
+fn parse_adapter_specs_inner(specs: &[String], announce: bool) -> Result<Vec<(String, String)>> {
     let mut result: Vec<(String, String)> = Vec::new();
     for spec in specs {
-        for (_name, seq) in parse_adapter_spec(spec)? {
+        for (_name, seq) in parse_adapter_spec_inner(spec, announce)? {
             result.push((format!("adapter_{}", result.len() + 1), seq));
         }
     }
