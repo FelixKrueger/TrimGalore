@@ -154,6 +154,45 @@ jobs:
       - name: cargo clippy (release, all targets, -D warnings)
         run: cargo clippy --all-targets --release -- -D warnings
 
+  # docs.yml builds the same site to deploy it; this builds it to gate PRs.
+  docs-build:
+    name: Docs build (Astro)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Astro requires >=22.12.0; pin to 24 (current Active LTS).
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build site
+        run: npm run build
+
+      - name: Assert build output
+        # A satori failure can leave a zero-byte PNG while the build still exits 0.
+        run: |
+          test -d dist/og
+          html=$(find dist -name '*.html' | wc -l)
+          png=$(find dist/og -name '*.png' | wc -l)
+          echo "$html HTML pages, $png OG images"
+          test "$html" -ge 1
+          test "$png"  -ge 1
+          runt=$(find dist/og -name '*.png' -size -10240c)
+          if [ -n "$runt" ]; then echo "Undersized OG images:"; echo "$runt"; exit 1; fi
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest

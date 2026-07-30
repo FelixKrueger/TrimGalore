@@ -1,6 +1,6 @@
 // Rasterise the brand SVG logos to PNG at sensible high-resolution sizes.
 //
-// Run via `npm run logos` from the Docs/ workspace. Idempotent — overwrites
+// Run via `npm run logos` from the docs/ workspace. Idempotent — overwrites
 // existing PNGs in public/logos/. Re-run whenever the source SVGs change.
 //
 // `sharp` is already a docs dependency (used elsewhere by Astro for image

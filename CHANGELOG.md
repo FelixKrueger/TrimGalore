@@ -223,6 +223,25 @@
   are unaffected by a mixed pair, and for `--clock` / `--implicon`, which
   continue to report their own (separate) error on such input.
 
+#### Infrastructure (contributor-facing)
+
+- **New `docs-build` CI job.** Every pull request now builds the Astro docs site
+  and asserts the build produced HTML pages and non-empty satori OG images.
+  Previously `docs.yml` triggered only on `push` to `master`/`dev`, so a docs
+  change — or a docs dependency bump — was first validated by the live deploy on
+  the trunk. Found while merging a `satori` 0.28 → 0.29 bump whose eight green
+  checks were all Rust.
+
+  The OG-image assertion is the part worth having: a renderer failure can leave a
+  zero-byte PNG while the build still exits 0, so build status alone is not
+  evidence. The check uses a byte floor rather than a zero-size test, because
+  `find -size -1k` rounds up to a block and misses a truncated file.
+
+- **`justfile` docs recipes fixed.** `logos`, `docs` and `docs-dev` ran
+  `cd Docs`; the directory is `docs/`. These worked on case-insensitive
+  filesystems and failed on Linux, which defeated the recipes' purpose of giving
+  contributors local CI parity.
+
 
 ### Version 2.3.0 (Release on 27 June 2026)
 
