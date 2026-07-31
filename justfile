@@ -81,17 +81,17 @@ validate-paired-end:
         fi; \
     done
 
-# Regenerate PNG logos from the SVG sources (in Docs/).
+# Regenerate PNG logos from the SVG sources (in docs/).
 logos:
-    cd Docs && npm run logos
+    cd docs && npm run logos
 
-# Build the docs site (in Docs/).
+# Build the docs site (in docs/).
 docs:
-    cd Docs && npm run build
+    cd docs && npm run build
 
-# Serve the docs site locally for preview (in Docs/).
+# Serve the docs site locally for preview (in docs/).
 docs-dev:
-    cd Docs && npm run dev
+    cd docs && npm run dev
 
 # Show all available recipes.
 help:

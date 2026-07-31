@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ci.yml's docs-build job builds the same site to gate PRs; keep the steps in step.
   build:
     runs-on: ubuntu-latest
     defaults:
