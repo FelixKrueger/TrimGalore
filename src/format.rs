@@ -258,9 +258,12 @@ pub fn open_sync_reader(
     preserve_tags: &[String],
 ) -> Result<Box<dyn crate::fastq::RecordSource>> {
     match detect_input_format(path)? {
-        InputFormat::FastqPlain | InputFormat::FastqGz => {
-            Ok(Box::new(crate::fastq::FastqReader::open(path)?))
-        }
+        // The detected format is authoritative: it comes from file content,
+        // whereas `FastqReader::open` would re-derive it from the filename and
+        // get `.fq.bgz` wrong.
+        fmt @ (InputFormat::FastqPlain | InputFormat::FastqGz) => Ok(Box::new(
+            crate::fastq::FastqReader::open_with(path, fmt == InputFormat::FastqGz)?,
+        )),
         InputFormat::UnalignedBam => Ok(Box::new(
             crate::bam::BamReader::open(path)?.with_preserved_tags(preserve_tags),
         )),
@@ -275,9 +278,10 @@ pub fn open_threaded_reader(
     preserve_tags: &[String],
 ) -> Result<Box<dyn crate::fastq::RecordSource>> {
     match detect_input_format(path)? {
-        InputFormat::FastqPlain | InputFormat::FastqGz => {
-            Ok(Box::new(crate::fastq::FastqReader::open_threaded(path)?))
-        }
+        // Detected format wins over the filename; see `open_sync_reader`.
+        fmt @ (InputFormat::FastqPlain | InputFormat::FastqGz) => Ok(Box::new(
+            crate::fastq::FastqReader::open_threaded_with(path, fmt == InputFormat::FastqGz)?,
+        )),
         InputFormat::UnalignedBam => Ok(Box::new(crate::bam::BamReader::open_threaded_with_tags(
             path,
             preserve_tags,
@@ -291,6 +295,46 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use std::io::Write;
+
+    /// REGRESSION. `.fq.bgz` is detected as `FastqGz` from its decompressed
+    /// payload; the factory must hand that answer to `FastqReader` rather than
+    /// letting it re-derive one from the filename. Before this change the run
+    /// died with "stream did not contain valid UTF-8".
+    #[test]
+    fn sync_reader_decompresses_gzip_under_non_gz_extension() -> Result<()> {
+        let dir = fresh_tmpdir("tg_format_bgz_reader");
+        let p = dir.join("s.fq.bgz");
+        {
+            let mut enc = GzEncoder::new(std::fs::File::create(&p)?, Compression::default());
+            enc.write_all(b"@r1\nACGT\n+\nIIII\n")?;
+            enc.finish()?;
+        }
+        assert_eq!(detect_input_format(&p)?, InputFormat::FastqGz);
+
+        let mut reader = open_sync_reader(&p, &[])?;
+        let rec = reader.next_record()?.expect("one record");
+        assert_eq!(rec.id, "@r1");
+        assert_eq!(rec.seq, "ACGT");
+        assert!(reader.next_record()?.is_none());
+        Ok(())
+    }
+
+    /// Same file, threaded factory.
+    #[test]
+    fn threaded_reader_decompresses_gzip_under_non_gz_extension() -> Result<()> {
+        let dir = fresh_tmpdir("tg_format_bgz_reader_threaded");
+        let p = dir.join("s.fq.bgz");
+        {
+            let mut enc = GzEncoder::new(std::fs::File::create(&p)?, Compression::default());
+            enc.write_all(b"@r1\nACGT\n+\nIIII\n")?;
+            enc.finish()?;
+        }
+
+        let mut reader = open_threaded_reader(&p, &[])?;
+        assert_eq!(reader.next_record()?.expect("one record").id, "@r1");
+        assert!(reader.next_record()?.is_none());
+        Ok(())
+    }
 
     fn fresh_tmpdir(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(slug);

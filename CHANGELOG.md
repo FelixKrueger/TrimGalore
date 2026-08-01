@@ -3,6 +3,23 @@
 
 ### Unreleased
 
+#### Bug fixes
+
+- **Gzipped input under an extension other than `.gz`** (for example
+  `bgzip`-produced `.fq.bgz`) failed with `stream did not contain valid
+  UTF-8`. The input format is detected from file *content*, but that verdict
+  was then discarded and re-derived from the *filename* in three places
+  (`FastqReader::open`, `FastqReader::open_threaded`, and
+  `FastqReader::sanity_check`), so the compressed bytes were read as text.
+  The detected format is now passed down to all three. New
+  `open_with` / `open_threaded_with` / `sanity_check_with` constructors take
+  the verdict from the caller; the filename-based entry points remain for
+  callers that have not run detection.
+  Known limitation: output compression still mirrors the input *filename*, so
+  a `.bgz` input produces plain `.fq` output. Moving that decision to the
+  detected format would change behaviour for every run (including a plain file
+  misnamed `.gz`) and is left to a separate change.
+
 #### Changes
 
 - **`--clump_only` now supports uBAM in/out** — extending the mode with
