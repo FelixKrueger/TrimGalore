@@ -15,7 +15,8 @@ export default defineConfig({
   // are typed literally throughout, so nothing is lost.
   markdown: {
     smartypants: false,
-    remarkPlugins: [remarkMath],
+    // Single-dollar inline math off: `$` in prose was being consumed as maths.
+    remarkPlugins: [[remarkMath, { singleDollarTextMath: false }]],
     rehypePlugins: [rehypeKatex, [addClasses, { ".katex": "not-content" }]],
   },
   integrations: [

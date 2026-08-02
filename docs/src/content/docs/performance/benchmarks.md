@@ -126,6 +126,7 @@ CPU time is what cloud providers bill for and what drives energy consumption. Tr
 | Single-threaded | 4,437s | 329s | **13.49×** |
 | 8 cores (nf-core default) | 2,972s | 501s | **5.93×** |
 
+<!-- Tilde escapes below guard GFM single-tilde strikethrough, not dollar maths. -->
 On AWS at \~$0.05/vCPU-hour, trimming 84M PE reads at the nf-core default costs roughly **$0.041 with TG** vs **$0.007 with the Rust v2 build** — a 5.9× saving per sample. Across a 1000-sample cohort that scales to **\~$41 with TG vs \~$7 with Rust v2**, with proportional savings in carbon footprint and shared-cluster CPU-hour pressure.
 
 ### Output file size

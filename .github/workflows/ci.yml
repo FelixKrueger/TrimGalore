@@ -193,6 +193,29 @@ jobs:
           runt=$(find dist/og -name '*.png' -size -10240c)
           if [ -n "$runt" ]; then echo "Undersized OG images:"; echo "$runt"; exit 1; fi
 
+      - name: Assert no silent render corruption
+        # Two of these shipped to the live site; all three keep the build green.
+        run: |
+          test -d dist
+          fail=0
+          for pat in 'katex-error' '<img[^>]*src="[Dd]ocs/' '<del>'; do
+            if grep -rlE --include='*.html' -- "$pat" dist; then
+              echo "::error::'$pat' in built output (files above)"
+              echo "  <del> means a bare '~' opened GFM strikethrough: escape it as \\~ in the source .md."
+              fail=1
+            fi
+          done
+          # clumpy.md's $$ display maths is the only legitimate KaTeX on the site;
+          # anything else means a bare $ in prose was parsed as maths.
+          stray=$(grep -rlF --include='*.html' -- 'class="katex' dist \
+                  | grep -v '^dist/performance/clumpy/index.html$' || true)
+          if [ -n "$stray" ]; then
+            echo "::error::unexpected rendered maths (a bare \$ in prose?):"
+            echo "$stray"
+            fail=1
+          fi
+          exit $fail
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest
