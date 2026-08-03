@@ -1,1 +1,7 @@
 archived/
+
+# Spike build artefacts and generated inputs. Recreate by running the spike's
+# own script or `cargo build --release` from its directory; the SPIKE_*.md
+# report records the parameters each was built with.
+**/target/
+**/fixture.fastq

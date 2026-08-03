@@ -1,0 +1,19 @@
+[package]
+name = "paraseq-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+paraseq = "=0.4.13"
+anyhow = "1"
+
+[[bin]]
+name = "spike_paraseq"
+path = "spike_paraseq.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "debuginfo"
