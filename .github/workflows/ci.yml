@@ -197,6 +197,12 @@ jobs:
         # Two of these shipped to the live site; all three keep the build green.
         run: |
           test -d dist
+          # Positive control: prove these greps can still match before trusting a
+          # null result. clumpy.md's $$ display maths is the one page that must
+          # always be found, and the only legitimate KaTeX on the site.
+          grep -rlF --include='*.html' -- 'class="katex' dist \
+            | grep -q '^dist/performance/clumpy/index.html$' \
+            || { echo "::error::positive control failed - clumpy maths not found, so a clean result here proves nothing"; exit 1; }
           fail=0
           for pat in 'katex-error' '<img[^>]*src="[Dd]ocs/' '<del>'; do
             if grep -rlE --include='*.html' -- "$pat" dist; then
@@ -205,8 +211,7 @@ jobs:
               fail=1
             fi
           done
-          # clumpy.md's $$ display maths is the only legitimate KaTeX on the site;
-          # anything else means a bare $ in prose was parsed as maths.
+          # Any other page with rendered maths means a bare $ in prose was parsed.
           stray=$(grep -rlF --include='*.html' -- 'class="katex' dist \
                   | grep -v '^dist/performance/clumpy/index.html$' || true)
           if [ -n "$stray" ]; then
