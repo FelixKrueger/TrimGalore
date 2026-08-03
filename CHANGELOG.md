@@ -83,6 +83,20 @@
 
 #### Fixes
 
+- **Documentation site: `$` in prose is no longer eaten as maths.** The docs
+  pipeline enables `remark-math`, which by default treats single dollars as
+  inline-maths delimiters. Prices in the changelog and benchmark pages were
+  being consumed: `~$7 vs ~$41 per 1000-sample cohort at AWS $0.05/vCPU-hour`
+  rendered with two `$` deleted and `7vs` italicised, and a whole sentence on
+  the benchmarks page rendered in red as a KaTeX parse error. Single-dollar
+  inline maths is now disabled; `$$` display maths is unaffected.
+
+- **Documentation site: the multi-threading benchmark image now loads.** The
+  v0.6.0 entry pointed at `docs/Images/pigz_bench.png`, a path that exists in
+  neither the repository nor the built site, so the image was broken in both
+  GitHub and web renderings. The asset now lives in `docs/public/images/` and
+  is referenced by absolute URL so one tag serves both renderers.
+
 - **`-a2`/`--adapter2` is no longer ignored unless `-a` is also given**
   ([#369](https://github.com/FelixKrueger/TrimGalore/issues/369), reported by
   @MathieuUm). Adapter resolution was an early-return chain in which only the
@@ -1161,7 +1175,7 @@ before:         CCTAAGGAAACAAGTACACTCCACACATGCATAAAGGAAATCAAATGTTATTTTTAAGAAAATG
 
 * Added multi-threading support with the new option `-j/--cores INT`; many thanks to Frankie James for initiating this. Multi-threading support works effectively if Cutadapt is run with Python 3, and if parallel gzip (`pigz`) is installed:
 
-<img title="Multi-threading benchmark" style="float:right;margin:20px 20 20 600px" id="Multi-threading support" src="docs/Images/pigz_bench.png" >
+<img title="Multi-threading benchmark" alt="Runtime versus core count for SE and PE trimming with Python 3 and pigz" style="float:right;margin:20px 20 20 600px" id="Multi-threading support" src="https://www.trimgalore.com/images/pigz_bench.png" >
 
 For Cutadapt to work with multiple cores, it requires Python 3 as well as parallel gzip (pigz) installed on the system. The version of Python used is detected from the shebang line of the Cutadapt executable (either 'cutadapt', or a specified path). If Python 2 is detected, `--cores` is set to 1 and multi-core processing will be disabled. If `pigz` cannot be detected on your system, Trim Galore reverts to using `gzip` compression. Please note however, that `gzip` compression will slow down multi-core processes so much that it is hardly worthwhile, please see: [here](https://github.com/FelixKrueger/TrimGalore/issues/16#issuecomment-458557103) for more info).
 
