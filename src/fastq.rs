@@ -27,15 +27,29 @@ const BUF_SIZE: usize = 64 * 1024;
 /// `--clumpify` on top for reordering plus a higher gzip level.
 pub const DEFAULT_GZIP_LEVEL: u32 = 1;
 
-/// Filename-based gzip guess, kept only for the constructors that have no
-/// caller-supplied verdict.
+/// Content-based gzip check for the constructors that have no caller-supplied
+/// verdict.
 ///
-/// This is the weak signal: `bgzip`-produced files are commonly named `.bgz`
-/// and would be misread as plain text. `format::detect_input_format` inspects
-/// the payload instead, and callers that have run it should pass its answer to
-/// [`FastqReader::open_with`] rather than relying on this.
-fn is_gz_filename(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| ext == "gz")
+/// Reads three bytes and looks for the gzip magic. That is cheap enough that
+/// guessing from the filename buys nothing, and the filename is wrong in both
+/// directions: `bgzip` output is commonly named `.bgz`, and a plain FASTQ is
+/// sometimes misnamed `.fastq.gz`.
+///
+/// Deliberately contains no BAM logic, so `fastq` does not gain a dependency on
+/// `format` and the `BAM\1` discrimination stays in `detect_input_format` where
+/// it belongs. It cannot misfire on plain FASTQ, whose first byte is `@` and
+/// never `0x1F`.
+///
+/// Also deliberately not `detect_input_format`, which *bails* on empty input.
+/// `demux` reads back a trimmed output that is legitimately empty when every
+/// read was filtered, and that must not become an error. Any failure here
+/// (missing file, permissions, short file) answers "not gzip" and lets the
+/// subsequent open report the real problem.
+fn sniff_gzip(path: &Path) -> bool {
+    let mut magic = [0u8; 3];
+    File::open(path)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut magic))
+        .is_ok_and(|n| n == 3 && magic == [0x1F, 0x8B, 0x08])
 }
 
 /// A single FASTQ record with owned data.
@@ -263,7 +277,7 @@ impl FastqReader {
     /// the filename is the weaker signal and misses e.g. `.fq.bgz`.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
-        Self::open_with(path, is_gz_filename(path))
+        Self::open_with(path, sniff_gzip(path))
     }
 
     /// Open a FASTQ file for synchronous reading.
@@ -289,7 +303,7 @@ impl FastqReader {
     /// known from file content.
     pub fn open_threaded<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
-        Self::open_threaded_with(path, is_gz_filename(path))
+        Self::open_threaded_with(path, sniff_gzip(path))
     }
 
     /// Open a FASTQ file with background decompression on a dedicated thread.
@@ -508,7 +522,7 @@ impl FastqReader {
     /// known from file content.
     pub fn sanity_check<P: AsRef<Path>>(path: P) -> Result<()> {
         let path = path.as_ref();
-        Self::sanity_check_with(path, is_gz_filename(path))
+        Self::sanity_check_with(path, sniff_gzip(path))
     }
 
     /// Perform input sanity checks on the first record.
@@ -1004,14 +1018,18 @@ mod tests {
         write_gz(&p, "@r1\nACGT\n+\nIIII\n")?;
 
         FastqReader::sanity_check_with(&p, true)?;
-        // And the filename-based entry point still gets it wrong, which is
-        // exactly why callers with a content-detected verdict must not use it.
-        assert!(FastqReader::sanity_check(&p).is_err());
+        // The un-suffixed entry point must agree: it sniffs the content too,
+        // so there is no longer a "wrong" default to fall into.
+        FastqReader::sanity_check(&p)?;
         Ok(())
     }
 
     /// A `.gz`-named plain file: the caller's `false` must win over the
     /// filename, the mirror image of the `.bgz` case.
+    ///
+    /// This direction is a user-visible behaviour change, not only an internal
+    /// one: before, a plain FASTQ misnamed `.fastq.gz` failed with
+    /// `invalid gzip header`, and now it reads. See the CHANGELOG entry.
     #[test]
     fn open_with_honours_a_plain_verdict_on_a_gz_name() -> Result<()> {
         let dir = gz_tmpdir("tg_fastq_plain_gz_name");
