@@ -27,6 +27,31 @@ const BUF_SIZE: usize = 64 * 1024;
 /// `--clumpify` on top for reordering plus a higher gzip level.
 pub const DEFAULT_GZIP_LEVEL: u32 = 1;
 
+/// Content-based gzip check for the constructors that have no caller-supplied
+/// verdict.
+///
+/// Reads three bytes and looks for the gzip magic. That is cheap enough that
+/// guessing from the filename buys nothing, and the filename is wrong in both
+/// directions: `bgzip` output is commonly named `.bgz`, and a plain FASTQ is
+/// sometimes misnamed `.fastq.gz`.
+///
+/// Deliberately contains no BAM logic, so `fastq` does not gain a dependency on
+/// `format` and the `BAM\1` discrimination stays in `detect_input_format` where
+/// it belongs. It cannot misfire on plain FASTQ, whose first byte is `@` and
+/// never `0x1F`.
+///
+/// Also deliberately not `detect_input_format`, which *bails* on empty input.
+/// `demux` reads back a trimmed output that is legitimately empty when every
+/// read was filtered, and that must not become an error. Any failure here
+/// (missing file, permissions, short file) answers "not gzip" and lets the
+/// subsequent open report the real problem.
+fn sniff_gzip(path: &Path) -> bool {
+    let mut magic = [0u8; 3];
+    File::open(path)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut magic))
+        .is_ok_and(|n| n == 3 && magic == [0x1F, 0x8B, 0x08])
+}
+
 /// A single FASTQ record with owned data.
 #[derive(Debug, Clone)]
 pub struct FastqRecord {
@@ -244,20 +269,24 @@ pub struct FastqReader {
 }
 
 impl FastqReader {
-    /// Open a FASTQ file for synchronous reading.
+    /// Open a FASTQ file for synchronous reading, deciding gzip from the
+    /// filename.
+    ///
+    /// Prefer [`FastqReader::open_with`] when the caller already knows the
+    /// format from file *content* (as `format::detect_input_format` does):
+    /// the filename is the weaker signal and misses e.g. `.fq.bgz`.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
-        let file = File::open(path)
-            .with_context(|| format!("Failed to open input file: {}", path.display()))?;
+        Self::open_with(path, sniff_gzip(path))
+    }
 
-        let reader: Box<dyn BufRead + Send> = if path.extension().is_some_and(|ext| ext == "gz") {
-            Box::new(BufReader::with_capacity(
-                BUF_SIZE,
-                MultiGzDecoder::new(file),
-            ))
-        } else {
-            Box::new(BufReader::with_capacity(BUF_SIZE, file))
-        };
+    /// Open a FASTQ file for synchronous reading.
+    ///
+    /// `is_gzip` comes from the caller, normally `format::detect_input_format`,
+    /// which inspects file content rather than the filename.
+    pub fn open_with<P: AsRef<Path>>(path: P, is_gzip: bool) -> Result<Self> {
+        let path = path.as_ref();
+        let reader = Self::open_reader(path, is_gzip)?;
 
         Ok(FastqReader {
             source: ReaderSource::Direct {
@@ -267,13 +296,25 @@ impl FastqReader {
         })
     }
 
+    /// Open a FASTQ file with background decompression on a dedicated thread,
+    /// deciding gzip from the filename.
+    ///
+    /// Prefer [`FastqReader::open_threaded_with`] when the format is already
+    /// known from file content.
+    pub fn open_threaded<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        Self::open_threaded_with(path, sniff_gzip(path))
+    }
+
     /// Open a FASTQ file with background decompression on a dedicated thread.
     ///
     /// Returns immediately. A background thread reads and decompresses
     /// the file, sending records through a bounded channel. The main
     /// thread calls `next_record()` which receives from the channel,
     /// overlapping decompression with processing.
-    pub fn open_threaded<P: AsRef<Path>>(path: P) -> Result<Self> {
+    ///
+    /// `is_gzip` comes from the caller; see [`FastqReader::open_with`].
+    pub fn open_threaded_with<P: AsRef<Path>>(path: P, is_gzip: bool) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
         // Validate the file exists before spawning the thread
@@ -284,7 +325,7 @@ impl FastqReader {
         let (tx, rx) = std::sync::mpsc::sync_channel(READER_CHANNEL_BATCHES);
 
         let handle = std::thread::spawn(move || {
-            let mut reader = match Self::open_direct(&path) {
+            let mut reader = match Self::open_direct(&path, is_gzip) {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = tx.send(Err(e));
@@ -333,20 +374,27 @@ impl FastqReader {
         })
     }
 
-    /// Internal: open a file and return the raw reader components (for use in threads).
-    fn open_direct(path: &Path) -> Result<(Box<dyn BufRead + Send>, String)> {
+    /// Internal: build the buffered byte reader for `path`.
+    ///
+    /// The single place that turns a gzip verdict into a decoder, so the
+    /// verdict is applied identically on the sync and threaded paths.
+    fn open_reader(path: &Path, is_gzip: bool) -> Result<Box<dyn BufRead + Send>> {
         let file = File::open(path)
             .with_context(|| format!("Failed to open input file: {}", path.display()))?;
 
-        let reader: Box<dyn BufRead + Send> = if path.extension().is_some_and(|ext| ext == "gz") {
+        Ok(if is_gzip {
             Box::new(BufReader::with_capacity(
                 BUF_SIZE,
                 MultiGzDecoder::new(file),
             ))
         } else {
             Box::new(BufReader::with_capacity(BUF_SIZE, file))
-        };
+        })
+    }
 
+    /// Internal: open a file and return the raw reader components (for use in threads).
+    fn open_direct(path: &Path, is_gzip: bool) -> Result<(Box<dyn BufRead + Send>, String)> {
+        let reader = Self::open_reader(path, is_gzip)?;
         Ok((reader, String::with_capacity(512)))
     }
 
@@ -467,11 +515,26 @@ impl FastqReader {
         }
     }
 
-    /// Perform input sanity checks on the first record.
-    /// Checks: FASTQ format validation, colorspace detection, empty file.
+    /// Perform input sanity checks on the first record, deciding gzip from the
+    /// filename.
+    ///
+    /// Prefer [`FastqReader::sanity_check_with`] when the format is already
+    /// known from file content.
     pub fn sanity_check<P: AsRef<Path>>(path: P) -> Result<()> {
         let path = path.as_ref();
-        let mut reader = FastqReader::open(path)?;
+        Self::sanity_check_with(path, sniff_gzip(path))
+    }
+
+    /// Perform input sanity checks on the first record.
+    /// Checks: FASTQ format validation, colorspace detection, empty file.
+    ///
+    /// This runs before anything else in `main()`, so it is the first place a
+    /// wrong gzip verdict surfaces: on a `.fq.bgz` input it read the
+    /// compressed bytes as text and failed with "stream did not contain valid
+    /// UTF-8" before the reader factories were ever reached.
+    pub fn sanity_check_with<P: AsRef<Path>>(path: P, is_gzip: bool) -> Result<()> {
+        let path = path.as_ref();
+        let mut reader = FastqReader::open_with(path, is_gzip)?;
 
         match reader.next_record()? {
             None => bail!(
@@ -891,5 +954,91 @@ mod tests {
             read_id_prefix("@SRR12345.1/1"),
             read_id_prefix("@SRR12345.1/3"),
         );
+    }
+
+    // ---- caller-supplied gzip verdict ----
+
+    fn gz_tmpdir(slug: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(slug);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_gz(path: &Path, body: &str) -> Result<()> {
+        let mut enc = GzEncoder::new(File::create(path)?, Compression::default());
+        write!(enc, "{body}")?;
+        enc.finish()?;
+        Ok(())
+    }
+
+    /// REGRESSION. `.fq.bgz` is gzip content under a non-`.gz` extension.
+    /// `format::detect_input_format` classifies it `FastqGz` from the
+    /// decompressed payload, but `FastqReader::open` derived the verdict from
+    /// the filename and read the compressed bytes as text, failing with
+    /// "stream did not contain valid UTF-8". `open_with` takes the caller's
+    /// already-correct answer instead.
+    #[test]
+    fn open_with_reads_gzip_under_non_gz_extension() -> Result<()> {
+        let dir = gz_tmpdir("tg_fastq_bgz");
+        let p = dir.join("s.fq.bgz");
+        write_gz(&p, "@r1\nACGT\n+\nIIII\n@r2\nTTTT\n+\nJJJJ\n")?;
+
+        let mut reader = FastqReader::open_with(&p, true)?;
+        let first = reader.next_record()?.expect("first record");
+        assert_eq!(first.id, "@r1");
+        assert_eq!(first.seq, "ACGT");
+        let second = reader.next_record()?.expect("second record");
+        assert_eq!(second.id, "@r2");
+        assert!(reader.next_record()?.is_none());
+        Ok(())
+    }
+
+    /// The same file through the threaded constructor: the verdict has to
+    /// cross the thread boundary, which is a separate code path.
+    #[test]
+    fn open_threaded_with_reads_gzip_under_non_gz_extension() -> Result<()> {
+        let dir = gz_tmpdir("tg_fastq_bgz_threaded");
+        let p = dir.join("s.fq.bgz");
+        write_gz(&p, "@r1\nACGT\n+\nIIII\n@r2\nTTTT\n+\nJJJJ\n")?;
+
+        let mut reader = FastqReader::open_threaded_with(&p, true)?;
+        assert_eq!(reader.next_record()?.expect("first record").id, "@r1");
+        assert_eq!(reader.next_record()?.expect("second record").id, "@r2");
+        assert!(reader.next_record()?.is_none());
+        Ok(())
+    }
+
+    /// `sanity_check` runs before everything else in `main()`, so it is the
+    /// first place the wrong verdict surfaced.
+    #[test]
+    fn sanity_check_with_accepts_gzip_under_non_gz_extension() -> Result<()> {
+        let dir = gz_tmpdir("tg_fastq_bgz_sanity");
+        let p = dir.join("s.fq.bgz");
+        write_gz(&p, "@r1\nACGT\n+\nIIII\n")?;
+
+        FastqReader::sanity_check_with(&p, true)?;
+        // The un-suffixed entry point must agree: it sniffs the content too,
+        // so there is no longer a "wrong" default to fall into.
+        FastqReader::sanity_check(&p)?;
+        Ok(())
+    }
+
+    /// A `.gz`-named plain file: the caller's `false` must win over the
+    /// filename, the mirror image of the `.bgz` case.
+    ///
+    /// This direction is a user-visible behaviour change, not only an internal
+    /// one: before, a plain FASTQ misnamed `.fastq.gz` failed with
+    /// `invalid gzip header`, and now it reads. See the CHANGELOG entry.
+    #[test]
+    fn open_with_honours_a_plain_verdict_on_a_gz_name() -> Result<()> {
+        let dir = gz_tmpdir("tg_fastq_plain_gz_name");
+        let p = dir.join("plain.fq.gz");
+        std::fs::write(&p, b"@r1\nACGT\n+\nIIII\n")?;
+
+        let mut reader = FastqReader::open_with(&p, false)?;
+        assert_eq!(reader.next_record()?.expect("record").id, "@r1");
+        assert!(reader.next_record()?.is_none());
+        Ok(())
     }
 }

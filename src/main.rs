@@ -14,7 +14,8 @@ use trim_galore::fastq::{FastqReader, FastqWriter, RecordSource};
 use trim_galore::fastqc;
 use trim_galore::filters::{MaxNFilter, UnpairedLengths};
 use trim_galore::format::{
-    InputFormat, PairedShape, detect_input_format, reject_bam_format_mismatch_in_pair,
+    InputFormat, PairedShape, detect_input_format, open_sync_reader, open_threaded_reader,
+    reject_bam_format_mismatch_in_pair,
 };
 use trim_galore::io as naming;
 use trim_galore::parallel;
@@ -28,7 +29,12 @@ use trim_galore::trimmer;
 /// catches mixed-aligned BAMs that slip past this fast-path.
 fn sanity_check_any(path: &std::path::Path) -> Result<()> {
     match detect_input_format(path)? {
-        InputFormat::FastqPlain | InputFormat::FastqGz => FastqReader::sanity_check(path),
+        // Hand the content-detected verdict down rather than letting
+        // `sanity_check` re-derive it from the filename, which gets
+        // `.fq.bgz` wrong.
+        fmt @ (InputFormat::FastqPlain | InputFormat::FastqGz) => {
+            FastqReader::sanity_check_with(path, fmt == InputFormat::FastqGz)
+        }
         InputFormat::UnalignedBam => {
             let mut r = BamReader::open(path)?;
             match r.next_record()? {
@@ -39,37 +45,6 @@ fn sanity_check_any(path: &std::path::Path) -> Result<()> {
                 Some(_) => Ok(()),
             }
         }
-    }
-}
-
-/// Open a threaded reader for `path`, dispatching by detected format.
-/// `preserve_tags` is honoured for BAM input; silently ignored for FASTQ.
-fn open_threaded_reader(
-    path: &std::path::Path,
-    preserve_tags: &[String],
-) -> Result<Box<dyn RecordSource>> {
-    match detect_input_format(path)? {
-        InputFormat::FastqPlain | InputFormat::FastqGz => {
-            Ok(Box::new(FastqReader::open_threaded(path)?))
-        }
-        InputFormat::UnalignedBam => Ok(Box::new(BamReader::open_threaded_with_tags(
-            path,
-            preserve_tags,
-        )?)),
-    }
-}
-
-/// Open a sync (single-threaded) reader for `path`, dispatching by detected
-/// format. Used by the `--cores 1` (serial) path.
-fn open_sync_reader(
-    path: &std::path::Path,
-    preserve_tags: &[String],
-) -> Result<Box<dyn RecordSource>> {
-    match detect_input_format(path)? {
-        InputFormat::FastqPlain | InputFormat::FastqGz => Ok(Box::new(FastqReader::open(path)?)),
-        InputFormat::UnalignedBam => Ok(Box::new(
-            BamReader::open(path)?.with_preserved_tags(preserve_tags),
-        )),
     }
 }
 

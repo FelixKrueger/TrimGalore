@@ -3,6 +3,40 @@
 
 ### Unreleased
 
+#### Bug fixes
+
+- **Whether input is gzipped is now decided by reading the file, not by its
+  name.** This corrects two opposite failures:
+
+  - `bgzip`-produced input named `.fq.bgz` (or anything else not ending in
+    `.gz`) failed with `stream did not contain valid UTF-8`, because the
+    compressed bytes were read as text.
+  - A plain FASTQ misnamed `.fastq.gz` failed with `invalid gzip header`.
+    It now reads successfully.
+
+  Both came from the same cause: the format is detected from file *content*,
+  but that verdict was discarded and re-derived from the *filename* by
+  `FastqReader`. Detection is now a three-byte gzip-magic check inside
+  `FastqReader` itself, so every caller gets it right by default, including
+  `--paired` at `--cores 1`, `--passthrough` and `--clump_only`. New
+  `open_with` / `open_threaded_with` / `sanity_check_with` constructors let
+  callers that have already detected the format pass the verdict in and skip
+  the re-check.
+
+  BAM discrimination is unaffected: `detect_input_format` still owns the
+  `BAM\1` payload check, and a `.bam` renamed `.fq.gz` is still read as BAM.
+
+  Two known limitations, both left to separate changes:
+
+  - Output compression still mirrors the input *filename*, so a `.bgz` input
+    produces plain `.fq` output. Moving that decision would change behaviour
+    for every run, including the misnamed-`.gz` file whose input handling
+    changed above.
+  - `.bgz` is not in the extension-stripping list, so a `sample.fq.bgz` input
+    produces `sample.fq_trimmed.fq` alongside
+    `sample.fq.bgz_trimming_report.txt`. MultiQC takes the sample name from
+    the report filename, so the two disagree.
+
 #### Changes
 
 - **`--clump_only` now supports uBAM in/out** — extending the mode with

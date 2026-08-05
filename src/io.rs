@@ -9,13 +9,23 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// True iff `path` ends with a `.gz` extension. The same heuristic that
-/// `FastqReader` uses to decide whether to wrap the input in a gzip
-/// decoder, so output naming + reader behaviour stay consistent.
+/// True iff `path` ends with a `.gz` extension.
+///
+/// **Filename-based on purpose, and no longer the same test the reader uses.**
+/// `FastqReader` decides whether to decompress by sniffing the file's first
+/// three bytes, because the name is unreliable in both directions. This
+/// function keeps looking at the name, because it answers a different
+/// question: not "is this input compressed" but "should the output be".
 ///
 /// Used to mirror input compression in the output filename / writer:
 /// `plain.fastq` → `plain_trimmed.fq` (plain), `plain.fastq.gz` →
 /// `plain_trimmed.fq.gz`. Matches Perl v0.6.x behaviour.
+///
+/// The two can therefore disagree, and today they do: a `.bgz` input is
+/// decompressed correctly but produces plain output, because this returns
+/// false for it. Moving the output decision to the detected format would
+/// change behaviour for every run, including a plain file misnamed `.gz`, so
+/// it is deliberately left for a separate change. See the CHANGELOG.
 pub fn is_gzipped(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "gz")
 }
