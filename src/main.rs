@@ -231,6 +231,16 @@ fn main() -> Result<()> {
              Either convert the uBAM to FASTQ via `samtools fastq` first, or drop --passthrough."
         );
     }
+    // `any_bam` is computed from `cli.input`; the passthrough file is a separate
+    // surface, so it needs its own format check — before any output is created.
+    if let Some(ref pt) = cli.passthrough
+        && matches!(detect_input_format(pt)?, InputFormat::UnalignedBam)
+    {
+        anyhow::bail!(
+            "--passthrough is not supported with uBAM input in this release. \
+             Either convert the uBAM to FASTQ via `samtools fastq` first, or drop --passthrough."
+        );
+    }
     if cli.paired && cli.input.len() == 1 && !matches!(input_formats[0], InputFormat::UnalignedBam)
     {
         anyhow::bail!(
@@ -737,10 +747,12 @@ fn main() -> Result<()> {
             sanity_check_any(&chunk[1])?;
             // --passthrough: sanity-check the third file once (Cli::validate
             // already enforces single-pair-only when passthrough is set).
+            // `sanity_check_any`, not `FastqReader::sanity_check`, so the
+            // passthrough path reaches the #379 restartability guard.
             if pair_idx == 0
                 && let Some(ref pt_path) = cli.passthrough
             {
-                FastqReader::sanity_check(pt_path)?;
+                sanity_check_any(pt_path)?;
             }
 
             let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &chunk[0])?;

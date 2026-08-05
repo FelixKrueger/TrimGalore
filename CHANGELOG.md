@@ -117,6 +117,36 @@
 
 #### Fixes
 
+- **Piped and stream input is now rejected with an accurate message**
+  ([#379](https://github.com/FelixKrueger/TrimGalore/issues/379)). Trim Galore
+  reads each input more than once — format detection, the initial sanity check
+  and adapter auto-detection each open it independently — so it requires a
+  regular file. Streams previously failed as though the *data* were at fault:
+  `<(zcat reads.fq.gz)` reported `doesn't seem to be in FastQ format`, a
+  gzipped pipe reported `Failed to decompress first block`, and a named FIFO
+  hung indefinitely with no message at all. All three now fail immediately,
+  naming the real constraint and giving the remedy (`zcat reads.fq.gz >
+  reads.fq` first).
+
+  This is a diagnostic change, not a capability change — piped input did not
+  work before and still does not. No input that previously succeeded is
+  affected: restartability is a property every working run already had.
+
+  Two cases are worth calling out. `--passthrough <stream>` was previously
+  unguarded on every layer, so a FIFO there hung *after* the R1/R2 output
+  files had been created, leaving partial output on disk; it is now rejected
+  before any output file is written. And `trim_galore /dev/stdin` typed at an
+  interactive terminal still waits for input rather than erroring — that is a
+  terminal, not a pipe, and telling them apart needs `isatty`.
+
+  Two smaller behaviour changes come with it. A `--demux` barcode file that is
+  a pipe or FIFO is now rejected: it is only read once, so restartability does
+  not apply, but a FIFO with no writer blocked with no message *after* trimming
+  and reporting had finished. And `--passthrough <uBAM>` is now rejected up
+  front rather than failing mid-run with `stream did not contain valid UTF-8`
+  — the existing uBAM rejection only inspected the R1/R2 inputs, never the
+  passthrough file.
+
 - **Documentation site: `$` in prose is no longer eaten as maths.** The docs
   pipeline enables `remark-math`, which by default treats single dollars as
   inline-maths delimiters. Prices in the changelog and benchmark pages were

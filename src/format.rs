@@ -13,12 +13,18 @@
 //! BGZF-framed FASTQ — as BAM, because the framing is identical. The only
 //! safe discriminator is the decompressed payload. Both plan reviewers
 //! caught this (A-C2 + B-Crit-2).
+//!
+//! Input that cannot be re-read from the start is rejected before either stage
+//! (#379): every pass over an input re-opens the path.
 
 use anyhow::{Context, Result, bail};
 use flate2::read::MultiGzDecoder;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::Path;
+
+/// Bytes peeked to classify the container format.
+const PEEK_LEN: usize = 4;
 
 /// Classification of an input file's container format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +206,124 @@ pub fn reject_bam_format_mismatch_in_pair(
     Ok(())
 }
 
+/// Why an input cannot be re-read from the start (issue #379).
+pub(crate) enum NotRestartable {
+    /// A pipe or FIFO, named by its file type.
+    Pipe,
+    /// A socket, named by its file type.
+    Socket,
+    /// A second open did not return to the start of the data.
+    Reopen,
+}
+
+/// The user-facing rejection. Shared by the path check in `Cli::validate` and
+/// the handle check here so the wording cannot drift; both forms contain
+/// "cannot be re-read from the start".
+pub(crate) fn not_restartable_message(path: &Path, why: NotRestartable) -> String {
+    let opening = match why {
+        NotRestartable::Pipe => format!(
+            "Input '{}' is a pipe or FIFO, not a regular file, so it cannot be \
+             re-read from the start.",
+            path.display()
+        ),
+        NotRestartable::Socket => format!(
+            "Input '{}' is a socket, not a regular file, so it cannot be \
+             re-read from the start.",
+            path.display()
+        ),
+        NotRestartable::Reopen => format!(
+            "Input '{}' cannot be re-read from the start: opening it a second \
+             time did not return to the beginning of the data.",
+            path.display()
+        ),
+    };
+    format!(
+        "{opening}\n\n\
+         Trim Galore reads each input more than once — format detection, the initial\n\
+         sanity check, and adapter auto-detection each open it independently — so it\n\
+         requires a regular file.\n\n\
+         Common causes are pipes, FIFOs, process substitution such as\n\
+         `<(zcat reads.fq.gz)`, and /dev/stdin. Write the stream to a file first:\n\n\
+         \x20   zcat reads.fq.gz > reads.fq && trim_galore [options] reads.fq"
+    )
+}
+
+/// Why `meta`'s file type cannot be re-read from the start, if it cannot.
+///
+/// Takes `Metadata` so one predicate serves both a path `stat` (which never
+/// blocks, unlike opening a writer-less FIFO) and a handle `fstat`.
+#[cfg(unix)]
+pub(crate) fn non_restartable_kind(meta: &std::fs::Metadata) -> Option<NotRestartable> {
+    use std::os::unix::fs::FileTypeExt;
+    let ft = meta.file_type();
+    if ft.is_fifo() {
+        Some(NotRestartable::Pipe)
+    } else if ft.is_socket() {
+        Some(NotRestartable::Socket)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn non_restartable_kind(_meta: &std::fs::Metadata) -> Option<NotRestartable> {
+    None
+}
+
+/// Read until `buf` is full or EOF, retrying `Interrupted`.
+///
+/// A single short `read` would make the restartability comparison wrong in both
+/// directions: it can reject a good regular file, and an empty second read
+/// compares equal as a prefix.
+fn read_filled(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        match reader.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(k) => n += k,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(n)
+}
+
+/// True iff opening `path` a second time returns to the beginning of the data.
+///
+/// Trim Galore opens each input several times (format detection, sanity check,
+/// adapter auto-detection, the trim pass), so a path whose re-open does not
+/// restart cannot be processed. `/dev/fd/N` shares the file offset on some
+/// platforms even though it is seekable, which is why this interrogates the
+/// second handle rather than probing the first for seekability.
+///
+/// Callers must reject FIFOs first: a second open on a FIFO with no live writer
+/// blocks indefinitely. `first` must be the 1..=`PEEK_LEN` bytes the first
+/// handle actually returned — outside that range the answer is meaningless.
+fn reopen_restarts(path: &Path, first: &[u8]) -> Result<bool> {
+    debug_assert!(
+        (1..=PEEK_LEN).contains(&first.len()),
+        "reopen_restarts: `first` must be 1..={PEEK_LEN} bytes, got {}",
+        first.len()
+    );
+    let ctx = || {
+        format!(
+            "Failed to re-open input file '{}' for the restartability check",
+            path.display()
+        )
+    };
+    let mut file = File::open(path).with_context(ctx)?;
+
+    // An inherited offset is the exact signal; anything else defers to the bytes.
+    if file.stream_position().is_ok_and(|pos| pos != 0) {
+        return Ok(false);
+    }
+
+    let mut again = [0u8; PEEK_LEN];
+    let want = first.len().min(PEEK_LEN);
+    let n = read_filled(&mut file, &mut again[..want]).with_context(ctx)?;
+    Ok(n == first.len() && &again[..n] == first)
+}
+
 /// Peek the first bytes of `path` and classify by content (NOT by filename).
 ///
 /// See module-level docs for the algorithm and the rationale for the
@@ -207,13 +331,26 @@ pub fn reject_bam_format_mismatch_in_pair(
 pub fn detect_input_format(path: &Path) -> Result<InputFormat> {
     let mut file = File::open(path)
         .with_context(|| format!("Failed to open input file: {}", path.display()))?;
-    let mut peek = [0u8; 4];
-    let n = file
-        .read(&mut peek)
+
+    // Before the first `read`: a FIFO with a live writer but no data yet blocks
+    // there, and a second open with no writer blocks forever.
+    let meta = file
+        .metadata()
+        .with_context(|| format!("Failed to stat input file: {}", path.display()))?;
+    if let Some(kind) = non_restartable_kind(&meta) {
+        bail!("{}", not_restartable_message(path, kind));
+    }
+
+    let mut peek = [0u8; PEEK_LEN];
+    let n = read_filled(&mut file, &mut peek)
         .with_context(|| format!("Failed to read from {}", path.display()))?;
 
     if n == 0 {
         bail!("Input file '{}' is empty", path.display());
+    }
+
+    if !reopen_restarts(path, &peek[..n])? {
+        bail!("{}", not_restartable_message(path, NotRestartable::Reopen));
     }
 
     if peek[0] == b'@' {
@@ -224,10 +361,8 @@ pub fn detect_input_format(path: &Path) -> Result<InputFormat> {
     // compression method; flate is what every modern gzip implementation
     // uses, and the BGZF spec also fixes it at 08.
     if n >= 3 && peek[0] == 0x1F && peek[1] == 0x8B && peek[2] == 0x08 {
-        // Re-open from byte 0 (cheaper than seeking and sidesteps any
-        // interaction between `MultiGzDecoder` and the already-consumed
-        // prefix; the alternative `PeekReader` wrapper in PLAN §5 step 2.3
-        // is a documented future optimization, not required for correctness).
+        // Re-open rather than seek: sidesteps a `MultiGzDecoder` interaction
+        // with the consumed prefix, and non-restartable input is rejected above.
         let file = File::open(path)?;
         let mut decoder = MultiGzDecoder::new(file);
         let mut payload = [0u8; 4];
@@ -411,8 +546,185 @@ mod tests {
         let dir = fresh_tmpdir("tg_format_empty");
         let p = dir.join("empty.fq");
         std::fs::write(&p, b"").unwrap();
-        let r = detect_input_format(&p);
-        assert!(r.is_err());
+        let msg = detect_input_format(&p)
+            .expect_err("an empty file must error")
+            .to_string();
+        // The empty check must keep winning over the #379 restartability check.
+        assert!(msg.contains("is empty"), "unexpected message: {msg}");
+        assert!(
+            !msg.contains("cannot be re-read"),
+            "empty regular file must not be reported as non-restartable: {msg}"
+        );
+    }
+
+    // ── #379: input that cannot be re-read from the start ────────────────
+    //
+    // `File::open` on a FIFO with no writer blocks, so every test below either
+    // holds the write end open or only ever `stat`s the path, and each bounds the
+    // call under test. No setup step can block: `mkfifo(1)` exits immediately and
+    // the writer's blocking open runs on its own thread.
+
+    /// Run `body` on a thread; fail rather than hang if it blocks.
+    fn bounded<T: Send + 'static>(what: &str, body: impl FnOnce() -> T + Send + 'static) -> T {
+        use std::sync::mpsc::RecvTimeoutError;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(body());
+        });
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(v) => v,
+            Err(RecvTimeoutError::Timeout) => panic!("{what} blocked; it must fail, not hang"),
+            // Distinct from a hang: reporting a panicking body as "blocked" would
+            // misdescribe the one failure this harness exists to identify.
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("{what} panicked; see the panic message above")
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn make_fifo(path: &std::path::Path) {
+        let st = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("mkfifo must run");
+        // Without this, a failed mkfifo leaves a regular file and the test
+        // fails pointing at the guard rather than at the harness.
+        assert!(st.success(), "mkfifo {} failed", path.display());
+        use std::os::unix::fs::FileTypeExt;
+        assert!(
+            std::fs::metadata(path).unwrap().file_type().is_fifo(),
+            "fixture must be a FIFO, not a regular file"
+        );
+    }
+
+    /// Hold the write end open so a reader's `open` can complete.
+    ///
+    /// Must be a separate thread: a write-only `open` blocks until a reader
+    /// appears, so opening it on this thread would self-deadlock.
+    #[cfg(unix)]
+    fn spawn_fifo_writer(path: &std::path::Path) -> std::thread::JoinHandle<()> {
+        let p = path.to_path_buf();
+        std::thread::spawn(move || {
+            // Panic rather than return: a silent failure here leaves the reader
+            // blocking, which would be reported against the guard.
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&p)
+                .expect("FIFO writer must open");
+            // EPIPE expected: the guard drops the reader before this lands.
+            let _ = f.write_all(b"@read1\nACGT\n+\nIIII\n");
+        })
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detect_rejects_a_fifo_with_the_pipe_message() {
+        let dir = fresh_tmpdir("tg_format_fifo_detect");
+        let p = dir.join("stream.fq");
+        make_fifo(&p);
+        let _writer = spawn_fifo_writer(&p);
+        let target = p.clone();
+        let msg = bounded("detect_input_format on a FIFO", move || {
+            detect_input_format(&target)
+                .expect_err("a FIFO must be rejected")
+                .to_string()
+        });
+        assert!(
+            msg.contains("cannot be re-read from the start") && msg.contains("is a pipe or FIFO"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    /// Layer 1: a path `stat` names a FIFO *without opening it*, which is what
+    /// lets `Cli::validate` reject a writer-less FIFO instead of blocking.
+    #[cfg(unix)]
+    #[test]
+    fn path_stat_names_a_fifo_without_opening_it() {
+        let dir = fresh_tmpdir("tg_format_fifo_stat");
+        let p = dir.join("stream.fq");
+        make_fifo(&p);
+        let target = p.clone();
+        // No writer, ever: `File::open` here would block forever.
+        let meta = bounded("fs::metadata on a writer-less FIFO", move || {
+            std::fs::metadata(&target).expect("stat must not block")
+        });
+        assert!(matches!(
+            non_restartable_kind(&meta),
+            Some(NotRestartable::Pipe)
+        ));
+
+        let reg = dir.join("a.fq");
+        std::fs::write(&reg, b"@read1\nACGT\n+\nIIII\n").unwrap();
+        assert!(non_restartable_kind(&std::fs::metadata(&reg).unwrap()).is_none());
+    }
+
+    #[test]
+    fn reopen_restarts_answers_both_directions() -> Result<()> {
+        let dir = fresh_tmpdir("tg_format_reopen");
+        let p = dir.join("a.fq");
+        std::fs::write(&p, b"@read1\nACGT\n+\nIIII\n")?;
+        assert!(reopen_restarts(&p, b"@rea")?);
+        // Negative control: the comparison must be able to say no. There is no
+        // portable real-world input that reaches it and returns false.
+        assert!(!reopen_restarts(&p, b"XXXX")?);
+        Ok(())
+    }
+
+    /// A genuinely non-restartable source that cannot block.
+    #[cfg(unix)]
+    #[test]
+    fn reopen_restarts_false_for_a_streaming_char_device() -> Result<()> {
+        let p = std::path::Path::new("/dev/urandom");
+        let mut first = [0u8; PEEK_LEN];
+        let n = read_filled(&mut File::open(p)?, &mut first)?;
+        assert_eq!(n, PEEK_LEN);
+        assert!(!reopen_restarts(p, &first)?);
+        Ok(())
+    }
+
+    /// The case a byte comparison alone accepted: `/dev/fd/N` is a `dup` on
+    /// Darwin, so the second open resumes at the first one's offset and a
+    /// 4-byte file yields an empty second read that compares equal as a prefix.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn detect_rejects_dev_fd_over_a_four_byte_file() -> Result<()> {
+        use std::os::unix::io::AsRawFd;
+        let dir = fresh_tmpdir("tg_format_devfd");
+        let p = dir.join("tiny.fq");
+        std::fs::write(&p, b"@abc")?;
+        let held = File::open(&p)?;
+        let devfd = std::path::PathBuf::from(format!("/dev/fd/{}", held.as_raw_fd()));
+        let msg = detect_input_format(&devfd)
+            .expect_err("/dev/fd over a shared offset must be rejected")
+            .to_string();
+        assert!(
+            msg.contains("cannot be re-read from the start"),
+            "unexpected message: {msg}"
+        );
+        Ok(())
+    }
+
+    /// Isolates the start-offset condition. Bytes 4..8 repeat bytes 0..4, so the
+    /// byte comparison alone calls this restartable and only the offset rejects
+    /// it — the residual the plan carried as A2 until v3.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn detect_rejects_dev_fd_when_the_leading_bytes_repeat() -> Result<()> {
+        use std::os::unix::io::AsRawFd;
+        let dir = fresh_tmpdir("tg_format_devfd_repeat");
+        let p = dir.join("repeat.fq");
+        std::fs::write(&p, b"@a@a@a@a")?;
+        let held = File::open(&p)?;
+        let devfd = std::path::PathBuf::from(format!("/dev/fd/{}", held.as_raw_fd()));
+        let msg = detect_input_format(&devfd)
+            .expect_err("a repeating prefix must not defeat the check")
+            .to_string();
+        assert!(
+            msg.contains("cannot be re-read from the start"),
+            "unexpected message: {msg}"
+        );
+        Ok(())
     }
 
     // ── reject_bam_format_mismatch_in_pair (#363) ──────────────────────
