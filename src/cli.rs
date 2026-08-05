@@ -479,6 +479,27 @@ where
         .collect()
 }
 
+/// Existence + restartability check for a path the run will re-read (#379).
+///
+/// `stat` rather than `exists()` so a pipe or FIFO is named here, before
+/// anything opens it — `File::open` on a FIFO with no writer blocks forever,
+/// which is a hang with no message rather than a diagnostic.
+fn check_restartable_input(path: &std::path::Path, not_found: &str) -> anyhow::Result<()> {
+    let meta = std::fs::metadata(path).map_err(|e| {
+        // Only NotFound is "not found"; reporting EACCES or EMFILE that way is
+        // the wrong-blame this guard exists to remove.
+        if e.kind() == std::io::ErrorKind::NotFound {
+            anyhow::anyhow!("{not_found}: {}", path.display())
+        } else {
+            anyhow::Error::new(e).context(format!("Cannot stat input file: {}", path.display()))
+        }
+    })?;
+    if let Some(kind) = crate::format::non_restartable_kind(&meta) {
+        anyhow::bail!("{}", crate::format::not_restartable_message(path, kind));
+    }
+    Ok(())
+}
+
 impl Cli {
     /// Shared validation for any paired-end mode (`--paired`, `--clock`,
     /// `--implicon`) that takes input files in pairwise (R1, R2, R1, R2, …)
@@ -880,10 +901,9 @@ impl Cli {
             if self.demux.is_some() {
                 anyhow::bail!("--passthrough is not compatible with --demux");
             }
-            // 1.viii — file must exist
-            if !pt.exists() {
-                anyhow::bail!("--passthrough file not found: {}", pt.display());
-            }
+            // 1.viii — file must exist, and must be re-readable (#379): the
+            // passthrough stream is opened once to sanity-check and again to read.
+            check_restartable_input(pt, "--passthrough file not found")?;
             // 1.ix — case-folded collision with R1/R2 (issue #216-style APFS/NTFS guard).
             // self.input.len() == 2 here per 1.ii. The plan's main.rs::run pre-flight
             // catches case-only output collisions; this catches case-only INPUT aliases
@@ -923,16 +943,14 @@ impl Cli {
             if self.paired {
                 anyhow::bail!("Demultiplexing is only allowed for single-end files");
             }
-            if !demux_file.exists() {
-                anyhow::bail!("Barcode file not found: {}", demux_file.display());
-            }
+            // Read once, so restartability does not apply — but a writer-less FIFO
+            // here blocks after the whole trim run has completed (#379 review).
+            check_restartable_input(demux_file, "Barcode file not found")?;
         }
 
-        // Check input files exist
+        // Check input files exist and can be re-read from the start (#379)
         for path in &self.input {
-            if !path.exists() {
-                anyhow::bail!("Input file not found: {}", path.display());
-            }
+            check_restartable_input(path, "Input file not found")?;
         }
 
         // #369 — say when -a2 cannot be used, otherwise validate it up front so a
