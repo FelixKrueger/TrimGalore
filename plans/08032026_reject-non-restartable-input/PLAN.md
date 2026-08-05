@@ -398,6 +398,26 @@ v2 asserted the two changes do not interact. That was true of v2's shape and is 
 
 **Merge order: #374 first.** It is complete, green (468 tests) and an external contributor's; this plan should absorb the churn rather than impose it. Then rebase, correct the `main.rs` references, and re-verify §2.4's three sites. Note that layer 1 lives in `cli.rs`, which #374 does not touch at all — so the part of this change that closes the most cases cannot conflict with it either way.
 
+### 7.2 Post-#374 (2026-08-05)
+
+#374 merged to `dev` as `e470331`. This branch rebased onto it **cleanly, no conflicts** — as predicted, his hunks (`main.rs:14`/`:28`/`:42`) and this change's (`:228`/`:755`) never met.
+
+Every `main.rs` line number elsewhere in this plan predates the rebase. His change removed the duplicate `open_sync_reader`/`open_threaded_reader` from `main.rs`, so the two §2.3 inventory entries at `main.rs:51`/`:68` **no longer exist** — `format.rs`'s factories are now the only ones. Current numbers for the load-bearing sites:
+
+| Site | Was | Now |
+|---|---|---|
+| `sanity_check_any` → `detect_input_format` | `:30` | `:31` |
+| all-inputs detect map | `:187` | `:162` |
+| `--passthrough` + uBAM (`any_bam`) | `:253` | `:228` |
+| the H1 passthrough format check | — | `:237` |
+| passthrough sanity check | `:768` | `:755` |
+| passthrough readers | `:1344`/`:1383` | `:1331`/`:1370` |
+| `main.rs` duplicate factories | `:51`/`:68` | **deleted** |
+
+**§2.1's open count rises again.** `sniff_gzip` (`fastq.rs:48`) opens the path for three magic bytes, and `FastqReader::open` / `open_threaded` / `sanity_check` each call it (`fastq.rs:280`/`:306`/`:525`), so every bare entry point now performs two opens. The guarded factories in `format.rs` call the `_with` variants and are unaffected. This does not weaken anything here — all three layers reject a stream before those paths are reached — but it is one more instance of the count rising without anyone intending it, which is the argument for ALT-4 (memoise detection per path) eventually.
+
+**Composition verified**, not assumed: 482 tests pass (470 + his 12), fmt and clippy clean, #374's `.bgz`-named-gzip case still trims to completion, and a FIFO is still rejected promptly with no output directory.
+
 ---
 
 ## 8. Assumptions
