@@ -14,8 +14,8 @@ authors:
     given-names: Felix
     affiliation: Altos Labs
     orcid: "https://orcid.org/0000-0002-5513-3324"
-version: 2.2.0
-date-released: 2026-05-07
+version: 2.3.0
+date-released: 2026-07-07
 license: GPL-3.0-only
 repository-code: "https://github.com/FelixKrueger/TrimGalore"
 url: "https://www.trimgalore.com"
@@ -33,5 +33,5 @@ identifiers:
     value: "10.5281/zenodo.5127898"
     description: "Concept DOI (all versions — resolves to the latest)"
   - type: doi
-    value: "10.5281/zenodo.20127893"
-    description: "v2.2.0"
+    value: "10.5281/zenodo.21235981"
+    description: "v2.3.0"
