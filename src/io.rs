@@ -431,7 +431,16 @@ pub fn json_report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
 
 /// Strip FASTQ extensions from a filename, returning just the base stem.
 ///
-/// Handles: .fastq.gz, .fastq, .fq.gz, .fq
+/// Handles `.fastq` / `.fq`, each optionally followed by a gzip-family
+/// suffix: `.gz`, or the `.bgz` / `.bgzf` names `bgzip` output is often
+/// given. The two suffix groups are stripped in sequence rather than
+/// enumerated as a combined list, so adding one compression name does not
+/// multiply the cases. The `.bgz` forms are here because such a file is read
+/// correctly since #374, and its output name has to follow
+/// ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+///
+/// Anything else (a `.bam` input, an unrelated extension) falls through to
+/// `Path::file_stem`, which drops the final component only.
 pub fn strip_fastq_extensions(path: &Path) -> String {
     let name = path
         .file_name()
@@ -439,21 +448,21 @@ pub fn strip_fastq_extensions(path: &Path) -> String {
         .to_string_lossy()
         .to_string();
 
-    // Strip extensions in order of specificity
-    for ext in &[".fastq.gz", ".fq.gz", ".fastq", ".fq"] {
-        if name.ends_with(ext) {
-            return name[..name.len() - ext.len()].to_string();
+    // Strip one gzip-family suffix, if present. These are disjoint: `.bgz`
+    // does not end in `.gz`, so the order within the list does not matter.
+    let stem = [".gz", ".bgz", ".bgzf"]
+        .iter()
+        .find_map(|ext| name.strip_suffix(ext))
+        .unwrap_or(&name);
+
+    // Then the FASTQ extension itself, longest first.
+    for ext in [".fastq", ".fq"] {
+        if let Some(base) = stem.strip_suffix(ext) {
+            return base.to_string();
         }
     }
 
-    // Fallback: strip .gz then whatever extension remains
-    let name = if name.ends_with(".gz") {
-        &name[..name.len() - 3]
-    } else {
-        &name
-    };
-
-    Path::new(name)
+    Path::new(stem)
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
@@ -477,6 +486,56 @@ mod tests {
             strip_fastq_extensions(Path::new("sample_R1.fq.gz")),
             "sample_R1"
         );
+    }
+
+    /// REGRESSION ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+    /// `bgzip` output is commonly named `.bgz`/`.bgzf`, and since #374 such a
+    /// file is read correctly. The stem has to follow, or `sample.fq.bgz`
+    /// produces `sample.fq_trimmed.fq` next to
+    /// `sample.fq.bgz_trimming_report.txt` and the two disagree about the
+    /// sample name (which is what MultiQC groups on).
+    #[test]
+    fn test_strip_fastq_extensions_bgz() {
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample.fastq.bgz")),
+            "sample"
+        );
+        assert_eq!(strip_fastq_extensions(Path::new("sample.fq.bgz")), "sample");
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample.fastq.bgzf")),
+            "sample"
+        );
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample.fq.bgzf")),
+            "sample"
+        );
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample_R1.fq.bgz")),
+            "sample_R1"
+        );
+        // Bare compression suffix, no inner .fastq/.fq. The old fallback
+        // already handled this one via `file_stem`; pinned so the rewrite
+        // below does not lose it.
+        assert_eq!(strip_fastq_extensions(Path::new("sample.bgz")), "sample");
+        assert_eq!(strip_fastq_extensions(Path::new("sample.bgzf")), "sample");
+        // Multi-component name with no inner .fastq/.fq: the fallback now runs
+        // on the already-stripped name, so one more component goes than before
+        // (this was `sample.txt`). That is what `.txt.gz` has always done.
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample.txt.bgz")),
+            "sample"
+        );
+    }
+
+    /// The non-FASTQ names that reach this function must keep their existing
+    /// stems: `.bam` inputs (uBAM), bare `.gz`, and unrelated extensions all
+    /// fall through to `file_stem`.
+    #[test]
+    fn test_strip_fastq_extensions_leaves_other_names_alone() {
+        assert_eq!(strip_fastq_extensions(Path::new("sample.bam")), "sample");
+        assert_eq!(strip_fastq_extensions(Path::new("sample.gz")), "sample");
+        assert_eq!(strip_fastq_extensions(Path::new("sample.txt.gz")), "sample");
+        assert_eq!(strip_fastq_extensions(Path::new("sample")), "sample");
     }
 
     #[test]

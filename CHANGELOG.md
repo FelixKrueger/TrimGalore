@@ -26,16 +26,39 @@
   BAM discrimination is unaffected: `detect_input_format` still owns the
   `BAM\1` payload check, and a `.bam` renamed `.fq.gz` is still read as BAM.
 
-  Two known limitations, both left to separate changes:
+  One known limitation remains, left to a separate change: output compression
+  still mirrors the input *filename*, so a `.bgz` input produces plain `.fq`
+  output. Moving that decision would change behaviour for every run, including
+  the misnamed-`.gz` file whose input handling changed above.
 
-  - Output compression still mirrors the input *filename*, so a `.bgz` input
-    produces plain `.fq` output. Moving that decision would change behaviour
-    for every run, including the misnamed-`.gz` file whose input handling
-    changed above.
-  - `.bgz` is not in the extension-stripping list, so a `sample.fq.bgz` input
-    produces `sample.fq_trimmed.fq` alongside
-    `sample.fq.bgz_trimming_report.txt`. MultiQC takes the sample name from
-    the report filename, so the two disagree.
+- **`.bgz` / `.bgzf` input no longer leaves an inner `.fastq` in the output
+  filename** ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+  `sample.fastq.bgz` produced `sample.fastq_trimmed.fq` alongside
+  `sample.fastq.bgz_trimming_report.txt`; the two disagreed about the sample
+  name, and MultiQC takes that name from the report filename, so a trimmed
+  file and its report could land under different samples. The output is now
+  `sample_trimmed.fq`, matching what the same bytes under a `.fastq.gz` name
+  have always produced.
+
+  `io::strip_fastq_extensions` now removes a gzip-family suffix (`.gz`,
+  `.bgz`, `.bgzf`) and then the FASTQ extension, instead of matching an
+  enumerated list of combined suffixes. Names with no inner `.fastq`/`.fq`
+  are unaffected where they carry a single extension (`sample.bgz` →
+  `sample`). A multi-component name now loses one component more than before
+  (`sample.txt.bgz` → `sample`, previously `sample.txt`), matching what
+  `.gz` has always done. `.bam` inputs and unrelated extensions keep the
+  stems they had.
+
+  The specialty modes name their outputs from the same stem, so they shift
+  too. `--implicon` on `sample_R1.fastq.bgz` now writes
+  `sample_8bp_UMI_R1.fastq` where it wrote `sample_R1.fastq_8bp_UMI_R1.fastq`:
+  its R1/R2 de-duplication only fires on a stem ending in `_R1`, which the
+  old stem never did, so the doubled read tag disappears as well.
+  `--hardtrim5`, `--hardtrim3` and `--clock` shift in the same direction.
+
+  Output *filenames* only: no fixture in `test_files/` or in the
+  `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
+  comparison is untouched.
 
 #### Changes
 
