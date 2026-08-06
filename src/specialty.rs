@@ -795,4 +795,36 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         Ok(())
     }
+
+    // --- Output naming on `.bgz` input (#381) ---
+
+    /// REGRESSION ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+    /// Every specialty mode names its output from the same stripped stem, so
+    /// teaching the stripper about `.bgz` moves these filenames too.
+    ///
+    /// For `--implicon` it fixes a second fault rather than only tidying the
+    /// name: the R1/R2 de-duplication above fires on a stem ending in `_R1`,
+    /// which `sample_R1.fastq.bgz` never produced (its stem was
+    /// `sample_R1.fastq`), so the read tag appeared twice. Pinned here because
+    /// nothing else in the suite runs a specialty mode on a `.bgz` name.
+    #[test]
+    fn bgz_stem_reaches_specialty_output_names() {
+        assert_eq!(
+            implicon_output_name(Path::new("sample_R1.fastq.bgz"), 8, "R1", None, false),
+            PathBuf::from("sample_8bp_UMI_R1.fastq"),
+            "implicon R1: the doubled read tag must be gone"
+        );
+        assert_eq!(
+            implicon_output_name(Path::new("sample_R2.fq.bgzf"), 8, "R2", None, false),
+            PathBuf::from("sample_8bp_UMI_R2.fastq")
+        );
+        assert_eq!(
+            hardtrim_output_name(Path::new("sample.fastq.bgz"), 50, "5prime", None, false),
+            PathBuf::from("sample.50bp_5prime.fq")
+        );
+        assert_eq!(
+            clock_output_name(Path::new("sample_R1.fq.bgz"), "R1", None, false),
+            PathBuf::from("sample_R1.clock_UMI.R1.fq")
+        );
+    }
 }

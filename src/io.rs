@@ -435,15 +435,8 @@ pub fn json_report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
 /// suffix: `.gz`, or the `.bgz` / `.bgzf` names `bgzip` output is often
 /// given. The two suffix groups are stripped in sequence rather than
 /// enumerated as a combined list, so adding one compression name does not
-/// multiply the cases.
-///
-/// The `.bgz` forms matter because since
-/// [#374](https://github.com/FelixKrueger/TrimGalore/pull/374) such a file is
-/// *read* correctly (gzip-ness comes from the file's first three bytes, not
-/// its name). Before this stripped them too, `sample.fq.bgz` produced
-/// `sample.fq_trimmed.fq` alongside `sample.fq.bgz_trimming_report.txt`, the
-/// output and the report disagreeing about the sample name, which is what
-/// MultiQC groups on
+/// multiply the cases. The `.bgz` forms are here because such a file is read
+/// correctly since #374, and its output name has to follow
 /// ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
 ///
 /// Anything else (a `.bam` input, an unrelated extension) falls through to
@@ -525,6 +518,13 @@ mod tests {
         // below does not lose it.
         assert_eq!(strip_fastq_extensions(Path::new("sample.bgz")), "sample");
         assert_eq!(strip_fastq_extensions(Path::new("sample.bgzf")), "sample");
+        // Multi-component name with no inner .fastq/.fq: the fallback now runs
+        // on the already-stripped name, so one more component goes than before
+        // (this was `sample.txt`). That is what `.txt.gz` has always done.
+        assert_eq!(
+            strip_fastq_extensions(Path::new("sample.txt.bgz")),
+            "sample"
+        );
     }
 
     /// The non-FASTQ names that reach this function must keep their existing

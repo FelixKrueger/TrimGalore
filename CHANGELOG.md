@@ -43,8 +43,20 @@
   `io::strip_fastq_extensions` now removes a gzip-family suffix (`.gz`,
   `.bgz`, `.bgzf`) and then the FASTQ extension, instead of matching an
   enumerated list of combined suffixes. Names with no inner `.fastq`/`.fq`
-  (`sample.bgz`), `.bam` inputs and unrelated extensions keep the stems they
-  had. Output *filenames* only: no fixture in `test_files/` or in the
+  are unaffected where they carry a single extension (`sample.bgz` →
+  `sample`). A multi-component name now loses one component more than before
+  (`sample.txt.bgz` → `sample`, previously `sample.txt`), matching what
+  `.gz` has always done. `.bam` inputs and unrelated extensions keep the
+  stems they had.
+
+  The specialty modes name their outputs from the same stem, so they shift
+  too. `--implicon` on `sample_R1.fastq.bgz` now writes
+  `sample_8bp_UMI_R1.fastq` where it wrote `sample_R1.fastq_8bp_UMI_R1.fastq`:
+  its R1/R2 de-duplication only fires on a stem ending in `_R1`, which the
+  old stem never did, so the doubled read tag disappears as well.
+  `--hardtrim5`, `--hardtrim3` and `--clock` shift in the same direction.
+
+  Output *filenames* only: no fixture in `test_files/` or in the
   `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
   comparison is untouched.
 
