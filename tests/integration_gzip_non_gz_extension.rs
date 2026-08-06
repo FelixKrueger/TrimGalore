@@ -76,12 +76,10 @@ fn sample_reads(tag: &str) -> String {
 /// asymmetry is deliberate and documented; these tests care that the reads are
 /// correct, not how they are framed.
 ///
-/// Note the stems the callers pass: a `.bgz` input is not recognised by
-/// `io::strip_fastq_extensions`, so `pair_R1.fq.bgz` yields
-/// `pair_R1.fq_val_1.fq`, with the inner `.fq` still in the name. That is a
-/// known cosmetic wart (the report file disagrees with the output file, which
-/// matters to MultiQC) and is filed for a separate change; these tests encode
-/// current behaviour rather than the behaviour we would prefer.
+/// The stems the callers pass are the tidy ones: since #381
+/// `io::strip_fastq_extensions` recognises the `.bgz` forms, so
+/// `pair_R1.fq.bgz` yields `pair_R1_val_1.fq` with no inner `.fq` left in the
+/// name. `bgz_output_and_report_agree_on_the_stem` below pins that directly.
 fn read_output(dir: &Path, stem: &str) -> String {
     let text = read_output_raw(dir, stem);
     assert!(
@@ -127,7 +125,7 @@ fn single_end_bgz_input_is_decompressed() {
         "single-end .bgz must succeed. stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let trimmed = read_output(&dir, "sample.fq_trimmed");
+    let trimmed = read_output(&dir, "sample_trimmed");
     assert!(
         trimmed.contains("@se_0"),
         "trimmed output must contain the reads, got:\n{trimmed}"
@@ -166,8 +164,8 @@ fn paired_bgz_input_serial_is_decompressed() {
         "paired .bgz at --cores 1 must succeed. stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(read_output(&dir, "pair_R1.fq_val_1").contains("@pe1_0"));
-    assert!(read_output(&dir, "pair_R2.fq_val_2").contains("@pe2_0"));
+    assert!(read_output(&dir, "pair_R1_val_1").contains("@pe1_0"));
+    assert!(read_output(&dir, "pair_R2_val_2").contains("@pe2_0"));
 }
 
 /// Paired-end at `--cores 2`, which takes the worker-pool path and a different
@@ -199,8 +197,8 @@ fn paired_bgz_input_parallel_is_decompressed() {
         "paired .bgz at --cores 2 must succeed. stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(read_output(&dir, "pair_R1.fq_val_1").contains("@pp1_0"));
-    assert!(read_output(&dir, "pair_R2.fq_val_2").contains("@pp2_0"));
+    assert!(read_output(&dir, "pair_R1_val_1").contains("@pp1_0"));
+    assert!(read_output(&dir, "pair_R2_val_2").contains("@pp2_0"));
 }
 
 /// Serial and parallel must agree on the reads, not merely both succeed.
@@ -232,7 +230,7 @@ fn paired_bgz_serial_and_parallel_agree() {
             .output()
             .expect("binary must run");
         assert!(out.status.success(), "--cores {cores} must succeed");
-        outputs.push(read_output(&sub, "pair_R1.fq_val_1"));
+        outputs.push(read_output(&sub, "pair_R1_val_1"));
     }
 
     assert_eq!(
@@ -288,4 +286,66 @@ fn plain_fastq_misnamed_gz_is_read_as_plain() {
     );
     // `sample.fastq.gz` IS in the strip list, so this one keeps the tidy stem.
     assert!(read_output(&dir, "sample_trimmed").contains("@mn_0"));
+}
+
+/// The reproduction from
+/// [#381](https://github.com/FelixKrueger/TrimGalore/issues/381): trimmed
+/// output and trimming report must agree on the sample name.
+///
+/// The report filename is the input filename plus a suffix, while the output
+/// filename is the *stripped* stem, so the two only line up when the stripper
+/// knows the input's extension. It did not know `.bgz`, so `sample.fastq.bgz`
+/// gave `sample.fastq_trimmed.fq` next to
+/// `sample.fastq.bgz_trimming_report.txt`. MultiQC takes the sample name from
+/// the report filename, so the pair can land under different samples.
+///
+/// The same bytes are run twice, once under each name, and the assertion is
+/// the same for both: this is a contrast test, not a hard-coded expectation.
+#[test]
+fn bgz_output_and_report_agree_on_the_stem() {
+    for (name, stem) in [
+        ("sample.fastq.bgz", "sample"),
+        ("sample.fq.bgz", "sample"),
+        ("sample.fastq.gz", "sample"), // the control: always worked
+    ] {
+        let dir = fresh_tmpdir(&format!("tg_bgz_stem_{stem}_{}", name.replace('.', "_")));
+        let input = dir.join(name);
+        write_gz(&input, &sample_reads("st"));
+
+        let out = Command::new(binary())
+            .args([
+                "--dont_gzip",
+                "-o",
+                dir.to_str().unwrap(),
+                input.to_str().unwrap(),
+            ])
+            .output()
+            .expect("binary must run");
+        assert!(
+            out.status.success(),
+            "{name} must trim. stderr:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let trimmed = dir.join(format!("{stem}_trimmed.fq"));
+        assert!(
+            trimmed.exists(),
+            "{name}: expected output {}, found {:?}",
+            trimmed.display(),
+            std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect::<Vec<_>>()
+        );
+        for report in [
+            dir.join(format!("{name}_trimming_report.txt")),
+            dir.join(format!("{name}_trimming_report.json")),
+        ] {
+            assert!(
+                report.exists(),
+                "{name}: expected report {}",
+                report.display()
+            );
+        }
+    }
 }

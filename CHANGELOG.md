@@ -26,16 +26,27 @@
   BAM discrimination is unaffected: `detect_input_format` still owns the
   `BAM\1` payload check, and a `.bam` renamed `.fq.gz` is still read as BAM.
 
-  Two known limitations, both left to separate changes:
+  One known limitation remains, left to a separate change: output compression
+  still mirrors the input *filename*, so a `.bgz` input produces plain `.fq`
+  output. Moving that decision would change behaviour for every run, including
+  the misnamed-`.gz` file whose input handling changed above.
 
-  - Output compression still mirrors the input *filename*, so a `.bgz` input
-    produces plain `.fq` output. Moving that decision would change behaviour
-    for every run, including the misnamed-`.gz` file whose input handling
-    changed above.
-  - `.bgz` is not in the extension-stripping list, so a `sample.fq.bgz` input
-    produces `sample.fq_trimmed.fq` alongside
-    `sample.fq.bgz_trimming_report.txt`. MultiQC takes the sample name from
-    the report filename, so the two disagree.
+- **`.bgz` / `.bgzf` input no longer leaves an inner `.fastq` in the output
+  filename** ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+  `sample.fastq.bgz` produced `sample.fastq_trimmed.fq` alongside
+  `sample.fastq.bgz_trimming_report.txt`; the two disagreed about the sample
+  name, and MultiQC takes that name from the report filename, so a trimmed
+  file and its report could land under different samples. The output is now
+  `sample_trimmed.fq`, matching what the same bytes under a `.fastq.gz` name
+  have always produced.
+
+  `io::strip_fastq_extensions` now removes a gzip-family suffix (`.gz`,
+  `.bgz`, `.bgzf`) and then the FASTQ extension, instead of matching an
+  enumerated list of combined suffixes. Names with no inner `.fastq`/`.fq`
+  (`sample.bgz`), `.bam` inputs and unrelated extensions keep the stems they
+  had. Output *filenames* only: no fixture in `test_files/` or in the
+  `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
+  comparison is untouched.
 
 #### Changes
 
