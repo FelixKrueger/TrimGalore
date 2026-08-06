@@ -1,0 +1,10 @@
+[package]
+name = "spike-nonseekable"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Rob Patro asked us to test `main` (TrimGalore#379). `main` HEAD f648e3bb is the
+# v0.2.0 tag object, so this pins the tag and tests both at once.
+[dependencies]
+rapidgzip-core = { git = "https://github.com/COMBINE-lab/rapidgzip-rust", tag = "v0.2.0" }
