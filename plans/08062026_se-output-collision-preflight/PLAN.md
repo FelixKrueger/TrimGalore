@@ -746,6 +746,25 @@ output byte-intact. All three demux routes verified closed individually.
 **Still open, unchanged:** §11 Opens 3 and 4; symlink aliasing (A8, now the sole residual);
 `--fastqc_args -o` (A2's named exception).
 
+**D13 — the identity key is split in two, after CI caught D8 overreaching.** D8 re-keyed
+`Cli::validate`'s input-identity checks on `collision_key`, which case-folds. That broke the
+#216 validation guard: it feeds four genuinely distinct files on a case-sensitive filesystem
+(`Sample_R1` / `SAMPLE_R1`) and asserts the *output* pre-flight refuses them with the APFS/NTFS
+message — but the case-folded input check fired first with "Pair 2 is a duplicate of pair 1",
+which on Linux is false. Case-folding is correct for **output** paths (distinct inputs whose
+outputs alias on APFS/NTFS — the whole point of #216) and wrong for **input identity** (folding
+case claims two real files are one). Split accordingly:
+
+- `path_identity_key` — absolutised, `..`-folded, **case preserved** → the three `cli.rs`
+  input-identity checks.
+- `collision_key` — the same, **plus** case-folding → the output-collision pre-flight, and the
+  `--passthrough` alias check, which was deliberately case-folded for APFS safety all along.
+
+The reviewers' H1 finding was about *spelling* (`./x` vs `x`), not case; D8 extended it further
+than the finding warranted. `--paired ./a_R1.fq a_R1.fq` is still refused. Not reproducible
+locally — APFS is case-insensitive, so the two filenames are one file on this machine, which is
+why the validation matrix rather than any local test caught it.
+
 ### Iteration log
 
 **#1 — duplicate-input predicate.** Three `--clock`/`--implicon` validation tests failed

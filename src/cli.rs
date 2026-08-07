@@ -534,7 +534,7 @@ impl Cli {
         for chunk in self.input.chunks(2) {
             // #383 — keyed like the output-collision pre-flight, so `./r1.fq r1.fq`
             // cannot pass as a pair. Raw `==` let two spellings of one file through.
-            if crate::io::collision_key(&chunk[0]) == crate::io::collision_key(&chunk[1]) {
+            if crate::io::path_identity_key(&chunk[0]) == crate::io::path_identity_key(&chunk[1]) {
                 anyhow::bail!(
                     "Read 1 and Read 2 appear to be the same file: {}. \
                      Did you mean to pass distinct R1 and R2 files?",
@@ -546,8 +546,8 @@ impl Cli {
             self.input.chunks(2).map(|c| (&c[0], &c[1])).collect();
         for (i, (r1, r2)) in pairs.iter().enumerate() {
             for (j, (pr1, pr2)) in pairs.iter().enumerate().take(i) {
-                if crate::io::collision_key(r1) == crate::io::collision_key(pr1)
-                    && crate::io::collision_key(r2) == crate::io::collision_key(pr2)
+                if crate::io::path_identity_key(r1) == crate::io::path_identity_key(pr1)
+                    && crate::io::path_identity_key(r2) == crate::io::path_identity_key(pr2)
                 {
                     anyhow::bail!(
                         "Pair {} ({}, {}) is a duplicate of pair {}. \
@@ -632,10 +632,10 @@ impl Cli {
         // specific R1==R2 message, so they are excluded rather than pre-empted.
         if !self.paired && !self.clock && self.implicon.is_none() {
             for (i, path) in self.input.iter().enumerate() {
-                let key = crate::io::collision_key(path);
+                let key = crate::io::path_identity_key(path);
                 if let Some(j) = self.input[..i]
                     .iter()
-                    .position(|other| crate::io::collision_key(other) == key)
+                    .position(|other| crate::io::path_identity_key(other) == key)
                 {
                     anyhow::bail!(
                         "Input file {} was given more than once (arguments {} and {}). \

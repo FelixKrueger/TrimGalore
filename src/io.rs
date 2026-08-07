@@ -44,12 +44,10 @@ pub fn norm_path(p: &Path) -> String {
     p.to_string_lossy().to_ascii_lowercase()
 }
 
-/// Case-folded, lexically-normalised collision key (issues #216, #383).
-///
-/// Absolutises, then folds `..` against the component stack, so `./x`, `<cwd>/x` and
-/// `a/../x` all collapse to one key. Purely lexical — no filesystem access — so a
-/// symlinked path still aliases undetected (the remaining residual).
-pub fn collision_key(p: &Path) -> String {
+/// Lexically normalised path: absolutised, with `..` folded against the component
+/// stack, so `./x`, `<cwd>/x` and `a/../x` name one path. No filesystem access, so a
+/// symlinked path is not resolved.
+fn lexical_normalise(p: &Path) -> PathBuf {
     let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut stack: Vec<Component> = Vec::new();
     for c in abs.components() {
@@ -66,7 +64,20 @@ pub fn collision_key(p: &Path) -> String {
             other => stack.push(other),
         }
     }
-    norm_path(&stack.iter().collect::<PathBuf>())
+    stack.iter().collect()
+}
+
+/// Is this the same file? Case-**sensitive**, because on a case-sensitive filesystem
+/// `X` and `x` are two files and calling them one would reject valid input. Used for
+/// input identity in `Cli::validate` (issue #383).
+pub fn path_identity_key(p: &Path) -> String {
+    lexical_normalise(p).to_string_lossy().into_owned()
+}
+
+/// Would these two paths be the same *output* file? Case-**folded**, because outputs
+/// differing only in case alias each other on APFS/NTFS (issues #216, #383).
+pub fn collision_key(p: &Path) -> String {
+    norm_path(&lexical_normalise(p))
 }
 
 /// Remediation offered when nothing mode-specific applies.
@@ -1091,6 +1102,44 @@ mod tests {
             !with.contains("different source directories"),
             "a hint must REPLACE the generic advice, not append to it: {with}"
         );
+    }
+
+    /// The two keys differ in exactly one respect, and that difference is load-bearing.
+    ///
+    /// REGRESSION: re-keying `Cli::validate`'s input-identity checks on the case-folded
+    /// key made the #216 CI guard fail — it feeds four genuinely distinct files
+    /// (`Sample_R1` / `SAMPLE_R1`) on a case-sensitive filesystem and asserts the
+    /// *output* pre-flight refuses them. Case-folding input identity called them
+    /// duplicates instead, which on Linux is false.
+    #[test]
+    fn identity_key_is_case_sensitive_but_collision_key_is_not() {
+        let lower = Path::new("Sample_R1.fastq.gz");
+        let upper = Path::new("SAMPLE_R1.fastq.gz");
+        assert_ne!(
+            path_identity_key(lower),
+            path_identity_key(upper),
+            "two files differing only in case are distinct files"
+        );
+        assert_eq!(
+            collision_key(lower),
+            collision_key(upper),
+            "but their outputs alias each other on APFS/NTFS"
+        );
+    }
+
+    /// Both keys normalise spelling — that is the part #383 needed.
+    #[test]
+    fn both_keys_normalise_spelling() {
+        for a in ["./x.fq", "a/../x.fq"] {
+            assert_eq!(
+                path_identity_key(Path::new(a)),
+                path_identity_key(Path::new("x.fq"))
+            );
+            assert_eq!(
+                collision_key(Path::new(a)),
+                collision_key(Path::new("x.fq"))
+            );
+        }
     }
 
     /// Assumption A2, in the direction that makes the pre-flight sufficient:
