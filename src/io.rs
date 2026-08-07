@@ -7,7 +7,7 @@
 //! - Reports: *_trimming_report.txt
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// True iff `path` ends with a `.gz` extension.
 ///
@@ -34,15 +34,83 @@ pub fn is_gzipped(path: &Path) -> bool {
 /// on case-insensitive filesystems (APFS/NTFS). Used by:
 ///   * `Cli::validate()` to catch `--passthrough` aliasing R1 or R2 (e.g.
 ///     `--passthrough r1.fq.gz` while R1 is `R1.fq.gz`).
-///   * `main::run` paired-end output-collision pre-flight, which hashes
-///     prospective output paths so case-only aliases fail loudly rather
-///     than silently overwriting (issue #216).
+///   * `collision_key`, which absolutises first and is what every
+///     output-collision pre-flight in `main.rs` now hashes (issues #216, #383).
 ///
 /// Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
 /// false-positive, but the penalty is a loud early error rather than
 /// silent data loss.
 pub fn norm_path(p: &Path) -> String {
     p.to_string_lossy().to_ascii_lowercase()
+}
+
+/// Case-folded, lexically-normalised collision key (issues #216, #383).
+///
+/// Absolutises, then folds `..` against the component stack, so `./x`, `<cwd>/x` and
+/// `a/../x` all collapse to one key. Purely lexical — no filesystem access — so a
+/// symlinked path still aliases undetected (the remaining residual).
+pub fn collision_key(p: &Path) -> String {
+    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut stack: Vec<Component> = Vec::new();
+    for c in abs.components() {
+        match c {
+            // `/..` is `/` on POSIX; `..` above a relative root has to be kept.
+            Component::ParentDir => match stack.last() {
+                Some(Component::Normal(_)) => {
+                    stack.pop();
+                }
+                Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+                _ => stack.push(c),
+            },
+            Component::CurDir => {}
+            other => stack.push(other),
+        }
+    }
+    norm_path(&stack.iter().collect::<PathBuf>())
+}
+
+/// Remediation offered when nothing mode-specific applies.
+const GENERIC_ADVICE: &str = "Check that inputs produce distinct output paths \
+                              (e.g., different source directories or `--output_dir`).";
+
+/// Reject duplicate output paths, or an output that would overwrite an input, before
+/// any file is opened. Called by every `main.rs` dispatch path that writes more than
+/// one file: SE trim, `--paired` trim, `--hardtrim5/3`, `--clock`/`--implicon` and
+/// `--clump_only` — all four output formats. A new dispatch path needs a call here too.
+pub fn preflight_output_collisions(
+    planned: &[PathBuf],
+    inputs: &[PathBuf],
+    hint: Option<&str>,
+) -> Result<()> {
+    let input_keys: std::collections::HashMap<String, &PathBuf> =
+        inputs.iter().map(|p| (collision_key(p), p)).collect();
+    let mut seen: std::collections::HashMap<String, PathBuf> =
+        std::collections::HashMap::with_capacity(planned.len());
+
+    for p in planned {
+        let key = collision_key(p);
+        if let Some(input) = input_keys.get(&key) {
+            anyhow::bail!(
+                "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                 this run would write output to {}, which is also one of its inputs. \
+                 If that file is an earlier run's output, drop it from the input list; \
+                 otherwise use `--output_dir` to write elsewhere.",
+                input.display()
+            );
+        }
+        if let Some(existing) = seen.insert(key, p.clone()) {
+            // The hint replaces the generic advice; on CWD-naming modes the generic
+            // advice is false, so appending would contradict itself.
+            anyhow::bail!(
+                "Output path collision (case-insensitive, for APFS/NTFS safety): \
+                 {} and {} would be written to the same file. {}",
+                existing.display(),
+                p.display(),
+                hint.unwrap_or(GENERIC_ADVICE)
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Ensure the user-supplied `--output_dir` exists, creating it (and any
@@ -878,5 +946,265 @@ mod tests {
         // Heuristic is extension-based (matches FastqReader's gzip detection),
         // so a misnamed file doesn't trigger.
         assert!(!is_gzipped(Path::new("sample.gz.fastq")));
+    }
+
+    // --- preflight_output_collisions (issues #216, #383) ---
+    //
+    // Lexical throughout, so none of these touch the filesystem.
+
+    fn pb(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
+
+    #[test]
+    fn preflight_accepts_distinct_outputs() {
+        let planned = [pb("a_trimmed.fq.gz"), pb("b_trimmed.fq.gz")];
+        let inputs = [pb("a.fastq.gz"), pb("b.fastq.gz")];
+        assert!(preflight_output_collisions(&planned, &inputs, None).is_ok());
+    }
+
+    #[test]
+    fn preflight_accepts_empty_and_single() {
+        assert!(preflight_output_collisions(&[], &[], None).is_ok());
+        assert!(
+            preflight_output_collisions(&[pb("a_trimmed.fq.gz")], &[pb("a.fastq.gz")], None)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn preflight_rejects_identical_outputs() {
+        let planned = [pb("x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        let err = preflight_output_collisions(&planned, &[], None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("would be written to the same file"),
+            "got: {err}"
+        );
+        assert!(err.contains("x_trimmed.fq.gz"), "must name the path: {err}");
+    }
+
+    /// Issue #216. Unreachable from an integration test: two paths differing only
+    /// in case cannot coexist on APFS.
+    #[test]
+    fn preflight_rejects_case_only_variants() {
+        let planned = [pb("Sample_trimmed.fq.gz"), pb("SAMPLE_trimmed.fq.gz")];
+        let err = preflight_output_collisions(&planned, &[], None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("would be written to the same file"),
+            "got: {err}"
+        );
+    }
+
+    /// REGRESSION (#383). A raw-string key let `./x` and `x` through while naming
+    /// one file, so the reported bug survived its own fix.
+    #[test]
+    fn preflight_rejects_dot_slash_alias() {
+        let planned = [pb("./x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        let err = preflight_output_collisions(&planned, &[], None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("would be written to the same file"),
+            "got: {err}"
+        );
+    }
+
+    /// REGRESSION (#383). Same defect via a mixed absolute/relative argument list.
+    #[test]
+    fn preflight_rejects_absolute_versus_relative_alias() {
+        let abs = std::env::current_dir().unwrap().join("x_trimmed.fq.gz");
+        let planned = [abs, pb("x_trimmed.fq.gz")];
+        let err = preflight_output_collisions(&planned, &[], None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("would be written to the same file"),
+            "got: {err}"
+        );
+    }
+
+    /// REGRESSION (#383). An output that would overwrite an input gets its own
+    /// message: "same file" is untrue here and its remedies do not apply.
+    #[test]
+    fn preflight_rejects_output_that_aliases_an_input() {
+        let planned = [pb("s_trimmed.fq.gz")];
+        let inputs = [pb("s.fastq.gz"), pb("s_trimmed.fq.gz")];
+        let err = preflight_output_collisions(&planned, &inputs, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("which is also one of its inputs"),
+            "got: {err}"
+        );
+        assert!(
+            !err.contains("would be written to the same file"),
+            "must not fall back to the duplicate-output wording: {err}"
+        );
+    }
+
+    /// The alias check is keyed the same way, so a `./` spelling still catches it.
+    #[test]
+    fn preflight_rejects_input_alias_across_spellings() {
+        let planned = [pb("./s_trimmed.fq.gz")];
+        let inputs = [pb("s_trimmed.fq.gz")];
+        assert!(preflight_output_collisions(&planned, &inputs, None).is_err());
+    }
+
+    /// REGRESSION (#383). `..` used to defeat the key, so `trim_galore
+    /// ../data/s.fastq /abs/data/s.fq` lost one input's reads at exit 0 — the
+    /// reported bug reproducing through its own fix.
+    #[test]
+    fn preflight_rejects_dotdot_alias() {
+        let planned = [pb("a/../x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        assert!(preflight_output_collisions(&planned, &[], None).is_err());
+    }
+
+    /// `..` that cannot be folded away must not be silently dropped: two paths
+    /// differing only below a kept `..` stay distinct.
+    #[test]
+    fn preflight_keeps_unfoldable_paths_distinct() {
+        let planned = [pb("../x_trimmed.fq.gz"), pb("../y_trimmed.fq.gz")];
+        assert!(preflight_output_collisions(&planned, &[], None).is_ok());
+    }
+
+    #[test]
+    fn preflight_appends_hint_only_when_given() {
+        let planned = [pb("x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        let with = preflight_output_collisions(&planned, &[], Some("EXTRA-HINT."))
+            .unwrap_err()
+            .to_string();
+        assert!(with.contains("EXTRA-HINT."), "got: {with}");
+        let without = preflight_output_collisions(&planned, &[], None)
+            .unwrap_err()
+            .to_string();
+        assert!(!without.contains("EXTRA-HINT."), "got: {without}");
+        // ...and the generic advice appears only when no hint was given.
+        assert!(
+            without.contains("different source directories"),
+            "got: {without}"
+        );
+        assert!(
+            !with.contains("different source directories"),
+            "a hint must REPLACE the generic advice, not append to it: {with}"
+        );
+    }
+
+    /// Assumption A2, in the direction that makes the pre-flight sufficient:
+    /// where two inputs' PRIMARY output paths differ, every secondary output
+    /// path must differ too — so a secondary can never collide unless a primary
+    /// already has, and hashing primaries alone is enough.
+    ///
+    /// Checked across the flag matrix (`--basename` / `--dont_gzip` / `-o`, each
+    /// on and off) because `--basename` and `-o` are exactly the flags that
+    /// collapse distinct inputs onto one path.
+    ///
+    /// FastQC's `<stem>_fastqc.zip` is not asserted separately: the bundled
+    /// crate derives it from the primary path we hand it, so there is no second
+    /// key of ours to compare, and writing the formula out here would only test
+    /// the formula. Its one real exception — `--fastqc_args "-o DIR"`, which
+    /// overrides the output directory where the pre-flight cannot see it — is
+    /// recorded in the plan as a known residual, not covered here.
+    #[test]
+    fn distinct_primary_outputs_imply_distinct_secondary_outputs() {
+        // The last two share a basename across directories. Without that pair the
+        // assertion is a tautology: every namer embeds `file_name()`, so distinct
+        // basenames make it true regardless of whether a namer honours the directory.
+        let inputs = [
+            Path::new("d/alpha.fastq.gz"),
+            Path::new("d/beta.fastq.gz"),
+            Path::new("e/gamma.fq.gz"),
+            Path::new("d/same.fastq.gz"),
+            Path::new("e/same.fastq.gz"),
+        ];
+        let out = PathBuf::from("shared_out");
+
+        for basename in [None, Some("fixed")] {
+            for gzip in [true, false] {
+                for output_dir in [None, Some(out.as_path())] {
+                    let primaries: Vec<PathBuf> = inputs
+                        .iter()
+                        .map(|p| single_end_output_name(p, output_dir, basename, gzip))
+                        .collect();
+
+                    for (i, a) in primaries.iter().enumerate() {
+                        for (j, b) in primaries.iter().enumerate().take(i) {
+                            if a == b {
+                                // --basename collapses every input onto one primary; the
+                                // pre-flight rejects that, and cli.rs:620 rejects it earlier
+                                // still for multi-input SE. Nothing to prove here.
+                                continue;
+                            }
+                            // Primaries differ, so every secondary must differ too.
+                            for namer in [report_name, json_report_name, clumping_report_name] {
+                                assert_ne!(
+                                    namer(inputs[i], output_dir),
+                                    namer(inputs[j], output_dir),
+                                    "secondary collided while primaries {a:?} / {b:?} differ \
+                                     (basename={basename:?} gzip={gzip} out={output_dir:?})"
+                                );
+                            }
+                            // The demux stem, via the same function `demultiplex` uses.
+                            // Only meaningful when the two primaries share a directory:
+                            // demux resolves its output dir to `-o` else the primary's
+                            // parent, so differing parents already separate the paths and
+                            // the stem is allowed to repeat.
+                            if a.parent() == b.parent() {
+                                assert_ne!(
+                                    crate::demux::demux_base_name(a),
+                                    crate::demux::demux_base_name(b),
+                                    "demux stems collided in one directory while primaries \
+                                     differ: {a:?} / {b:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Complement to the above: the primary key is strictly *coarser* than the
+    /// report key, which is why checking primaries covers reports rather than
+    /// merely coinciding with them. Three spellings of one sample share a
+    /// primary while keeping three distinct report names.
+    #[test]
+    fn primary_output_key_is_coarser_than_secondary_keys() {
+        let variants = [
+            Path::new("d/sample.fastq.gz"),
+            Path::new("d/sample.fq.gz"),
+            Path::new("d/sample.fastq.bgz"),
+        ];
+
+        // All three collapse to one primary output...
+        let primaries: Vec<PathBuf> = variants
+            .iter()
+            .map(|p| single_end_output_name(p, None, None, true))
+            .collect();
+        assert!(
+            primaries.windows(2).all(|w| w[0] == w[1]),
+            "expected one shared primary, got {primaries:?}"
+        );
+
+        // ...while every secondary name stays distinct, so a secondary can never
+        // collide unless the primary already has.
+        for namer in [report_name, json_report_name, clumping_report_name] {
+            let secondaries: Vec<PathBuf> = variants.iter().map(|p| namer(p, None)).collect();
+            for (i, a) in secondaries.iter().enumerate() {
+                for b in &secondaries[..i] {
+                    assert_ne!(a, b, "secondary names must be distinct: {a:?} vs {b:?}");
+                }
+            }
+        }
+
+        // Same property for the uBAM primary.
+        let bam: Vec<PathBuf> = variants
+            .iter()
+            .map(|p| single_end_bam_output_name(p, None, None))
+            .collect();
+        assert!(bam.windows(2).all(|w| w[0] == w[1]), "got {bam:?}");
     }
 }

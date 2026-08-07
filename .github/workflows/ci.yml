@@ -639,6 +639,61 @@ jobs:
           # Fail-fast sanity: NOTHING should be written — covers reports too.
           test -z "$(ls -A /tmp/rust_case/out 2>/dev/null)"
 
+      - name: Validate single-end collision pre-flight (issue #383)
+        run: |
+          # SE trim was the only trim path without the #216 pre-flight: two inputs
+          # sharing a stem produced ONE output at exit 0, first input's reads gone.
+          rm -rf /tmp/rust_se_coll; mkdir -p /tmp/rust_se_coll/out
+          cp test_files/illumina_10K.fastq.gz /tmp/rust_se_coll/sample.fastq.gz
+          cp test_files/illumina_10K.fastq.gz /tmp/rust_se_coll/sample.fq.gz
+          set +e
+          ./target/release/trim_galore -o /tmp/rust_se_coll/out \
+            /tmp/rust_se_coll/sample.fastq.gz /tmp/rust_se_coll/sample.fq.gz 2>&1 | tee /tmp/se_coll.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "Output path collision" /tmp/se_coll.log
+          test -z "$(ls -A /tmp/rust_se_coll/out 2>/dev/null)"
+
+      - name: Validate --hardtrim5 collision pre-flight and its own remediation (issue #383)
+        run: |
+          # Hardtrim names output into the CWD, so identical basenames collide even
+          # from different directories and -o does not rescue it. The generic advice
+          # ("different source directories or --output_dir") is wrong here, so the
+          # message must carry the mode-specific hint instead.
+          rm -rf /tmp/rust_ht_coll; mkdir -p /tmp/rust_ht_coll/sub1 /tmp/rust_ht_coll/sub2 /tmp/rust_ht_coll/out
+          cp test_files/illumina_10K.fastq.gz /tmp/rust_ht_coll/sub1/same.fastq.gz
+          cp test_files/illumina_10K.fastq.gz /tmp/rust_ht_coll/sub2/same.fastq.gz
+          set +e
+          ./target/release/trim_galore --hardtrim5 30 -o /tmp/rust_ht_coll/out \
+            /tmp/rust_ht_coll/sub1/same.fastq.gz /tmp/rust_ht_coll/sub2/same.fastq.gz 2>&1 | tee /tmp/ht_coll.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "Output path collision" /tmp/ht_coll.log
+          grep -q "one invocation per input" /tmp/ht_coll.log
+          test -z "$(ls -A /tmp/rust_ht_coll/out 2>/dev/null)"
+
+      - name: Validate an output may not overwrite an input (issue #383)
+        run: |
+          # An output path can alias an INPUT of the same run: the run then destroys
+          # that input's reads and writes a second file holding the wrong sample.
+          # Reachable by re-running over a directory that holds a previous output.
+          rm -rf /tmp/rust_alias; mkdir -p /tmp/rust_alias
+          cp test_files/illumina_10K.fastq.gz /tmp/rust_alias/sample.fastq.gz
+          cp test_files/illumina_10K.fastq.gz /tmp/rust_alias/sample_trimmed.fq.gz
+          BEFORE=$(md5sum /tmp/rust_alias/sample_trimmed.fq.gz | awk '{print $1}')
+          set +e
+          ./target/release/trim_galore \
+            /tmp/rust_alias/sample.fastq.gz /tmp/rust_alias/sample_trimmed.fq.gz 2>&1 | tee /tmp/alias.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          test $rc -ne 0
+          grep -q "which is also one of its inputs" /tmp/alias.log
+          # The named input must be byte-identical afterwards, and no new file written.
+          test "$(md5sum /tmp/rust_alias/sample_trimmed.fq.gz | awk '{print $1}')" = "$BEFORE"
+          test "$(ls -A /tmp/rust_alias | wc -l)" -eq 2
+
       - name: Validate multi-pair with --cores 1 (sequential path)
         run: |
           rm -rf /tmp/rust_multi_seq; mkdir -p /tmp/rust_multi_seq

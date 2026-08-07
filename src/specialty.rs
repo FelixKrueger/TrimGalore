@@ -11,6 +11,25 @@ use crate::fastq::FastqWriter;
 use crate::format::{InputFormat, detect_input_format};
 use crate::io as naming;
 
+/// Which end `--hardtrim5`/`--hardtrim3` keeps, as it appears in the output filename.
+///
+/// A type rather than a `&str` because the discriminator is written twice per mode
+/// since #383 — once building the collision candidates, once naming the output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardtrimEnd {
+    Five,
+    Three,
+}
+
+impl HardtrimEnd {
+    fn as_str(self) -> &'static str {
+        match self {
+            HardtrimEnd::Five => "5prime",
+            HardtrimEnd::Three => "3prime",
+        }
+    }
+}
+
 /// Hard-trim every read to keep only the first `keep` bases from the 5' end.
 ///
 /// Output filename: `*.{keep}bp_5prime.fq(.gz)`
@@ -23,7 +42,7 @@ pub fn hardtrim5(
     cores: usize,
     gzip_level: u32,
 ) -> Result<()> {
-    let output_path = hardtrim_output_name(input, keep, "5prime", output_dir, gzip);
+    let output_path = hardtrim_output_name(input, keep, HardtrimEnd::Five, output_dir, gzip);
     eprintln!(
         "Writing hard-trimmed (first {}bp) version of '{}' to '{}'",
         keep,
@@ -66,7 +85,7 @@ pub fn hardtrim3(
     cores: usize,
     gzip_level: u32,
 ) -> Result<()> {
-    let output_path = hardtrim_output_name(input, keep, "3prime", output_dir, gzip);
+    let output_path = hardtrim_output_name(input, keep, HardtrimEnd::Three, output_dir, gzip);
     eprintln!(
         "Writing hard-trimmed (last {}bp) version of '{}' to '{}'",
         keep,
@@ -117,7 +136,7 @@ pub fn hardtrim5_to_bam(
     command_line: &str,
     input_phred_offset: u8,
 ) -> Result<()> {
-    let output_path = hardtrim_bam_output_name(input, keep, "5prime", output_dir);
+    let output_path = hardtrim_bam_output_name(input, keep, HardtrimEnd::Five, output_dir);
     eprintln!(
         "Writing hard-trimmed (first {}bp) version of '{}' to '{}'",
         keep,
@@ -169,7 +188,7 @@ pub fn hardtrim3_to_bam(
     command_line: &str,
     input_phred_offset: u8,
 ) -> Result<()> {
-    let output_path = hardtrim_bam_output_name(input, keep, "3prime", output_dir);
+    let output_path = hardtrim_bam_output_name(input, keep, HardtrimEnd::Three, output_dir);
     eprintln!(
         "Writing hard-trimmed (last {}bp) version of '{}' to '{}'",
         keep,
@@ -420,16 +439,16 @@ pub fn implicon(
 
 // --- Output naming helpers ---
 
-fn hardtrim_output_name(
+pub fn hardtrim_output_name(
     input: &Path,
     keep: usize,
-    end: &str,
+    end: HardtrimEnd,
     output_dir: Option<&Path>,
     gzip: bool,
 ) -> PathBuf {
     let stem = naming::strip_fastq_extensions(input);
     let ext = if gzip { ".fq.gz" } else { ".fq" };
-    let filename = format!("{}.{}bp_{}{}", stem, keep, end, ext);
+    let filename = format!("{}.{}bp_{}{}", stem, keep, end.as_str(), ext);
     match output_dir {
         Some(dir) => dir.join(filename),
         None => PathBuf::from(filename),
@@ -443,14 +462,14 @@ fn hardtrim_output_name(
 /// 5'- and 3'-outputs from the same input. The deliberate departure here
 /// preserves the `5prime` / `3prime` discriminator from the FASTQ scheme
 /// — a v2.1 spec-correction documented inline.
-fn hardtrim_bam_output_name(
+pub fn hardtrim_bam_output_name(
     input: &Path,
     keep: usize,
-    end: &str,
+    end: HardtrimEnd,
     output_dir: Option<&Path>,
 ) -> PathBuf {
     let stem = naming::strip_fastq_extensions(input);
-    let filename = format!("{}.{}bp_{}.bam", stem, keep, end);
+    let filename = format!("{}.{}bp_{}.bam", stem, keep, end.as_str());
     match output_dir {
         Some(dir) => dir.join(filename),
         None => PathBuf::from(filename),
@@ -819,7 +838,13 @@ mod tests {
             PathBuf::from("sample_8bp_UMI_R2.fastq")
         );
         assert_eq!(
-            hardtrim_output_name(Path::new("sample.fastq.bgz"), 50, "5prime", None, false),
+            hardtrim_output_name(
+                Path::new("sample.fastq.bgz"),
+                50,
+                HardtrimEnd::Five,
+                None,
+                false
+            ),
             PathBuf::from("sample.50bp_5prime.fq")
         );
         assert_eq!(

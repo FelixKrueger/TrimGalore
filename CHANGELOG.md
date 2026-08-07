@@ -60,7 +60,86 @@
   `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
   comparison is untouched.
 
+- **Single-end trimming no longer discards one input's reads when two inputs
+  share an output name** ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
+  `trim_galore sample.fastq.gz sample.fq.gz` produced a single
+  `sample_trimmed.fq.gz` and exited 0, having written the second input over the
+  first. Two trimming reports were left behind, each stating that all its reads
+  had been written, so the arithmetic on disk was wrong and nothing checked it.
+
+  The output-collision pre-flight added for
+  [#216](https://github.com/FelixKrueger/TrimGalore/issues/216) already refused
+  this on `--paired`, `--clock`, `--implicon` and `--clump_only`. It was missing
+  from four dispatch paths, all sharing one shape — a loop over the input list
+  with no check in front of it: single-end trim (FASTQ and uBAM output) and
+  `--hardtrim5`/`--hardtrim3` (FASTQ and uBAM output). All four now check, and
+  every path routes through one shared implementation.
+
+  `--hardtrim5`/`--hardtrim3` were the wider case, because they name output into
+  the *current working directory* rather than beside the input: identical input
+  basenames collided there even when the inputs came from different directories,
+  so `--hardtrim5 30 */*.fastq.gz` over a per-sample layout kept only the last
+  sample. Because `--output_dir` cannot resolve that collision, these two modes
+  add their own remediation to the error rather than the generic advice.
+
+  Two further defects in the check itself are fixed at the same time:
+
+  - **The key was a raw path string**, so `./sample.fastq.gz` and
+    `sample.fastq.gz` — or a list mixing absolute and relative paths, as
+    `find`/`xargs` and pipeline staging produce — named one file under two keys
+    and passed. The key is now lexically normalised — absolutised, then `..`
+    folded against the component stack — so `./x`, `<cwd>/x` and `a/../x` all
+    resolve to one key without touching the filesystem. A path reached through a
+    **symlink** still aliases undetected; that is the one remaining case, and it
+    costs the same silent read loss this entry describes.
+  - **The check compared outputs only against other outputs**, never against the
+    run's own inputs — and, once that was fixed, only *primary* outputs were
+    compared. A trimming report, or a `--demux` per-barcode file, could still
+    overwrite a named input while every primary output stayed distinct. Reports
+    and `--demux` outputs are now in the checked set, and `--demux`'s barcode
+    file is treated as an input that may not be written over. An output path can
+    *be* an input:
+    `trim_galore sample.fastq.gz sample_trimmed.fq.gz` (reachable by re-running
+    over a directory holding an earlier run's output) destroyed the second
+    input's reads and wrote a `sample_trimmed_trimmed.fq.gz` containing the
+    first sample's — a wrong-sample file, which is harder to notice than a
+    missing one. This affected `--paired` as well, and is now refused on every
+    path with a message of its own.
+
+  A rejected run still writes nothing, and the diagnostic keeps naming the paths
+  as the user spelled them.
+
 #### Changes
+
+- **A file given twice on one command line is now rejected**
+  ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
+  `trim_galore sample.fastq.gz sample.fastq.gz` previously trimmed the file
+  twice and wrote the same output twice, exiting 0. It is now refused during
+  argument validation, matching the duplicate-pair rejection `--paired` has
+  always had. `--clock` and `--implicon` keep their own more specific
+  "Read 1 and Read 2 appear to be the same file" message.
+
+- **Two collision messages advised `--output-dir`, which is not a valid flag**
+  (only `--output_dir` and `-o` are). Both now name `--output_dir`.
+
+- **`--hardtrim5/3`, `--clock` and `--implicon` name output into the current
+  working directory**, so on a collision the usual advice — use different source
+  directories, or `--output_dir` — is false for them: neither changes the
+  outcome. These four modes now get their own remediation instead, replacing the
+  generic sentence rather than contradicting it a clause later.
+
+- **One definition of "the same file".** `--paired`'s R1≠R2 check, its
+  duplicate-pair check, the duplicate-input check and the `--passthrough` alias
+  check all compared paths more weakly than the collision pre-flight did, so
+  `trim_galore --paired ./a_R1.fq a_R1.fq` exited 0 and wrote two byte-identical
+  files labelled as a validated R1/R2 pair. All four now use the same key as the
+  pre-flight.
+
+- **Case-folded paths are treated as colliding**, which is what makes the
+  APFS/NTFS guard work. On an opt-in case-sensitive volume two genuinely distinct
+  inputs differing only in case are therefore refused. That trade — a loud error
+  over a silent overwrite — is unchanged since v2.0; it is recorded here because
+  it had never been stated.
 
 - **`--clump_only` now supports uBAM in/out** — extending the mode with
   unaligned BAM support via `--output-format ubam` (input auto-detected

@@ -52,33 +52,83 @@ type AdapterList = Vec<(String, String)>;
 type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
 type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
 
+/// Replaces the generic advice for the modes that name output into the CWD
+/// (`--hardtrim5/3`, `--clock`, `--implicon`), where "use `--output_dir`" is false.
+const CWD_OUTPUT_HINT: &str = "This mode writes output to the current working directory, \
+                               so inputs sharing a basename collide whatever `--output_dir` \
+                               is set to — run one invocation per input, or give the inputs \
+                               distinct basenames.";
+
+/// Every file a run reads and must therefore never write over: the positionals,
+/// `--passthrough`, and `--demux`'s barcode file.
+fn guarded_inputs(cli: &Cli) -> Vec<std::path::PathBuf> {
+    let mut v = cli.input.clone();
+    if let Some(ref pt) = cli.passthrough {
+        v.push(pt.clone());
+    }
+    if let Some(ref bc) = cli.demux {
+        v.push(bc.clone());
+    }
+    v
+}
+
+/// Secondary outputs an SE FASTQ trim run writes besides the trimmed file: the two
+/// trimming reports, and — when `--demux` is set — every per-barcode file.
+///
+/// Needed because the pre-flight's output-vs-input check is only as complete as the
+/// path list it is given: assumption A2 argues that checking *primary* paths covers
+/// secondary paths for output-vs-**output** collisions, and says nothing about
+/// output-vs-**input**. A secondary output can equal a named input while every
+/// primary stays distinct.
+fn planned_secondary_outputs(
+    cli: &Cli,
+    output_dir: Option<&Path>,
+    gzip: bool,
+) -> Result<Vec<std::path::PathBuf>> {
+    let mut v = Vec::new();
+    for input in &cli.input {
+        if !cli.no_report_file {
+            v.push(naming::report_name(input, output_dir));
+            v.push(naming::json_report_name(input, output_dir));
+        }
+        if let Some(ref barcode_file) = cli.demux {
+            let barcodes = demux::read_barcode_file(barcode_file)?;
+            let trimmed =
+                naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
+            v.extend(demux::demux_output_paths(
+                &trimmed, &barcodes, gzip, output_dir,
+            ));
+        }
+    }
+    Ok(v)
+}
+
+/// Prospective hardtrim output paths for every input, per resolved output format.
+fn planned_hardtrim_outputs(
+    cli: &Cli,
+    keep: usize,
+    end: specialty::HardtrimEnd,
+    output_dir: Option<&Path>,
+    gzip: bool,
+) -> Vec<std::path::PathBuf> {
+    cli.input
+        .iter()
+        .map(|input| match cli.output_format {
+            trim_galore::cli::OutputFormat::Fastq => {
+                specialty::hardtrim_output_name(input, keep, end, output_dir, gzip)
+            }
+            trim_galore::cli::OutputFormat::UBam => {
+                specialty::hardtrim_bam_output_name(input, keep, end, output_dir)
+            }
+        })
+        .collect()
+}
+
 /// Resolve `--memory` into a `(n_bins, bin_byte_budget)` layout when
 /// `--clumpify` is set, and emit a one-line startup notice with the
 /// resolved values. Returns `None` if clumpify is off — or if the budget
 /// is below the floor, in which case we print a loud warning and fall back
 /// to plain mode rather than refusing to run.
-/// Case-folded (APFS/NTFS-safe) output-path collision pre-flight for the
-/// v2 uBAM output paths. Hashes each prospective path via `naming::norm_path`;
-/// bails on the first duplicate. Mirrors the SE FASTQ pre-flight pattern from
-/// the FASTQ path — same error message shape.
-fn preflight_collision_bam(paths: &[std::path::PathBuf]) -> Result<()> {
-    let mut seen: std::collections::HashMap<String, std::path::PathBuf> =
-        std::collections::HashMap::new();
-    for p in paths {
-        if let Some(existing) = seen.insert(naming::norm_path(p), p.clone()) {
-            anyhow::bail!(
-                "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                 {} and {} would be written to the same file. \
-                 Check that inputs produce distinct output paths \
-                 (e.g., different source directories or `--output_dir`).",
-                existing.display(),
-                p.display()
-            );
-        }
-    }
-    Ok(())
-}
-
 fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     if !cli.clumpify {
         return Ok(None);
@@ -342,6 +392,12 @@ fn main() -> Result<()> {
 
     // Specialty modes — bypass normal trimming pipeline entirely
     if let Some(n) = cli.hardtrim5 {
+        // #383 — collide across all inputs before the first write.
+        naming::preflight_output_collisions(
+            &planned_hardtrim_outputs(&cli, n, specialty::HardtrimEnd::Five, output_dir, gzip),
+            &guarded_inputs(&cli),
+            Some(CWD_OUTPUT_HINT),
+        )?;
         for input in &cli.input {
             match cli.output_format {
                 trim_galore::cli::OutputFormat::Fastq => specialty::hardtrim5(
@@ -367,6 +423,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(n) = cli.hardtrim3 {
+        // #383 — collide across all inputs before the first write.
+        naming::preflight_output_collisions(
+            &planned_hardtrim_outputs(&cli, n, specialty::HardtrimEnd::Three, output_dir, gzip),
+            &guarded_inputs(&cli),
+            Some(CWD_OUTPUT_HINT),
+        )?;
         for input in &cli.input {
             match cli.output_format {
                 trim_galore::cli::OutputFormat::Fastq => specialty::hardtrim3(
@@ -395,6 +457,7 @@ fn main() -> Result<()> {
         run_specialty_paired(
             &cli,
             "Clock",
+            Some(CWD_OUTPUT_HINT),
             |r1, r2| {
                 (
                     specialty::clock_output_name(r1, "R1", output_dir, gzip),
@@ -409,6 +472,7 @@ fn main() -> Result<()> {
         run_specialty_paired(
             &cli,
             "IMPLICON",
+            Some(CWD_OUTPUT_HINT),
             |r1, r2| {
                 (
                     specialty::implicon_output_name(r1, umi_len, "R1", output_dir, gzip),
@@ -457,6 +521,7 @@ fn main() -> Result<()> {
                     run_specialty_paired(
                         &cli,
                         "--clump_only",
+                        None, // clumped_paired_output_names uses input.parent(), not the CWD
                         |r1, r2| {
                             naming::clumped_paired_output_names(r1, r2, output_dir, basename, gzip)
                         },
@@ -478,24 +543,13 @@ fn main() -> Result<()> {
                         },
                     )?;
                 } else {
-                    // SE FASTQ pre-flight (case-folded per issue #216).
-                    let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
-                        std::collections::HashMap::new();
-                    for input in &cli.input {
-                        let out = naming::clumped_output_name(input, output_dir, basename, gzip);
-                        if let Some(existing) =
-                            out_paths.insert(naming::norm_path(&out), out.clone())
-                        {
-                            anyhow::bail!(
-                                "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                                 {} and {} would be written to the same file. \
-                                 Check that inputs produce distinct output paths \
-                                 (e.g., different source directories or `--output_dir`).",
-                                existing.display(),
-                                out.display()
-                            );
-                        }
-                    }
+                    // SE FASTQ pre-flight (issues #216, #383).
+                    let planned: Vec<std::path::PathBuf> = cli
+                        .input
+                        .iter()
+                        .map(|input| naming::clumped_output_name(input, output_dir, basename, gzip))
+                        .collect();
+                    naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
                     for input in &cli.input {
                         clump_only::clump_only_single(
                             input,
@@ -530,7 +584,11 @@ fn main() -> Result<()> {
                             output_dir,
                             basename,
                         );
-                        preflight_collision_bam(&[planned])?;
+                        naming::preflight_output_collisions(
+                            &[planned],
+                            &guarded_inputs(&cli),
+                            None,
+                        )?;
                         clump_only::clump_only_paired_to_bam_one_pair(
                             &cli.input,
                             output_dir,
@@ -563,7 +621,7 @@ fn main() -> Result<()> {
                                 basename,
                             ));
                         }
-                        preflight_collision_bam(&planned)?;
+                        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
                         // Per-pair iteration. Mirrors the trim FASTQ multi-pair
                         // shape (main.rs:651-669) with pair-progress banner +
                         // per-pair sanity-checks + `.with_context()` error
@@ -611,7 +669,7 @@ fn main() -> Result<()> {
                     for input in &cli.input {
                         planned.push(naming::clumped_bam_output_name(input, output_dir, basename));
                     }
-                    preflight_collision_bam(&planned)?;
+                    naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
                     for input in &cli.input {
                         clump_only::clump_only_single_to_bam(
                             input,
@@ -670,16 +728,8 @@ fn main() -> Result<()> {
     }
 
     if cli.paired {
-        // Pre-flight: detect output-path collisions across pairs before any I/O.
-        // Hash key is the full path, case-folded (ASCII lowercase) so that paths
-        // differing only in letter-case — which alias the same file on APFS/NTFS
-        // — collide here rather than silently overwriting on disk (issue #216).
-        // Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
-        // false-positive, but the penalty is a loud early error rather than
-        // silent data loss.
-        let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
-            std::collections::HashMap::new();
-        let norm = |p: &std::path::Path| -> String { p.to_string_lossy().to_ascii_lowercase() };
+        // Pre-flight across pairs before any I/O; see io::collision_key for the key.
+        let mut planned: Vec<std::path::PathBuf> = Vec::new();
         for chunk in cli.input.chunks(2) {
             let (o1, o2) = naming::paired_end_output_names(
                 &chunk[0],
@@ -712,19 +762,9 @@ fn main() -> Result<()> {
                     gzip,
                 ));
             }
-            for p in candidates {
-                if let Some(existing) = out_paths.insert(norm(&p), p.clone()) {
-                    anyhow::bail!(
-                        "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                         {} and {} would be written to the same file. \
-                         Check that input pairs produce distinct output paths \
-                         (e.g., different source directories or `--output-dir`).",
-                        existing.display(),
-                        p.display()
-                    );
-                }
-            }
+            planned.extend(candidates);
         }
+        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
 
         // Adapter detection runs PER PAIR — intentional deviation from Perl
         // v0.6.x (which detected once on $ARGV[0] at trim_galore:2455). Shell-
@@ -781,6 +821,17 @@ fn main() -> Result<()> {
     } else {
         // Single-end: process each input file independently
         // (matches Perl TrimGalore behavior of looping over all positional args)
+        // #383 — SE trim was the only trim path without the #216 pre-flight.
+        let planned: Vec<std::path::PathBuf> = cli
+            .input
+            .iter()
+            .map(|input| {
+                naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip)
+            })
+            .collect();
+        let mut planned = planned;
+        planned.extend(planned_secondary_outputs(&cli, output_dir, gzip)?);
+        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
         for (i, input) in cli.input.iter().enumerate() {
             if i > 0 {
                 eprintln!("\n--------------------------------------------------");
@@ -1797,27 +1848,16 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
         // two-BAM case from the mixed case (#363). The per-pair loop that used to
         // stand here emitted the two-BAM message for either.
         // Pre-flight: one BAM output per pair; collision on case-folded path.
-        let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
-            std::collections::HashMap::new();
-        let norm = |p: &std::path::Path| -> String { p.to_string_lossy().to_ascii_lowercase() };
+        let mut planned: Vec<std::path::PathBuf> = Vec::new();
         for chunk in cli.input.chunks(2) {
-            let out = naming::paired_bam_output_name(
+            planned.push(naming::paired_bam_output_name(
                 &chunk[0],
                 &chunk[1],
                 output_dir,
                 cli.basename.as_deref(),
-            );
-            if let Some(existing) = out_paths.insert(norm(&out), out.clone()) {
-                anyhow::bail!(
-                    "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                     {} and {} would be written to the same file. \
-                     Check that input pairs produce distinct output paths \
-                     (e.g., different source directories or `--output-dir`).",
-                    existing.display(),
-                    out.display()
-                );
-            }
+            ));
         }
+        naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
 
         let total_pairs = cli.input.len() / 2;
         for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
@@ -1855,6 +1895,13 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
     }
 
     // Single-end loop.
+    // #383 — same hole as the FASTQ SE loop.
+    let planned: Vec<std::path::PathBuf> = cli
+        .input
+        .iter()
+        .map(|input| naming::single_end_bam_output_name(input, output_dir, cli.basename.as_deref()))
+        .collect();
+    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
     for (i, input) in cli.input.iter().enumerate() {
         if i > 0 {
             eprintln!("\n--------------------------------------------------");
@@ -2400,6 +2447,7 @@ fn pct(part: usize, total: usize) -> f64 {
 fn run_specialty_paired<NameFn, RunFn>(
     cli: &Cli,
     mode_label: &str,
+    hint: Option<&str>,
     mut output_names: NameFn,
     mut run_pair: RunFn,
 ) -> Result<()>
@@ -2407,26 +2455,14 @@ where
     NameFn: FnMut(&Path, &Path) -> (std::path::PathBuf, std::path::PathBuf),
     RunFn: FnMut(&Path, &Path) -> Result<()>,
 {
-    // Pre-flight: detect output-path collisions across pairs (same shape
-    // as the --paired pre-flight at lines 82–125).
-    let mut out_paths: std::collections::HashMap<String, std::path::PathBuf> =
-        std::collections::HashMap::new();
-    let norm = |p: &std::path::Path| -> String { p.to_string_lossy().to_ascii_lowercase() };
+    // Pre-flight across pairs before any I/O; see io::collision_key for the key.
+    let mut planned: Vec<std::path::PathBuf> = Vec::new();
     for chunk in cli.input.chunks(2) {
         let (o1, o2) = output_names(&chunk[0], &chunk[1]);
-        for p in [o1, o2] {
-            if let Some(existing) = out_paths.insert(norm(&p), p.clone()) {
-                anyhow::bail!(
-                    "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                     {} and {} would be written to the same file. \
-                     Check that input pairs produce distinct output paths \
-                     (e.g., different source directories or `--output_dir`).",
-                    existing.display(),
-                    p.display()
-                );
-            }
-        }
+        planned.push(o1);
+        planned.push(o2);
     }
+    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), hint)?;
 
     let total_pairs = cli.input.len() / 2;
     for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {

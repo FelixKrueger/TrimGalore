@@ -532,7 +532,9 @@ impl Cli {
             );
         }
         for chunk in self.input.chunks(2) {
-            if chunk[0] == chunk[1] {
+            // #383 — keyed like the output-collision pre-flight, so `./r1.fq r1.fq`
+            // cannot pass as a pair. Raw `==` let two spellings of one file through.
+            if crate::io::collision_key(&chunk[0]) == crate::io::collision_key(&chunk[1]) {
                 anyhow::bail!(
                     "Read 1 and Read 2 appear to be the same file: {}. \
                      Did you mean to pass distinct R1 and R2 files?",
@@ -544,7 +546,9 @@ impl Cli {
             self.input.chunks(2).map(|c| (&c[0], &c[1])).collect();
         for (i, (r1, r2)) in pairs.iter().enumerate() {
             for (j, (pr1, pr2)) in pairs.iter().enumerate().take(i) {
-                if r1 == pr1 && r2 == pr2 {
+                if crate::io::collision_key(r1) == crate::io::collision_key(pr1)
+                    && crate::io::collision_key(r2) == crate::io::collision_key(pr2)
+                {
                     anyhow::bail!(
                         "Pair {} ({}, {}) is a duplicate of pair {}. \
                          Did you mean to pass different files?",
@@ -621,6 +625,28 @@ impl Cli {
             anyhow::bail!(
                 "--basename cannot be used with multiple input files (ambiguous output naming)"
             );
+        }
+        // #383 — caught here, not in the output-collision pre-flight, so the message can
+        // be precise (see validate_paired_input's rationale for the paired equivalent).
+        // `--clock`/`--implicon` are paired but never set `paired`, and own a more
+        // specific R1==R2 message, so they are excluded rather than pre-empted.
+        if !self.paired && !self.clock && self.implicon.is_none() {
+            for (i, path) in self.input.iter().enumerate() {
+                let key = crate::io::collision_key(path);
+                if let Some(j) = self.input[..i]
+                    .iter()
+                    .position(|other| crate::io::collision_key(other) == key)
+                {
+                    anyhow::bail!(
+                        "Input file {} was given more than once (arguments {} and {}). \
+                         List each input once — trimming it twice would write the same \
+                         output file twice.",
+                        path.display(),
+                        j + 1,
+                        i + 1
+                    );
+                }
+            }
         }
         if self.paired && self.input.len() > 2 && self.basename.is_some() {
             anyhow::bail!(
@@ -858,7 +884,7 @@ impl Cli {
 
         // --passthrough: 9-item compatibility envelope. Layout mirrors --clumpify
         // above. Each rejection has a precise user-facing message; case-folded
-        // collision check (1.ix) uses crate::io::norm_path to share the same
+        // collision check (1.ix) uses crate::io::collision_key to share the same
         // APFS/NTFS-aware normalisation as the output-collision pre-flight in
         // main.rs (issue #216 protection).
         if let Some(ref pt) = self.passthrough {
@@ -910,9 +936,9 @@ impl Cli {
             // where --passthrough silently dual-consumes one input on a case-insensitive
             // filesystem.
             if self.input.len() == 2 {
-                let pt_norm = crate::io::norm_path(pt);
-                if pt_norm == crate::io::norm_path(&self.input[0])
-                    || pt_norm == crate::io::norm_path(&self.input[1])
+                let pt_norm = crate::io::collision_key(pt);
+                if pt_norm == crate::io::collision_key(&self.input[0])
+                    || pt_norm == crate::io::collision_key(&self.input[1])
                 {
                     anyhow::bail!(
                         "--passthrough cannot point at R1 or R2 (case-insensitive match \
@@ -1178,6 +1204,41 @@ mod tests {
         // Regression guard: the 2-file golden path must keep working.
         let cli = Cli::parse_from(["trim_galore", "--paired", R1, R2]);
         cli.validate().expect("two-file paired-end should validate");
+    }
+
+    /// #383. A duplicated positional would write one output twice. Rejected in
+    /// `validate()` so the message is precise, not the APFS/NTFS collision text.
+    #[test]
+    fn test_validate_single_end_duplicate_input_rejected() {
+        let cli = Cli::parse_from(["trim_galore", R1, R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("was given more than once"),
+            "expected duplicate-input rejection, got: {err}"
+        );
+        assert!(
+            !err.contains("APFS/NTFS"),
+            "must not defer to the collision pre-flight's message: {err}"
+        );
+    }
+
+    /// The same guard covers the specialty modes, which never consult `--paired`.
+    #[test]
+    fn test_validate_hardtrim_duplicate_input_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim5", "20", R1, R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("was given more than once"),
+            "expected duplicate-input rejection under --hardtrim5, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_single_end_distinct_inputs_accepted() {
+        // Negative control for the two tests above: distinct SE inputs still validate.
+        let cli = Cli::parse_from(["trim_galore", R1, ALT_R1]);
+        cli.validate()
+            .expect("distinct single-end inputs should validate");
     }
 
     // ── Multi-pair widening for --clock and --implicon ──
