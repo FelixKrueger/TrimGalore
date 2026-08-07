@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::fastq::{FastqReader, FastqWriter};
 
@@ -103,6 +103,60 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
     Ok(entries)
 }
 
+/// Per-barcode output stem, derived from the trimmed file's own name
+/// (`sample_trimmed.fq.gz` → `sample_trimmed`).
+///
+/// Extracted so the #383 collision-key assumption (A2: distinct primary output
+/// paths imply distinct secondary paths) can be asserted against this code
+/// rather than a copy of it.
+pub fn demux_base_name(trimmed_file: &Path) -> String {
+    let mut base = trimmed_file
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    if base.ends_with(".gz") {
+        base = base[..base.len() - 3].to_string();
+    }
+    if base.ends_with(".fq") {
+        base = base[..base.len() - 3].to_string();
+    }
+    base
+}
+
+/// Directory the per-barcode outputs land in: `--output_dir` else the trimmed
+/// file's own parent. Shared with [`demux_output_paths`] so the pre-flight and
+/// the writer cannot disagree.
+fn demux_output_dir(trimmed_file: &Path, output_dir: Option<&Path>) -> PathBuf {
+    output_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| {
+        trimmed_file
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    })
+}
+
+/// Every path [`demultiplex`] will write, for the #383 output-collision pre-flight.
+///
+/// Built from the same `demux_output_dir` / `output_filename` helpers the writer
+/// uses, so the two cannot drift; `demux_writes_exactly_the_planned_paths` pins it.
+pub fn demux_output_paths(
+    trimmed_file: &Path,
+    barcodes: &[BarcodeEntry],
+    gzip: bool,
+    output_dir: Option<&Path>,
+) -> Vec<PathBuf> {
+    let base = demux_base_name(trimmed_file);
+    let dir = demux_output_dir(trimmed_file, output_dir);
+    let mut paths: Vec<PathBuf> = barcodes
+        .iter()
+        .map(|e| dir.join(output_filename(&base, &e.sample_name, gzip)))
+        .collect();
+    paths.push(dir.join(output_filename(&base, "NoCode", gzip)));
+    paths.push(dir.join(format!("{}_demultiplexing_summary.txt", base)));
+    paths
+}
+
 /// Demultiplex a trimmed FASTQ file based on 3' inline barcodes.
 ///
 /// For each read:
@@ -124,27 +178,14 @@ pub fn demultiplex(
     let barcode_length = barcodes[0].barcode.len();
     eprintln!("Setting barcode length to {}", barcode_length);
 
-    // Derive base name for output files:
-    // trimmed file is e.g. "sample_trimmed.fq.gz" → strip .gz then .fq
     let trimmed_name = trimmed_file
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let mut base_name = trimmed_name.clone();
-    if base_name.ends_with(".gz") {
-        base_name = base_name[..base_name.len() - 3].to_string();
-    }
-    if base_name.ends_with(".fq") {
-        base_name = base_name[..base_name.len() - 3].to_string();
-    }
+    let base_name = demux_base_name(trimmed_file);
 
-    let dir = output_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| {
-        trimmed_file
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf()
-    });
+    let dir = demux_output_dir(trimmed_file, output_dir);
 
     // Open per-sample output writers + NoCode
     let mut writers: HashMap<String, FastqWriter> = HashMap::new();
