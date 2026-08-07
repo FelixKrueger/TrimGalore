@@ -349,3 +349,147 @@ fn bgz_output_and_report_agree_on_the_stem() {
         }
     }
 }
+
+// ── #384: uppercase extensions behave as their lowercase equivalents ──────
+
+/// V5. Literal filename assertions, computed without calling any function under
+/// test; no `--dont_gzip`, so both halves of the change are observable. The two
+/// halves fail independently: a wrong stem fails at path resolution, a wrong
+/// compression decision fails on the magic bytes.
+#[test]
+fn uppercase_extension_names_and_compresses_like_lowercase() {
+    let dir = fresh_tmpdir("tg_384_upper");
+    let input = dir.join("SAMPLE.FASTQ.GZ");
+    write_gz(&input, &sample_reads("U"));
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+
+    let status = Command::new(binary())
+        .args(["-o", out.to_str().unwrap(), input.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    // Naming half: exact literals. Before #384 the stem kept `.FASTQ` and the
+    // output was plain (`SAMPLE.FASTQ_trimmed.fq`).
+    let trimmed = out.join("SAMPLE_trimmed.fq.gz");
+    assert!(
+        trimmed.is_file(),
+        "expected SAMPLE_trimmed.fq.gz, found: {:?}",
+        std::fs::read_dir(&out)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>()
+    );
+    assert!(out.join("SAMPLE.FASTQ.GZ_trimming_report.txt").is_file());
+
+    // Compression half: gzip magic, checked on bytes — the name is what is under test.
+    let bytes = std::fs::read(&trimmed).unwrap();
+    assert!(
+        bytes.starts_with(&[0x1f, 0x8b]),
+        "output must be gzip-compressed, got {:02x?}",
+        &bytes[..bytes.len().min(4)]
+    );
+}
+
+/// V4. The refusals the fold newly creates: mixed extension *spellings* whose
+/// stems now agree. (Pure case-variants are already refused today via the
+/// case-folded report keys, so they cannot discriminate — see the #384 plan.)
+#[test]
+fn uppercase_and_lowercase_spellings_of_one_stem_now_collide() {
+    let dir = fresh_tmpdir("tg_384_collide");
+    // On case-insensitive filesystems (default APFS) the last two names alias ONE
+    // file, so the second write_gz overwrites the first and the loop's second
+    // iteration feeds the same inode under a different spelling. Both iterations
+    // still refuse on both filesystem kinds; do not add content assertions here.
+    write_gz(&dir.join("SAMPLE.FASTQ.GZ"), &sample_reads("A"));
+    write_gz(&dir.join("sample.fq.gz"), &sample_reads("B"));
+    write_gz(&dir.join("SAMPLE.FQ.GZ"), &sample_reads("C"));
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+
+    for second in ["sample.fq.gz", "SAMPLE.FQ.GZ"] {
+        let output = Command::new(binary())
+            .current_dir(&dir)
+            .args(["-o", "out", "SAMPLE.FASTQ.GZ", second])
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "{second}: expected collision refusal"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Output path collision"),
+            "{second}: {stderr}"
+        );
+        assert!(
+            std::fs::read_dir(&out).unwrap().next().is_none(),
+            "{second}: a refused run must write nothing"
+        );
+    }
+}
+
+/// V8. The least-guarded consumer: `--clump_only`'s report derives its
+/// `Input: … (gzip|plain)` label and its `Compression ratio:` gate from
+/// `is_gzipped`. Before #384 a `.GZ`-named input read `plain` with no ratio line.
+#[test]
+fn clump_only_uppercase_gz_reports_gzip_and_ratio() {
+    let dir = fresh_tmpdir("tg_384_clump");
+    let input = dir.join("SAMPLE.FASTQ.GZ");
+    write_gz(&input, &sample_reads("K"));
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+
+    let status = Command::new(binary())
+        .args([
+            "--clump_only",
+            "-o",
+            out.to_str().unwrap(),
+            input.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    assert!(
+        out.join("SAMPLE_clumped.fq.gz").is_file(),
+        "clump stem must fold too"
+    );
+    let report = std::fs::read_to_string(out.join("SAMPLE.FASTQ.GZ_clumping_report.txt")).unwrap();
+    assert!(
+        report.contains("gzip"),
+        "Input label must say gzip:\n{report}"
+    );
+    assert!(!report.contains("plain"), "must not say plain:\n{report}");
+    assert!(
+        report.contains("Compression ratio:"),
+        "ratio line must appear:\n{report}"
+    );
+}
+
+/// #384 on the paired path, restoring this file's dispatch-path matrix: paired
+/// mode adds the coupling that `input[0]` drives the run-wide `gzip` flag.
+#[test]
+fn paired_uppercase_extensions_name_and_compress_like_lowercase() {
+    let dir = fresh_tmpdir("tg_384_paired");
+    write_gz(&dir.join("P_R1.FASTQ.GZ"), &sample_reads("R1"));
+    write_gz(&dir.join("P_R2.FASTQ.GZ"), &sample_reads("R2"));
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+
+    let status = Command::new(binary())
+        .current_dir(&dir)
+        .args(["--paired", "-o", "out", "P_R1.FASTQ.GZ", "P_R2.FASTQ.GZ"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    for stem in ["P_R1_val_1", "P_R2_val_2"] {
+        let f = out.join(format!("{stem}.fq.gz"));
+        assert!(f.is_file(), "missing {stem}.fq.gz");
+        let bytes = std::fs::read(&f).unwrap();
+        assert!(bytes.starts_with(&[0x1f, 0x8b]), "{stem} must be gzip");
+    }
+}

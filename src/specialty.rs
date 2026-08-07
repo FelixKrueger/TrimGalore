@@ -817,6 +817,31 @@ mod tests {
 
     // --- Output naming on `.bgz` input (#381) ---
 
+    /// #384. Uppercase extensions fold in the specialty namers too, and the
+    /// `--implicon` `_R1` strip becomes newly reachable — the same second-fault
+    /// mechanism `bgz_stem_reaches_specialty_output_names` documents for `.bgz`.
+    #[test]
+    fn uppercase_stem_reaches_specialty_output_names() {
+        assert_eq!(
+            implicon_output_name(Path::new("SAMPLE_R1.FASTQ.GZ"), 8, "R1", None, false),
+            PathBuf::from("SAMPLE_8bp_UMI_R1.fastq")
+        );
+        assert_eq!(
+            hardtrim_output_name(
+                Path::new("SAMPLE.FASTQ.GZ"),
+                30,
+                HardtrimEnd::Five,
+                None,
+                true
+            ),
+            PathBuf::from("SAMPLE.30bp_5prime.fq.gz")
+        );
+        assert_eq!(
+            clock_output_name(Path::new("SAMPLE_R1.FQ.GZ"), "R1", None, false),
+            PathBuf::from("SAMPLE_R1.clock_UMI.R1.fq")
+        );
+    }
+
     /// REGRESSION ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
     /// Every specialty mode names its output from the same stripped stem, so
     /// teaching the stripper about `.bgz` moves these filenames too.

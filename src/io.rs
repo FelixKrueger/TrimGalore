@@ -26,8 +26,13 @@ use std::path::{Component, Path, PathBuf};
 /// false for it. Moving the output decision to the detected format would
 /// change behaviour for every run, including a plain file misnamed `.gz`, so
 /// it is deliberately left for a separate change. See the CHANGELOG.
+///
+/// Matching is ASCII-case-insensitive (#384) and must stay in step with
+/// `strip_fastq_extensions`: folding one but not the other names the output
+/// like the gzipped convention while writing it plain, or vice versa.
 pub fn is_gzipped(path: &Path) -> bool {
-    path.extension().is_some_and(|ext| ext == "gz")
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("gz"))
 }
 
 /// Case-folded (ASCII lowercase) string view of a path for collision detection
@@ -508,6 +513,18 @@ pub fn json_report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
     }
 }
 
+/// ASCII-case-insensitive suffix strip, preserving the case of what remains (#384).
+///
+/// Byte-wise on purpose: slicing `&str` at `len - suffix.len()` panics when the
+/// index lands inside a multi-byte character, and extensionless non-ASCII names
+/// are valid input. A matched all-ASCII tail guarantees the index is a boundary.
+fn strip_suffix_ignore_ascii_case<'a>(name: &'a str, suffix: &str) -> Option<&'a str> {
+    let idx = name.len().checked_sub(suffix.len())?;
+    name.as_bytes()[idx..]
+        .eq_ignore_ascii_case(suffix.as_bytes())
+        .then(|| &name[..idx])
+}
+
 /// Strip FASTQ extensions from a filename, returning just the base stem.
 ///
 /// Handles `.fastq` / `.fq`, each optionally followed by a gzip-family
@@ -531,12 +548,12 @@ pub fn strip_fastq_extensions(path: &Path) -> String {
     // does not end in `.gz`, so the order within the list does not matter.
     let stem = [".gz", ".bgz", ".bgzf"]
         .iter()
-        .find_map(|ext| name.strip_suffix(ext))
+        .find_map(|ext| strip_suffix_ignore_ascii_case(&name, ext))
         .unwrap_or(&name);
 
     // Then the FASTQ extension itself, longest first.
     for ext in [".fastq", ".fq"] {
-        if let Some(base) = stem.strip_suffix(ext) {
+        if let Some(base) = strip_suffix_ignore_ascii_case(stem, ext) {
             return base.to_string();
         }
     }
@@ -954,9 +971,58 @@ mod tests {
         assert!(!is_gzipped(Path::new("sample.fastq")));
         assert!(!is_gzipped(Path::new("sample.fq")));
         assert!(!is_gzipped(Path::new("/some/dir/x")));
-        // Heuristic is extension-based (matches FastqReader's gzip detection),
-        // so a misnamed file doesn't trigger.
+        // Heuristic is extension-based on purpose (the reader sniffs content;
+        // this names the output), so a misnamed file doesn't trigger.
         assert!(!is_gzipped(Path::new("sample.gz.fastq")));
+    }
+
+    /// #384. Case variants of `.gz` must fold; nothing else may start matching.
+    /// This is the committed guard for the compression half of the change.
+    #[test]
+    fn test_is_gzipped_folds_case() {
+        assert!(is_gzipped(Path::new("SAMPLE.FASTQ.GZ")));
+        assert!(is_gzipped(Path::new("sample.fastq.Gz")));
+        assert!(is_gzipped(Path::new("SAMPLE.FQ.gz")));
+        // .bgz is not .gz in ANY case — the pre-existing bgz asymmetry stays,
+        // and the fold must not widen is_gzipped to the stem's gzip-family list.
+        assert!(!is_gzipped(Path::new("sample.fastq.bgz")));
+        assert!(!is_gzipped(Path::new("SAMPLE.FASTQ.BGZ")));
+        assert!(!is_gzipped(Path::new("SAMPLE.FASTQ")));
+        assert!(!is_gzipped(Path::new("sample.GZ.fastq")));
+    }
+
+    /// #384. Extension matching folds; the retained part of the name must not.
+    #[test]
+    fn test_strip_fastq_extensions_folds_case() {
+        for (input, stem) in [
+            ("SAMPLE.FASTQ.GZ", "SAMPLE"),
+            ("Sample.FastQ.Gz", "Sample"),
+            ("SAMPLE.FQ", "SAMPLE"),
+            ("SAMPLE.FASTQ", "SAMPLE"),
+            ("SAMPLE.FQ.GZ", "SAMPLE"),
+            ("SAMPLE.FASTQ.BGZ", "SAMPLE"),
+            ("SAMPLE.FASTQ.BGZF", "SAMPLE"),
+            ("sample_R1.FQ.GZ", "sample_R1"),
+        ] {
+            assert_eq!(
+                strip_fastq_extensions(Path::new(input)),
+                stem,
+                "input {input}"
+            );
+        }
+    }
+
+    /// #384 regression. The naive slice form of the case-insensitive strip
+    /// panics mid-character on multi-byte names; these inputs work end-to-end
+    /// today and must keep doing so.
+    #[test]
+    fn test_strip_fastq_extensions_non_ascii_and_short_names() {
+        assert_eq!(strip_fastq_extensions(Path::new("😀")), "😀");
+        assert_eq!(strip_fastq_extensions(Path::new("é.fq")), "é");
+        assert_eq!(strip_fastq_extensions(Path::new("a")), "a");
+        // Non-FASTQ extensions keep the file_stem fallback, un-folded.
+        assert_eq!(strip_fastq_extensions(Path::new("sample.bam")), "sample");
+        assert_eq!(strip_fastq_extensions(Path::new("sample.txt")), "sample");
     }
 
     // --- preflight_output_collisions (issues #216, #383) ---

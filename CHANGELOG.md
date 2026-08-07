@@ -122,6 +122,35 @@
 - **Two collision messages advised `--output-dir`, which is not a valid flag**
   (only `--output_dir` and `-o` are). Both now name `--output_dir`.
 
+- **FASTQ extensions now match case-insensitively**
+  ([#384](https://github.com/FelixKrueger/TrimGalore/issues/384)).
+  `SAMPLE.FASTQ.GZ` previously kept an inner `.FASTQ` in its output stem while the
+  report used the full filename, so the two disagreed about the sample name. The
+  extension match (`.fastq`/`.fq`, `.gz`/`.bgz`/`.bgzf`) now folds ASCII case;
+  the rest of the name keeps its case. Four visible consequences for
+  uppercase-named input:
+
+  - `SAMPLE.FASTQ.GZ` now produces `SAMPLE_trimmed.fq.gz` where it produced
+    `SAMPLE.FASTQ_trimmed.fq`.
+  - Output for `.GZ`-named input is now **gzip-compressed**, mirroring `.gz`.
+    Perl v0.6.11's compression test was case-sensitive, so this knowingly departs
+    from v0.6.11 for uppercase names — the alternative was output named like the
+    gzipped convention but written plain.
+  - Some multi-input runs that used to succeed are now refused: inputs whose
+    extensions differ in spelling but whose stems now agree (`SAMPLE.FASTQ.GZ`
+    alongside `sample.fq.gz`) collide on the output path and fail loudly before
+    any file is written.
+  - `--clump_only` reports for `.GZ`-named input now label the input `gzip` and
+    include the `Compression ratio:` line; its output stem folds the same way.
+  - The specialty modes (`--hardtrim5/3`, `--clock`, `--implicon`) rename and
+    newly compress the same way — `SAMPLE_R1.FASTQ.GZ` under `--implicon` now
+    yields `SAMPLE_8bp_UMI_R1.fastq.gz`, with the `_R1` de-duplication newly
+    applying because the stem now ends in `_R1` (the same mechanism the `.bgz`
+    fix documented in #381).
+
+  This makes uppercase output internally consistent; it does not change the
+  report filename, which keeps the full input name as before.
+
 - **`--hardtrim5/3`, `--clock` and `--implicon` name output into the current
   working directory**, so on a collision the usual advice — use different source
   directories, or `--output_dir` — is false for them: neither changes the
