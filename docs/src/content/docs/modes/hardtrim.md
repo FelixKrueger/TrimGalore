@@ -36,3 +36,5 @@ For everything else, prefer the fine-grained `--clip_R1`, `--clip_R2`, `--three_
 ## Compatibility
 
 Both modes accept multiple input files in a single invocation and process them sequentially. Paired-end mode is not required. `--hardtrim*` operates per-file independently.
+
+`--hardtrim5` and `--hardtrim3` cannot be combined in one invocation; to apply both, run two passes and feed the first trim's output to the second.
