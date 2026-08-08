@@ -5,6 +5,18 @@
 
 #### Bug fixes
 
+- **`--clump_only --paired` no longer silently overwrites one mate's clumping
+  report with the other's**
+  ([#391](https://github.com/FelixKrueger/TrimGalore/issues/391)). Primaries
+  carry `_clumped_1`/`_clumped_2`, but reports are named from the input
+  filename alone, so `-o out A/reads.fq B/reads.fq` wrote ONE report at exit 0.
+  Clumping-report paths now join the collision pre-flight on every clump arm
+  (gated on `--no_report_file`, matching the writers), which also stops a
+  clumping report from silently overwriting an *input* named like one — on the
+  paired arm and the single-end/uBAM arms alike. The single-interleaved-BAM
+  shape gets the same candidate line as defensive symmetry only; with one input
+  its report can never alias it.
+
 - **Whether input is gzipped is now decided by reading the file, not by its
   name.** This corrects two opposite failures:
 

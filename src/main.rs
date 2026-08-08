@@ -52,12 +52,14 @@ type AdapterList = Vec<(String, String)>;
 type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
 type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
 
-/// Replaces the generic advice for the modes that name output into the CWD
-/// (`--hardtrim5/3`, `--clock`, `--implicon`), where "use `--output_dir`" is false.
-const PAIRED_REPORT_HINT: &str = "Paired outputs and reports are named from the input \
-                                  filename alone, so two inputs sharing a filename collide \
-                                  regardless of source directory — rename one input, or pass \
-                                  --no_report_file if only the reports collide.";
+/// Hint for the sites whose report names carry no positional discriminator:
+/// paired trim (FASTQ and uBAM out) and `--clump_only --paired` (#391).
+const PAIRED_REPORT_HINT: &str = "Outputs and reports are named from the input \
+                                  filename alone, so inputs sharing a filename can \
+                                  collide when --output_dir (or a shared input \
+                                  directory) sends them to one place — rename one \
+                                  input, or pass --no_report_file if only the \
+                                  reports collide.";
 
 /// CWD-output modes' remediation; see `PAIRED_REPORT_HINT` for the paired sites.
 const CWD_OUTPUT_HINT: &str = "This mode writes output to the current working directory, \
@@ -107,6 +109,24 @@ fn planned_secondary_outputs(
         }
     }
     Ok(v)
+}
+
+/// Clumping-report paths a `--clump_only` run plans — one per report-keyed input,
+/// nothing under `--no_report_file` (matching every writer's gate in clump_only.rs).
+/// The pre-flight is only as complete as its candidate list: #391 was the paired
+/// arm planning primaries alone while the writer also wrote per-mate reports.
+fn clump_report_candidates(
+    no_report_file: bool,
+    report_inputs: &[impl AsRef<Path>],
+    output_dir: Option<&Path>,
+) -> Vec<std::path::PathBuf> {
+    if no_report_file {
+        return Vec::new();
+    }
+    report_inputs
+        .iter()
+        .map(|input| naming::clumping_report_name(input.as_ref(), output_dir))
+        .collect()
 }
 
 /// Prospective hardtrim output paths for every input, per resolved output format.
@@ -465,10 +485,10 @@ fn main() -> Result<()> {
             "Clock",
             Some(CWD_OUTPUT_HINT),
             |r1, r2| {
-                (
+                vec![
                     specialty::clock_output_name(r1, "R1", output_dir, gzip),
                     specialty::clock_output_name(r2, "R2", output_dir, gzip),
-                )
+                ]
             },
             |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.compression),
         )?;
@@ -480,10 +500,10 @@ fn main() -> Result<()> {
             "IMPLICON",
             Some(CWD_OUTPUT_HINT),
             |r1, r2| {
-                (
+                vec![
                     specialty::implicon_output_name(r1, umi_len, "R1", output_dir, gzip),
                     specialty::implicon_output_name(r2, umi_len, "R2", output_dir, gzip),
-                )
+                ]
             },
             |r1, r2| {
                 specialty::implicon(
@@ -527,9 +547,20 @@ fn main() -> Result<()> {
                     run_specialty_paired(
                         &cli,
                         "--clump_only",
-                        None, // clumped_paired_output_names uses input.parent(), not the CWD
+                        // #391 — reports carry no _clumped_N discriminator; the hint's
+                        // --no_report_file remedy is the escape hatch when only they collide.
+                        Some(PAIRED_REPORT_HINT),
                         |r1, r2| {
-                            naming::clumped_paired_output_names(r1, r2, output_dir, basename, gzip)
+                            let (o1, o2) = naming::clumped_paired_output_names(
+                                r1, r2, output_dir, basename, gzip,
+                            );
+                            let mut v = vec![o1, o2];
+                            v.extend(clump_report_candidates(
+                                cli.no_report_file,
+                                &[r1, r2],
+                                output_dir,
+                            ));
+                            v
                         },
                         |r1, r2| {
                             clump_only::clump_only_paired(
@@ -550,11 +581,17 @@ fn main() -> Result<()> {
                     )?;
                 } else {
                     // SE FASTQ pre-flight (issues #216, #383).
-                    let planned: Vec<std::path::PathBuf> = cli
+                    let mut planned: Vec<std::path::PathBuf> = cli
                         .input
                         .iter()
                         .map(|input| naming::clumped_output_name(input, output_dir, basename, gzip))
                         .collect();
+                    // #391 — reports join so the input check covers them too.
+                    planned.extend(clump_report_candidates(
+                        cli.no_report_file,
+                        &cli.input,
+                        output_dir,
+                    ));
                     naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
                     for input in &cli.input {
                         clump_only::clump_only_single(
@@ -584,17 +621,21 @@ fn main() -> Result<()> {
                         // its condition is a strict subset of the `--paired`
                         // N=1 non-BAM guard in main() — and was retired with
                         // #363. Retained note so the absence is intentional.
-                        let planned = naming::clumped_paired_bam_output_name(
+                        let mut planned = vec![naming::clumped_paired_bam_output_name(
                             &cli.input[0],
                             None,
                             output_dir,
                             basename,
-                        );
-                        naming::preflight_output_collisions(
-                            &[planned],
-                            &guarded_inputs(&cli),
-                            None,
-                        )?;
+                        )];
+                        // #391 — defensive symmetry: with N=1 the report (input filename
+                        // plus a suffix) can never alias the input, but the arm keeps the
+                        // same shape as its siblings.
+                        planned.extend(clump_report_candidates(
+                            cli.no_report_file,
+                            &cli.input,
+                            output_dir,
+                        ));
+                        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
                         clump_only::clump_only_paired_to_bam_one_pair(
                             &cli.input,
                             output_dir,
@@ -625,6 +666,13 @@ fn main() -> Result<()> {
                                 Some(&chunk[1]),
                                 output_dir,
                                 basename,
+                            ));
+                            // #391 — ONE report per pair, keyed on the pair's first input
+                            // (clump_only.rs writes clumping_report_name(inputs[0], …)).
+                            planned.extend(clump_report_candidates(
+                                cli.no_report_file,
+                                std::slice::from_ref(&chunk[0]),
+                                output_dir,
                             ));
                         }
                         naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
@@ -675,6 +723,12 @@ fn main() -> Result<()> {
                     for input in &cli.input {
                         planned.push(naming::clumped_bam_output_name(input, output_dir, basename));
                     }
+                    // #391 — reports join so the input check covers them too.
+                    planned.extend(clump_report_candidates(
+                        cli.no_report_file,
+                        &cli.input,
+                        output_dir,
+                    ));
                     naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
                     for input in &cli.input {
                         clump_only::clump_only_single_to_bam(
@@ -2468,28 +2522,27 @@ fn pct(part: usize, total: usize) -> f64 {
 }
 
 /// Multi-pair driver for the run-and-exit specialty modes (`--clock`,
-/// `--implicon`). Iterates over `cli.input.chunks(2)`, prints a per-pair
-/// header for multi-pair invocations, and runs the supplied per-pair
-/// function. Mirrors `--paired`'s output-collision pre-flight (case-
-/// insensitive on full path) so two pairs that would write to the same
-/// output file fail loudly before any I/O.
+/// `--implicon`, `--clump_only --paired`). Iterates over `cli.input.chunks(2)`,
+/// prints a per-pair header for multi-pair invocations, and runs the supplied
+/// per-pair function. Mirrors `--paired`'s output-collision pre-flight (case-
+/// insensitive on full path); `pair_outputs` must return EVERY path the pair
+/// will write — primaries plus gated secondaries (#391) — so two pairs that
+/// would write to the same file fail loudly before any I/O.
 fn run_specialty_paired<NameFn, RunFn>(
     cli: &Cli,
     mode_label: &str,
     hint: Option<&str>,
-    mut output_names: NameFn,
+    mut pair_outputs: NameFn,
     mut run_pair: RunFn,
 ) -> Result<()>
 where
-    NameFn: FnMut(&Path, &Path) -> (std::path::PathBuf, std::path::PathBuf),
+    NameFn: FnMut(&Path, &Path) -> Vec<std::path::PathBuf>,
     RunFn: FnMut(&Path, &Path) -> Result<()>,
 {
     // Pre-flight across pairs before any I/O; see io::collision_key for the key.
     let mut planned: Vec<std::path::PathBuf> = Vec::new();
     for chunk in cli.input.chunks(2) {
-        let (o1, o2) = output_names(&chunk[0], &chunk[1]);
-        planned.push(o1);
-        planned.push(o2);
+        planned.extend(pair_outputs(&chunk[0], &chunk[1]));
     }
     naming::preflight_output_collisions(&planned, &guarded_inputs(cli), hint)?;
 

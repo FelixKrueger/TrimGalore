@@ -1236,40 +1236,63 @@ mod tests {
             Path::new("e/gamma.fq.gz"),
             Path::new("d/same.fastq.gz"),
             Path::new("e/same.fastq.gz"),
+            // Case-variant of d/same: primaries fold-collide (skipped pair), which
+            // is the collision_key dimension PathBuf equality used to miss (#391).
+            Path::new("d/SAME.fastq.gz"),
         ];
         let out = PathBuf::from("shared_out");
 
         for basename in [None, Some("fixed")] {
             for gzip in [true, false] {
                 for output_dir in [None, Some(out.as_path())] {
-                    let primaries: Vec<PathBuf> = inputs
-                        .iter()
-                        .map(|p| single_end_output_name(p, output_dir, basename, gzip))
-                        .collect();
+                    // #391 — the same implication must hold for every clump primary
+                    // namer, and on the pre-flight's own metric (collision_key), so
+                    // the fold dimension is exercised rather than PathBuf equality.
+                    let primary_sets: Vec<Vec<PathBuf>> = vec![
+                        inputs
+                            .iter()
+                            .map(|p| single_end_output_name(p, output_dir, basename, gzip))
+                            .collect(),
+                        inputs
+                            .iter()
+                            .map(|p| clumped_output_name(p, output_dir, basename, gzip))
+                            .collect(),
+                        inputs
+                            .iter()
+                            .map(|p| clumped_bam_output_name(p, output_dir, basename))
+                            .collect(),
+                    ];
+                    for primaries in &primary_sets {
+                        for (i, a) in primaries.iter().enumerate() {
+                            for (j, b) in primaries.iter().enumerate().take(i) {
+                                if collision_key(a) == collision_key(b) {
+                                    // --basename collapses every input onto one primary; the
+                                    // pre-flight rejects that, and cli.rs:620 rejects it earlier
+                                    // still for multi-input SE. Nothing to prove here.
+                                    continue;
+                                }
+                                // Primaries differ, so every secondary must differ too.
+                                for namer in [report_name, json_report_name, clumping_report_name] {
+                                    assert_ne!(
+                                        collision_key(&namer(inputs[i], output_dir)),
+                                        collision_key(&namer(inputs[j], output_dir)),
+                                        "secondary collided while primaries {a:?} / {b:?} differ \
+                                         (basename={basename:?} gzip={gzip} out={output_dir:?})"
+                                    );
+                                }
+                            }
+                        }
+                    }
 
-                    for (i, a) in primaries.iter().enumerate() {
-                        for (j, b) in primaries.iter().enumerate().take(i) {
-                            if a == b {
-                                // --basename collapses every input onto one primary; the
-                                // pre-flight rejects that, and cli.rs:620 rejects it earlier
-                                // still for multi-input SE. Nothing to prove here.
-                                continue;
-                            }
-                            // Primaries differ, so every secondary must differ too.
-                            for namer in [report_name, json_report_name, clumping_report_name] {
-                                assert_ne!(
-                                    namer(inputs[i], output_dir),
-                                    namer(inputs[j], output_dir),
-                                    "secondary collided while primaries {a:?} / {b:?} differ \
-                                     (basename={basename:?} gzip={gzip} out={output_dir:?})"
-                                );
-                            }
-                            // The demux stem, via the same function `demultiplex` uses.
-                            // Only meaningful when the two primaries share a directory:
-                            // demux resolves its output dir to `-o` else the primary's
-                            // parent, so differing parents already separate the paths and
-                            // the stem is allowed to repeat.
-                            if a.parent() == b.parent() {
+                    // The demux stem, via the same function `demultiplex` uses — a
+                    // property of the SE trim primary only. Only meaningful when the
+                    // two primaries share a directory: demux resolves its output dir
+                    // to `-o` else the primary's parent, so differing parents already
+                    // separate the paths and the stem is allowed to repeat.
+                    let se_primaries = &primary_sets[0];
+                    for (i, a) in se_primaries.iter().enumerate() {
+                        for b in se_primaries.iter().take(i) {
+                            if collision_key(a) != collision_key(b) && a.parent() == b.parent() {
                                 assert_ne!(
                                     crate::demux::demux_base_name(a),
                                     crate::demux::demux_base_name(b),
@@ -1285,10 +1308,11 @@ mod tests {
     }
 
     /// Complement to the above: the primary key is strictly *coarser* than the
-    /// report key (in single-end naming — paired `_val_N` inverts this, #388),
-    /// which is why checking SE primaries covers reports rather than merely
-    /// coinciding with them. Three spellings of one sample share a
-    /// primary while keeping three distinct report names.
+    /// report key (in single-end naming — paired `_val_N` inverts this, #388,
+    /// and `_clumped_N` inverts it the same way, #391), which is why checking
+    /// SE primaries covers reports rather than merely coinciding with them.
+    /// Three spellings of one sample share a primary while keeping three
+    /// distinct report names.
     #[test]
     fn primary_output_key_is_coarser_than_secondary_keys() {
         let variants = [
@@ -1324,5 +1348,30 @@ mod tests {
             .map(|p| single_end_bam_output_name(p, None, None))
             .collect();
         assert!(bam.windows(2).all(|w| w[0] == w[1]), "got {bam:?}");
+
+        // #391 — and for every clump primary namer: the three spellings share
+        // one primary each, so a clump report can only collide where the
+        // primary already has.
+        let clumped: Vec<PathBuf> = variants
+            .iter()
+            .map(|p| clumped_output_name(p, None, None, true))
+            .collect();
+        assert!(clumped.windows(2).all(|w| w[0] == w[1]), "got {clumped:?}");
+        let clumped_bam: Vec<PathBuf> = variants
+            .iter()
+            .map(|p| clumped_bam_output_name(p, None, None))
+            .collect();
+        assert!(
+            clumped_bam.windows(2).all(|w| w[0] == w[1]),
+            "got {clumped_bam:?}"
+        );
+        let clumped_pe_bam: Vec<PathBuf> = variants
+            .iter()
+            .map(|p| clumped_paired_bam_output_name(p, None, None, None))
+            .collect();
+        assert!(
+            clumped_pe_bam.windows(2).all(|w| w[0] == w[1]),
+            "got {clumped_pe_bam:?}"
+        );
     }
 }

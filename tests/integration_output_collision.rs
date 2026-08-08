@@ -71,9 +71,9 @@ fn count_reads_from(path: &Path, prefix: &str) -> usize {
         .count()
 }
 
-/// After a rejected run, `dir` must contain exactly `expected` — nothing written.
-/// Used where output would land beside the inputs (no `--output_dir`), so the
-/// "directory is empty" form does not apply.
+/// `dir` must contain exactly `expected`. For rejected runs (nothing written
+/// beside the inputs — the no-`--output_dir` twin of "directory is empty") and
+/// for accepted runs where the written set must equal the planned set (#391).
 fn assert_dir_holds_only(dir: &Path, expected: &[&str]) {
     let mut found: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
@@ -83,7 +83,10 @@ fn assert_dir_holds_only(dir: &Path, expected: &[&str]) {
     found.sort();
     let mut want: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
     want.sort();
-    assert_eq!(found, want, "a rejected run must write nothing");
+    assert_eq!(
+        found, want,
+        "directory must hold exactly the expected files"
+    );
 }
 
 const DUP_MSG: &str = "would be written to the same file";
@@ -1002,4 +1005,286 @@ fn paired_report_candidates_do_not_over_reject() {
     );
     assert!(dir3.join("A/reads.fq_trimming_report.txt").is_file());
     assert!(dir3.join("B/reads.fq_trimming_report.txt").is_file());
+}
+
+// ── --clump_only: clumping reports join the pre-flight (#391) ─────────────
+
+/// The #391 repro: same filename mates, `-o` collecting both reports onto one
+/// path. Primaries carry `_clumped_1`/`_clumped_2` and never collide; the
+/// reports are the only collision, and the message must say so.
+#[test]
+fn clump_paired_rejects_shared_report_name() {
+    let dir = tempdir("clump_rep");
+    write_fastq(&dir.join("a/reads.fq"), "CR1");
+    write_fastq(&dir.join("b/reads.fq"), "CR2");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "-o",
+            "out",
+            "a/reads.fq",
+            "b/reads.fq",
+        ],
+    );
+    assert_rejected_cleanly(&out, ok, &stderr, DUP_MSG);
+    assert!(
+        stderr.contains("reads.fq_clumping_report.txt"),
+        "the colliding path must be the clumping report:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--no_report_file"),
+        "hint must offer the report-only remedy:\n{stderr}"
+    );
+}
+
+/// Same fixtures, `--no_report_file`: the only paths the flag removes from the
+/// candidate list are the two reports, so success here proves the rejection
+/// above came from the reports — and that the gate matches the writer.
+#[test]
+fn clump_paired_accepts_shared_report_name_with_no_report_file() {
+    let dir = tempdir("clump_rep_norep");
+    write_fastq(&dir.join("a/reads.fq"), "CN1");
+    write_fastq(&dir.join("b/reads.fq"), "CN2");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "--no_report_file",
+            "-o",
+            "out",
+            "a/reads.fq",
+            "b/reads.fq",
+        ],
+    );
+    assert!(ok, "expected success:\n{stderr}");
+    assert_eq!(count_reads_from(&out.join("reads_clumped_1.fq"), "CN1"), 40);
+    assert_eq!(count_reads_from(&out.join("reads_clumped_2.fq"), "CN2"), 40);
+    assert_dir_holds_only(&out, &["reads_clumped_1.fq", "reads_clumped_2.fq"]);
+}
+
+/// Acceptance guard: distinct filenames → primaries + reports all written, and
+/// nothing else. The exact-set assertion pins that the pre-flight's candidate
+/// list and the writer's file set agree — the invariant whose absence is this
+/// bug family's root cause (#388, #391).
+#[test]
+fn clump_paired_accepts_distinct_filenames() {
+    let dir = tempdir("clump_ok");
+    write_fastq(&dir.join("a/r1.fq"), "D1");
+    write_fastq(&dir.join("b/r2.fq"), "D2");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "-o",
+            "out",
+            "a/r1.fq",
+            "b/r2.fq",
+        ],
+    );
+    assert!(ok, "expected success:\n{stderr}");
+    assert_eq!(count_reads_from(&out.join("r1_clumped_1.fq"), "D1"), 40);
+    assert_eq!(count_reads_from(&out.join("r2_clumped_2.fq"), "D2"), 40);
+    assert_dir_holds_only(
+        &out,
+        &[
+            "r1_clumped_1.fq",
+            "r2_clumped_2.fq",
+            "r1.fq_clumping_report.txt",
+            "r2.fq_clumping_report.txt",
+        ],
+    );
+}
+
+/// Cross-pair: all four primaries distinct (the positional suffixes cross),
+/// reports collide across pairs. Pins that the candidate list spans pairs.
+/// No filename assertion: candidate order decides which report is flagged.
+#[test]
+fn clump_paired_rejects_cross_pair_report_collision() {
+    let dir = tempdir("clump_xpair");
+    write_fastq(&dir.join("a/x.fq"), "X1");
+    write_fastq(&dir.join("a/y.fq"), "Y1");
+    write_fastq(&dir.join("b/y.fq"), "Y2");
+    write_fastq(&dir.join("b/x.fq"), "X2");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "-o",
+            "out",
+            "a/x.fq",
+            "a/y.fq",
+            "b/y.fq",
+            "b/x.fq",
+        ],
+    );
+    assert_rejected_cleanly(&out, ok, &stderr, DUP_MSG);
+}
+
+/// Case-free and no `-o`: one file as the mate of two pairs (validate permits
+/// this — only exact duplicate pairs are rejected). Reports collide in the
+/// shared mate's own directory while all four primaries stay distinct, so the
+/// rejection behaves identically on APFS and ext4.
+#[test]
+fn clump_paired_rejects_shared_mate_report_without_output_dir() {
+    let dir = tempdir("clump_mate");
+    write_fastq(&dir.join("p/a.fq"), "M1");
+    write_fastq(&dir.join("d/x.fq"), "MX");
+    write_fastq(&dir.join("q/b.fq"), "M2");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "p/a.fq",
+            "d/x.fq",
+            "q/b.fq",
+            "d/x.fq",
+        ],
+    );
+    assert!(!ok, "expected rejection:\n{stderr}");
+    assert!(
+        stderr.contains(DUP_MSG),
+        "expected duplicate wording:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("x.fq_clumping_report.txt"),
+        "the colliding path must be the shared mate's report:\n{stderr}"
+    );
+    assert_dir_holds_only(&dir.join("p"), &["a.fq"]);
+    assert_dir_holds_only(&dir.join("d"), &["x.fq"]);
+    assert_dir_holds_only(&dir.join("q"), &["b.fq"]);
+}
+
+/// `--basename foo` forces `foo_clumped_1`/`foo_clumped_2` primaries — distinct
+/// by construction — so this isolates the report path without any reasoning
+/// about stems. Reports ignore `--basename` and still collide.
+#[test]
+fn clump_paired_rejects_shared_report_name_with_basename() {
+    let dir = tempdir("clump_base");
+    write_fastq(&dir.join("a/reads.fq"), "B1");
+    write_fastq(&dir.join("b/reads.fq"), "B2");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "--basename",
+            "foo",
+            "-o",
+            "out",
+            "a/reads.fq",
+            "b/reads.fq",
+        ],
+    );
+    assert_rejected_cleanly(&out, ok, &stderr, DUP_MSG);
+    assert!(
+        stderr.contains("reads.fq_clumping_report.txt"),
+        "with --basename the reports are the only possible collision:\n{stderr}"
+    );
+}
+
+/// #385 defect-2 class on the SE clump arm: an input named like another input's
+/// clumping report was silently overwritten (this run exited 0 and destroyed
+/// input 2 before #391). Both files are valid FASTQ so the rejection is
+/// attributable to the pre-flight, not a parse error.
+#[test]
+fn clump_se_rejects_report_that_aliases_an_input() {
+    let dir = tempdir("clump_se_alias");
+    write_fastq(&dir.join("s.fq"), "SRC");
+    write_fastq(&dir.join("s.fq_clumping_report.txt"), "REPORTY");
+    let (ok, stderr) = run_in(&dir, &["--clump_only", "s.fq", "s.fq_clumping_report.txt"]);
+    assert!(!ok, "expected rejection:\n{stderr}");
+    assert!(
+        stderr.contains(ALIAS_MSG),
+        "expected alias wording:\n{stderr}"
+    );
+    assert_eq!(
+        count_reads_from(&dir.join("s.fq_clumping_report.txt"), "REPORTY"),
+        40
+    );
+    assert_dir_holds_only(&dir, &["s.fq", "s.fq_clumping_report.txt"]);
+}
+
+/// The same shape runs when reports are off — and writes exactly the primaries.
+#[test]
+fn clump_se_accepts_report_alias_with_no_report_file() {
+    let dir = tempdir("clump_se_alias_ok");
+    write_fastq(&dir.join("s.fq"), "SRC");
+    write_fastq(&dir.join("s.fq_clumping_report.txt"), "REPORTY");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--no_report_file",
+            "s.fq",
+            "s.fq_clumping_report.txt",
+        ],
+    );
+    assert!(ok, "expected success:\n{stderr}");
+    assert_eq!(count_reads_from(&dir.join("s_clumped.fq"), "SRC"), 40);
+    assert_eq!(
+        count_reads_from(&dir.join("s.fq_clumping_report_clumped.fq"), "REPORTY"),
+        40
+    );
+    assert_dir_holds_only(
+        &dir,
+        &[
+            "s.fq",
+            "s.fq_clumping_report.txt",
+            "s_clumped.fq",
+            "s.fq_clumping_report_clumped.fq",
+        ],
+    );
+}
+
+/// Task 2's paired-BAM Shape A arm plans ONE report per pair, keyed on the
+/// pair's FIRST input (clump_only.rs keys on inputs[0]). Keyed on chunk[1] by
+/// mistake, pair 1 would plan y.fq_clumping_report.txt, collide with nothing,
+/// and the run would proceed — this test discriminates exactly that.
+#[test]
+fn clump_paired_bam_rejects_report_that_aliases_an_input() {
+    let dir = tempdir("clump_bam_alias");
+    write_fastq(&dir.join("x.fq"), "PX");
+    write_fastq(&dir.join("y.fq"), "PY");
+    write_fastq(&dir.join("x.fq_clumping_report.txt"), "PR");
+    write_fastq(&dir.join("z.fq"), "PZ");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "--output-format",
+            "ubam",
+            "x.fq",
+            "y.fq",
+            "x.fq_clumping_report.txt",
+            "z.fq",
+        ],
+    );
+    assert!(!ok, "expected rejection:\n{stderr}");
+    assert!(
+        stderr.contains(ALIAS_MSG),
+        "expected alias wording:\n{stderr}"
+    );
+    assert_eq!(count_reads_from(&dir.join("x.fq"), "PX"), 40);
+    assert_eq!(
+        count_reads_from(&dir.join("x.fq_clumping_report.txt"), "PR"),
+        40
+    );
+    assert_dir_holds_only(&dir, &["x.fq", "y.fq", "x.fq_clumping_report.txt", "z.fq"]);
 }
