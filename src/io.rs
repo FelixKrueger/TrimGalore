@@ -1211,9 +1211,11 @@ mod tests {
     /// Assumption A2, in the direction that makes the pre-flight sufficient:
     /// where two inputs' PRIMARY output paths differ, every secondary output
     /// path must differ too — so a secondary can never collide unless a primary
-    /// already has, and hashing primaries alone is enough. Single-end naming
-    /// only: paired `_val_N` primaries break this (#388), which is why the
-    /// paired pre-flight carries report candidates explicitly.
+    /// already has, and hashing primaries alone is enough. Covers the SE trim
+    /// and clump primary namers, compared on `collision_key` (the pre-flight's
+    /// own metric). Paired `_val_N` / `_clumped_N` primaries break the
+    /// implication (#388, #391), which is why the paired pre-flights carry
+    /// report candidates explicitly.
     ///
     /// Checked across the flag matrix (`--basename` / `--dont_gzip` / `-o`, each
     /// on and off) because `--basename` and `-o` are exactly the flags that
@@ -1236,8 +1238,8 @@ mod tests {
             Path::new("e/gamma.fq.gz"),
             Path::new("d/same.fastq.gz"),
             Path::new("e/same.fastq.gz"),
-            // Case-variant of d/same: primaries fold-collide (skipped pair), which
-            // is the collision_key dimension PathBuf equality used to miss (#391).
+            // Fold-equal twin of d/same: the skip must use collision_key, not
+            // PathBuf equality, or the assertion below fails on this pair (#391).
             Path::new("d/SAME.fastq.gz"),
         ];
         let out = PathBuf::from("shared_out");
@@ -1245,9 +1247,8 @@ mod tests {
         for basename in [None, Some("fixed")] {
             for gzip in [true, false] {
                 for output_dir in [None, Some(out.as_path())] {
-                    // #391 — the same implication must hold for every clump primary
-                    // namer, and on the pre-flight's own metric (collision_key), so
-                    // the fold dimension is exercised rather than PathBuf equality.
+                    // #391 — same implication for every clump primary namer, on the
+                    // pre-flight's own metric (collision_key) so the fold is real.
                     let primary_sets: Vec<Vec<PathBuf>> = vec![
                         inputs
                             .iter()
@@ -1261,13 +1262,17 @@ mod tests {
                             .iter()
                             .map(|p| clumped_bam_output_name(p, output_dir, basename))
                             .collect(),
+                        inputs
+                            .iter()
+                            .map(|p| clumped_paired_bam_output_name(p, None, output_dir, basename))
+                            .collect(),
                     ];
                     for primaries in &primary_sets {
                         for (i, a) in primaries.iter().enumerate() {
                             for (j, b) in primaries.iter().enumerate().take(i) {
                                 if collision_key(a) == collision_key(b) {
                                     // --basename collapses every input onto one primary; the
-                                    // pre-flight rejects that, and cli.rs:620 rejects it earlier
+                                    // pre-flight rejects that, and cli.rs:624 rejects it earlier
                                     // still for multi-input SE. Nothing to prove here.
                                     continue;
                                 }
@@ -1309,8 +1314,9 @@ mod tests {
 
     /// Complement to the above: the primary key is strictly *coarser* than the
     /// report key (in single-end naming — paired `_val_N` inverts this, #388,
-    /// and `_clumped_N` inverts it the same way, #391), which is why checking
-    /// SE primaries covers reports rather than merely coinciding with them.
+    /// as does `clumped_paired_output_names`' `_clumped_N`, #391; the clump
+    /// primaries asserted below all collapse), which is why checking SE
+    /// primaries covers reports rather than merely coinciding with them.
     /// Three spellings of one sample share a primary while keeping three
     /// distinct report names.
     #[test]

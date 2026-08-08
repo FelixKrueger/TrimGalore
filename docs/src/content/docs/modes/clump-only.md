@@ -106,7 +106,7 @@ Accepted but inert: `-q` / `--quality`, `--stringency`, `-e` / `--error`. These 
 
 ## Reorder report
 
-The reorder report at `<stem>_clumping_report.txt` is narrower than the standard trimming report by design — no adapter counts, no quality statistics, no filter counters, and no JSON companion.
+The reorder report at `<input-name>_clumping_report.txt` is narrower than the standard trimming report by design — no adapter counts, no quality statistics, no filter counters, and no JSON companion.
 
 ```
 Trim Galore version: 2.x.x
@@ -119,7 +119,7 @@ Compression ratio: <x.yy>x                    # omitted unless BOTH sides are co
 Preserved tags: TAG1,TAG2,…                   # uBAM only; omitted if empty
 ```
 
-The `Compression ratio` line is emitted only when both input and output are compressed (any of gzip / BGZF). Under `--dont_gzip` or when input was plain FASTQ, the ratio would be misleading and is omitted. The report filename uses `_clumping_report` rather than `_trimming_report` specifically so downstream nf-core/MultiQC pipelines that scan `*_trimming_report.*` don't misclassify it as a trim result. Multi-pair PE runs produce one report per pair, matching v1 SE's one-report-per-input convention.
+The `Compression ratio` line is emitted only when both input and output are compressed (any of gzip / BGZF). Under `--dont_gzip` or when input was plain FASTQ, the ratio would be misleading and is omitted. The report filename uses `_clumping_report` rather than `_trimming_report` specifically so downstream nf-core/MultiQC pipelines that scan `*_trimming_report.*` don't misclassify it as a trim result. Paired FASTQ runs write one report per mate; the uBAM shapes write one per pair (keyed on the pair's first input), matching v1 SE's one-report-per-input convention.
 
 ## Relationship to `--clumpify`
 

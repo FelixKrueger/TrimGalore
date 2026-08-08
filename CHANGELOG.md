@@ -15,7 +15,9 @@
   clumping report from silently overwriting an *input* named like one — on the
   paired arm and the single-end/uBAM arms alike. The single-interleaved-BAM
   shape gets the same candidate line as defensive symmetry only; with one input
-  its report can never alias it.
+  its report can never alias it. As with #388, two inputs whose filenames differ
+  only in case are now refused into a shared output directory even on a
+  case-sensitive filesystem, where both reports could in fact coexist.
 
 - **Whether input is gzipped is now decided by reading the file, not by its
   name.** This corrects two opposite failures:

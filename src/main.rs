@@ -627,9 +627,8 @@ fn main() -> Result<()> {
                             output_dir,
                             basename,
                         )];
-                        // #391 — defensive symmetry: with N=1 the report (input filename
-                        // plus a suffix) can never alias the input, but the arm keeps the
-                        // same shape as its siblings.
+                        // #391 — defensive symmetry: with one input the report (filename
+                        // plus a suffix) can never alias it; the arm keeps its siblings' shape.
                         planned.extend(clump_report_candidates(
                             cli.no_report_file,
                             &cli.input,
