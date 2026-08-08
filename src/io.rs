@@ -1211,7 +1211,9 @@ mod tests {
     /// Assumption A2, in the direction that makes the pre-flight sufficient:
     /// where two inputs' PRIMARY output paths differ, every secondary output
     /// path must differ too — so a secondary can never collide unless a primary
-    /// already has, and hashing primaries alone is enough.
+    /// already has, and hashing primaries alone is enough. Single-end naming
+    /// only: paired `_val_N` primaries break this (#388), which is why the
+    /// paired pre-flight carries report candidates explicitly.
     ///
     /// Checked across the flag matrix (`--basename` / `--dont_gzip` / `-o`, each
     /// on and off) because `--basename` and `-o` are exactly the flags that
@@ -1283,8 +1285,9 @@ mod tests {
     }
 
     /// Complement to the above: the primary key is strictly *coarser* than the
-    /// report key, which is why checking primaries covers reports rather than
-    /// merely coinciding with them. Three spellings of one sample share a
+    /// report key (in single-end naming — paired `_val_N` inverts this, #388),
+    /// which is why checking SE primaries covers reports rather than merely
+    /// coinciding with them. Three spellings of one sample share a
     /// primary while keeping three distinct report names.
     #[test]
     fn primary_output_key_is_coarser_than_secondary_keys() {

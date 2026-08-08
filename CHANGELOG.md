@@ -109,6 +109,23 @@
   A rejected run still writes nothing, and the diagnostic keeps naming the paths
   as the user spelled them.
 
+- **Paired-end trimming reports can no longer silently overwrite each other**
+  ([#388](https://github.com/FelixKrueger/TrimGalore/issues/388)). Paired output
+  names carry a positional discriminator (`_val_1`/`_val_2`) that report names do
+  not, so two inputs with distinct trimmed outputs could still collide on their
+  reports: `--paired -o out A/reads.fq B/reads.fq` exited 0 with one report pair
+  for two inputs, and re-using a filename across pairs lost a report the same
+  way. The report paths (text and JSON, for both sides of every pair) now join
+  the collision pre-flight on the paired FASTQ and paired uBAM-output paths,
+  skipped under `--no_report_file` to match the writers.
+
+  Two behaviour changes follow. A pair whose R1 and R2 share a filename written
+  to a common output directory is now refused on every filesystem — that run
+  previously lost a report. And two genuinely distinct inputs whose filenames
+  differ only in case are refused even on a case-sensitive filesystem, where
+  both reports could in fact coexist: the same loud-error-over-silent-loss trade
+  the pre-flight has made since #216, now extended to paired reports.
+
 #### Changes
 
 - **A file given twice on one command line is now rejected**

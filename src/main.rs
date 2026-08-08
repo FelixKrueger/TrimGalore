@@ -54,6 +54,12 @@ type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, 
 
 /// Replaces the generic advice for the modes that name output into the CWD
 /// (`--hardtrim5/3`, `--clock`, `--implicon`), where "use `--output_dir`" is false.
+const PAIRED_REPORT_HINT: &str = "Paired outputs and reports are named from the input \
+                                  filename alone, so two inputs sharing a filename collide \
+                                  regardless of source directory — rename one input, or pass \
+                                  --no_report_file if only the reports collide.";
+
+/// CWD-output modes' remediation; see `PAIRED_REPORT_HINT` for the paired sites.
 const CWD_OUTPUT_HINT: &str = "This mode writes output to the current working directory, \
                                so inputs sharing a basename collide whatever `--output_dir` \
                                is set to — run one invocation per input, or give the inputs \
@@ -762,9 +768,21 @@ fn main() -> Result<()> {
                     gzip,
                 ));
             }
+            // #388 — report names carry no _val_ discriminator, so two inputs
+            // with distinct primaries can still collide on reports.
+            if !cli.no_report_file {
+                for input in [&chunk[0], &chunk[1]] {
+                    candidates.push(naming::report_name(input, output_dir));
+                    candidates.push(naming::json_report_name(input, output_dir));
+                }
+            }
             planned.extend(candidates);
         }
-        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
+        naming::preflight_output_collisions(
+            &planned,
+            &guarded_inputs(&cli),
+            Some(PAIRED_REPORT_HINT),
+        )?;
 
         // Adapter detection runs PER PAIR — intentional deviation from Perl
         // v0.6.x (which detected once on $ARGV[0] at trim_galore:2455). Shell-
@@ -1856,8 +1874,19 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
                 output_dir,
                 cli.basename.as_deref(),
             ));
+            // #388 — same report-collision hole as the FASTQ paired path.
+            if !cli.no_report_file {
+                for input in [&chunk[0], &chunk[1]] {
+                    planned.push(naming::report_name(input, output_dir));
+                    planned.push(naming::json_report_name(input, output_dir));
+                }
+            }
         }
-        naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+        naming::preflight_output_collisions(
+            &planned,
+            &guarded_inputs(cli),
+            Some(PAIRED_REPORT_HINT),
+        )?;
 
         let total_pairs = cli.input.len() / 2;
         for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
