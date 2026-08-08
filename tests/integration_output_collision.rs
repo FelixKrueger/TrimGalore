@@ -846,3 +846,160 @@ fn demux_writes_exactly_the_planned_paths() {
         "precondition: the planned set must be non-empty"
     );
 }
+
+// ── #388: paired report paths join the pre-flight ─────────────────────────
+//
+// Paired primaries carry a positional discriminator (`_val_1`/`_val_2`) that
+// report names do not, so two inputs with distinct primaries can collide on
+// reports. Before #388 all three rejection shapes below exited 0 having
+// silently overwritten one report pair.
+
+/// T1 — the case-free shape: same filename as R1 AND R2 of one pair, shared
+/// output dir. Runs identically on every filesystem.
+#[test]
+fn paired_rejects_same_filename_r1_r2_into_shared_output_dir() {
+    let dir = tempdir("388_samename");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    write_fastq(&dir.join("A/reads.fq"), "R1SIDE");
+    write_fastq(&dir.join("B/reads.fq"), "R2SIDE");
+    let (ok, stderr) = run_in(&dir, &["--paired", "-o", "out", "A/reads.fq", "B/reads.fq"]);
+    assert!(!ok, "expected rejection, got success:\n{stderr}");
+    assert!(
+        stderr.contains(DUP_MSG),
+        "expected collision wording:\n{stderr}"
+    );
+    assert!(
+        std::fs::read_dir(&out).unwrap().next().is_none(),
+        "a refused run must write nothing"
+    );
+}
+
+/// T2 — fold-equal filenames as R1/R2. On a case-insensitive filesystem this is
+/// a true positive; on a case-sensitive one it is the documented #216-style
+/// false positive (loud error over silent loss). The REJECTION is asserted, so
+/// the test is filesystem-independent.
+#[test]
+fn paired_rejects_fold_equal_filenames_into_shared_output_dir() {
+    let dir = tempdir("388_foldeq");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    write_fastq(&dir.join("a/r1.fq"), "LOWER");
+    write_fastq(&dir.join("b/R1.fq"), "UPPER");
+    let (ok, stderr) = run_in(&dir, &["--paired", "-o", "out", "a/r1.fq", "b/R1.fq"]);
+    assert_rejected_cleanly(&out, ok, &stderr, DUP_MSG);
+}
+
+/// T3 — the cross-pair route: pair 2 reuses a filename from pair 1.
+#[test]
+fn paired_rejects_cross_pair_report_collision() {
+    let dir = tempdir("388_crosspair");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    write_fastq(&dir.join("a/r1.fq"), "P1R1");
+    write_fastq(&dir.join("a/r2.fq"), "P1R2");
+    write_fastq(&dir.join("b/R2.fq"), "P2R1");
+    write_fastq(&dir.join("b/x.fq"), "P2R2");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--paired", "-o", "out", "a/r1.fq", "a/r2.fq", "b/R2.fq", "b/x.fq",
+        ],
+    );
+    assert_rejected_cleanly(&out, ok, &stderr, DUP_MSG);
+}
+
+/// T4 — the uBAM-output twin had the identical hole.
+#[test]
+fn paired_ubam_rejects_same_filename_r1_r2_into_shared_output_dir() {
+    let dir = tempdir("388_ubam");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    write_fastq(&dir.join("A/reads.fq"), "R1SIDE");
+    write_fastq(&dir.join("B/reads.fq"), "R2SIDE");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--paired",
+            "--output-format",
+            "ubam",
+            "-o",
+            "out",
+            "A/reads.fq",
+            "B/reads.fq",
+        ],
+    );
+    assert_rejected_cleanly(&out, ok, &stderr, DUP_MSG);
+}
+
+/// T5 — the gate: with --no_report_file no reports will be written, so the
+/// same inputs must run to completion. Pins candidates == writers.
+#[test]
+fn paired_same_filename_accepted_when_reports_disabled() {
+    let dir = tempdir("388_gate");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    write_fastq(&dir.join("A/reads.fq"), "R1SIDE");
+    write_fastq(&dir.join("B/reads.fq"), "R2SIDE");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--paired",
+            "--no_report_file",
+            "-o",
+            "out",
+            "A/reads.fq",
+            "B/reads.fq",
+        ],
+    );
+    assert!(ok, "expected success with reports disabled:\n{stderr}");
+    assert!(out.join("reads_val_1.fq").is_file());
+    assert!(out.join("reads_val_2.fq").is_file());
+    assert_eq!(
+        std::fs::read_dir(&out).unwrap().count(),
+        2,
+        "no reports may be written under --no_report_file"
+    );
+}
+
+/// T6 — over-rejection guards at the boundary A1 describes.
+#[test]
+fn paired_report_candidates_do_not_over_reject() {
+    // Single pair + --basename, no -o: reports keep per-input names beside
+    // their own inputs; primaries take the basename. Nothing collides.
+    let dir = tempdir("388_ok_basename");
+    write_fastq(&dir.join("r1.fq"), "B1");
+    write_fastq(&dir.join("r2.fq"), "B2");
+    let (ok, stderr) = run_in(&dir, &["--paired", "--basename", "foo", "r1.fq", "r2.fq"]);
+    assert!(ok, "basename pair must still run:\n{stderr}");
+    assert!(dir.join("foo_val_1.fq").is_file());
+    assert!(dir.join("r1.fq_trimming_report.txt").is_file());
+    assert!(dir.join("r2.fq_trimming_report.txt").is_file());
+
+    // Same stem, different extension as R1/R2: report keys differ (full
+    // filename), primaries differ (_val_1/_val_2). Nothing collides.
+    let dir2 = tempdir("388_ok_stem");
+    write_fastq(&dir2.join("sample.fq"), "S1");
+    write_fastq(&dir2.join("sample.fastq"), "S2");
+    let (ok, stderr) = run_in(&dir2, &["--paired", "sample.fq", "sample.fastq"]);
+    assert!(
+        ok,
+        "same-stem different-extension pair must still run:\n{stderr}"
+    );
+    assert!(dir2.join("sample.fq_trimming_report.txt").is_file());
+    assert!(dir2.join("sample.fastq_trimming_report.txt").is_file());
+
+    // T1 minus -o: same filename in different dirs, reports beside their own
+    // inputs. Pins that the candidates honour output_dir = None; a builder
+    // that resolved reports into one directory would over-reject this.
+    let dir3 = tempdir("388_ok_no_odir");
+    write_fastq(&dir3.join("A/reads.fq"), "N1");
+    write_fastq(&dir3.join("B/reads.fq"), "N2");
+    let (ok, stderr) = run_in(&dir3, &["--paired", "A/reads.fq", "B/reads.fq"]);
+    assert!(
+        ok,
+        "same filename in two dirs without -o must run:\n{stderr}"
+    );
+    assert!(dir3.join("A/reads.fq_trimming_report.txt").is_file());
+    assert!(dir3.join("B/reads.fq_trimming_report.txt").is_file());
+}
