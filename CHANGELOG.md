@@ -142,6 +142,21 @@
 
 #### Changes
 
+- **`--clump_only`'s `--help` text no longer contradicts the shipped uBAM
+  support** ([#400](https://github.com/FelixKrueger/TrimGalore/issues/400)). The
+  block predated the uBAM arms and still listed `--output-format ubam` among the
+  *rejected* flags while closing with "v1 is FASTQ in / FASTQ out only" — so the
+  text actively deterred users from a feature that works. Most consequential: the
+  output-filename sentence was FASTQ-only, and under `--output-format ubam` a
+  paired run writes **one** interleaved `*_clumped.bam`, not two mate files, so
+  anyone scripting against `_clumped_{1,2}.fq.gz` was misled. The whole block is
+  now format-aware: per-format filenames, `--compression` and `--dont_gzip`
+  marked FASTQ-output-only, `--preserve-tags` named as the aux-tag opt-in, the
+  appended `@PG` record noted as the reason whole-file identity does not hold on
+  BAM output, and uBAM input documented as requiring `--output-format ubam`. The
+  `--output-format ubam` value description also gained the two rejections it was
+  missing (`--retain_unpaired`, `--dont_gzip`). No behaviour change.
+
 - **The `--passthrough`-matches-R1/R2 message now says what it checks**
   ([#389](https://github.com/FelixKrueger/TrimGalore/issues/389)). The old text
   claimed the passthrough file "aliases an input file" unconditionally — false on

@@ -15,7 +15,8 @@ pub enum OutputFormat {
     #[default]
     Fastq,
     /// Unaligned BAM output. Always single-threaded; --clumpify,
-    /// --passthrough, --clock, --implicon, --demux are rejected at validation.
+    /// --passthrough, --clock, --implicon, --demux, --retain_unpaired and
+    /// --dont_gzip are rejected at validation.
     #[clap(name = "ubam")]
     UBam,
 }
@@ -177,33 +178,41 @@ pub struct Cli {
     #[clap(long = "clumpify")]
     pub clumpify: bool,
 
-    /// Lossless reorder-only specialty mode: reorder FASTQ records by
-    /// canonical 16-mer minimizer for gzip-friendly compression, WITHOUT
-    /// any trimming, filtering, adapter detection, or record modification.
-    /// Every input record appears in the output byte-identically (header,
-    /// sequence, quality); only file-level order changes. Output files use
-    /// the `*_clumped.fq(.gz)` (SE) or `*_clumped_{1,2}.fq(.gz)` (PE) suffix,
-    /// and a short `*_clumping_report.txt` is emitted (distinct from
+    /// Lossless reorder-only specialty mode: reorder FASTQ or unaligned BAM
+    /// (uBAM) records by canonical 16-mer minimizer for compression-friendly
+    /// grouping, WITHOUT any trimming, filtering, adapter detection, or record
+    /// modification. Every input record appears in the output byte-identically
+    /// — name, sequence, quality, plus any aux tags named in `--preserve-tags`
+    /// on uBAM; only file-level order changes. Output is `*_clumped.fq(.gz)`
+    /// (SE) or `*_clumped_{1,2}.fq(.gz)` (PE), or under `--output-format ubam`
+    /// a single `*_clumped.bam` (SE) and ONE interleaved `*_clumped.bam` per
+    /// pair (PE). A short `*_clumping_report.txt` is emitted (distinct from
     /// `*_trimming_report.txt` to keep downstream nf-core/MultiQC scanners
     /// unconfused).
     ///
-    /// Composes with `--compression`, `--memory`, `--cores`, `--paired`,
-    /// `--fastqc`, `--dont_gzip`, and `--basename`. Trimming/filtering flags
-    /// (`-a`, `--length`, `--rrbs`, `--polyA`, `--polyG`, `--trim-n`,
-    /// `--clip_*`, `--nextseq`, `--rename`, `--discard_untrimmed`,
-    /// `--consider_already_trimmed`, other specialty modes, `--passthrough`,
-    /// `--retain_unpaired`, `--output-format ubam`) are rejected. `-q` /
-    /// `--stringency` / `-e` have clap defaults and are silently ignored on
-    /// this path (mode does no trimming; matches how `--hardtrim5` treats
-    /// trim flags today).
+    /// Composes with `--compression` (FASTQ output only), `--memory`,
+    /// `--cores`, `--paired`, `--fastqc`, `--dont_gzip` (FASTQ output only),
+    /// `--basename`, `--output-format ubam`, and `--preserve-tags` (uBAM
+    /// only). Trimming/filtering flags (`-a`, `--length`, `--rrbs`, `--polyA`,
+    /// `--polyG`, `--trim-n`, `--clip_*`, `--nextseq`, `--rename`,
+    /// `--discard_untrimmed`, `--consider_already_trimmed`, other specialty
+    /// modes, `--passthrough`, `--retain_unpaired`) are rejected, as is
+    /// `--dont_gzip` together with `--output-format ubam` (BAM is always
+    /// BGZF). `-q` / `--stringency` / `-e` have clap defaults and are silently
+    /// ignored on this path (mode does no trimming; matches how `--hardtrim5`
+    /// treats trim flags today).
     ///
     /// Contract-scope note: byte-identity applies to header + sequence +
     /// quality bytes. The plus-line (line 3 of each record) is normalized
     /// to bare `+` on output; CRLF line endings are normalized to LF. Both
     /// normalizations are codebase-wide behaviours, inherited from the
-    /// FASTQ reader/writer.
+    /// FASTQ reader/writer. On uBAM output a `@PG` record is appended to the
+    /// header, so whole-file identity is not preserved — record bodies are.
     ///
-    /// v1 is FASTQ in / FASTQ out only. uBAM in/out is a natural follow-up.
+    /// FASTQ and uBAM input are both supported, but uBAM input requires
+    /// `--output-format ubam` (the FASTQ output path would drop aux tags).
+    /// Paired mode takes two files, or — with `--output-format ubam` — a
+    /// single interleaved uBAM.
     #[clap(long = "clump_only")]
     pub clump_only: bool,
 
