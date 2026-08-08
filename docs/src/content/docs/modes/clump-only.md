@@ -3,7 +3,7 @@ title: Clump-only (lossless reorder)
 description: Reorder FASTQ or uBAM records for gzip/BGZF-friendly compression without trimming (`--clump_only`).
 ---
 
-`--clump_only` is a run-and-exit mode that reorders FASTQ or unaligned BAM (uBAM) records by canonical 16-mer minimizer for compression-friendly grouping, **without any trimming, filtering, or adapter detection**. Every input record appears in the output byte-identically (header/name + sequence + quality + preserved aux tags for uBAM); only file-level order changes.
+`--clump_only` is a run-and-exit mode that reorders FASTQ or unaligned BAM (uBAM) records by canonical 16-mer minimizer for compression-friendly grouping, **without any trimming, filtering, or adapter detection**. Every input record appears in the output byte-identically on the FASTQ path (header + sequence + quality); only file-level order changes. uBAM output is lossless per record body rather than byte-identical — see [Record fidelity](#record-fidelity).
 
 Requested in [#353](https://github.com/FelixKrueger/TrimGalore/issues/353) as an archival and recompression path. It applies the same minimizer-based reordering as [`--clumpify`](/performance/clumpy/), which runs as a compression stage inside the trim pipeline, but operates as a standalone mode that leaves record contents unchanged.
 
