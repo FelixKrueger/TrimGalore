@@ -949,6 +949,15 @@ impl Cli {
             }
         }
 
+        // #386 — dispatch runs --hardtrim5 and returns, silently dropping a
+        // 3' request. Bespoke message per the family precedent (§3.4a).
+        if self.hardtrim5.is_some() && self.hardtrim3.is_some() {
+            anyhow::bail!(
+                "--hardtrim5 and --hardtrim3 cannot be combined in one invocation; \
+                 run the two trims as separate invocations, feeding the first trim's \
+                 output to the second."
+            );
+        }
         if let Some(n) = self.hardtrim5
             && (n == 0 || n >= 1000)
         {
@@ -1220,6 +1229,35 @@ mod tests {
             !err.contains("APFS/NTFS"),
             "must not defer to the collision pre-flight's message: {err}"
         );
+    }
+
+    /// #386. Both hardtrims together used to run only the 5' trim, silently
+    /// dropping the 3' request (the --hardtrim5 dispatch branch returns early).
+    #[test]
+    fn test_hardtrim5_and_hardtrim3_together_rejected() {
+        for args in [
+            vec!["trim_galore", "--hardtrim5", "20", "--hardtrim3", "15", R1],
+            vec!["trim_galore", "--hardtrim3", "15", "--hardtrim5", "20", R1],
+        ] {
+            let err = Cli::parse_from(&args).validate().unwrap_err().to_string();
+            assert!(err.contains("cannot be combined"), "got: {err}");
+            assert!(
+                err.contains("separate invocations"),
+                "must carry the remedy: {err}"
+            );
+        }
+    }
+
+    /// Regression guards: each flag alone must keep parsing and validating.
+    #[test]
+    fn test_each_hardtrim_alone_still_accepted() {
+        for args in [
+            vec!["trim_galore", "--hardtrim5", "20", R1],
+            vec!["trim_galore", "--hardtrim3", "15", R1],
+        ] {
+            let cli = Cli::parse_from(&args);
+            cli.validate().expect("single hardtrim flag must validate");
+        }
     }
 
     /// The same guard covers the specialty modes, which never consult `--paired`.

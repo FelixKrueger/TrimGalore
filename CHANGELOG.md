@@ -136,6 +136,12 @@
   always had. `--clock` and `--implicon` keep their own more specific
   "Read 1 and Read 2 appear to be the same file" message.
 
+- **`--hardtrim5` and `--hardtrim3` together are now a usage error**
+  ([#386](https://github.com/FelixKrueger/TrimGalore/issues/386)). Previously the
+  pair was accepted and only the 5' trim ran — the 3' request was silently
+  dropped (Perl v0.6.x behaved the same way). Run the two trims as separate
+  invocations.
+
 - **Two collision messages advised `--output-dir`, which is not a valid flag**
   (only `--output_dir` and `-o` are). Both now name `--output_dir`.
 
