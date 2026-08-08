@@ -35,14 +35,8 @@ pub fn is_gzipped(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("gz"))
 }
 
-/// Case-folded (ASCII lowercase) string view of a path — the folding component
-/// of `collision_key`, which absolutises first and is what every collision
-/// check uses (issues #216, #383, #389).
-///
-/// Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
-/// false-positive, but the penalty is a loud early error rather than
-/// silent data loss.
-pub fn norm_path(p: &Path) -> String {
+/// Case-folded (ASCII lowercase) view of a path; the folding half of `collision_key`.
+fn norm_path(p: &Path) -> String {
     p.to_string_lossy().to_ascii_lowercase()
 }
 
@@ -77,7 +71,12 @@ pub fn path_identity_key(p: &Path) -> String {
 }
 
 /// Would these two paths be the same *output* file? Case-**folded**, because outputs
-/// differing only in case alias each other on APFS/NTFS (issues #216, #383).
+/// differing only in case alias each other on APFS/NTFS (issues #216, #383). Input
+/// identity asks a different question and uses the case-preserving `path_identity_key`.
+///
+/// Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
+/// false-positive, but the penalty is a loud early error rather than
+/// silent data loss.
 pub fn collision_key(p: &Path) -> String {
     norm_path(&lexical_normalise(p))
 }
@@ -763,9 +762,8 @@ mod tests {
 
     #[test]
     fn test_norm_path_case_folds() {
-        // norm_path is the case-folded normalisation that the output-collision
-        // pre-flight + --passthrough validation both use. Plain lowercase is
-        // identity; uppercase / mixed case fold to lowercase.
+        // The fold `collision_key` is built on (callers reach it through that key,
+        // never directly). Plain lowercase is identity; upper/mixed folds down.
         assert_eq!(norm_path(Path::new("foo.fq.gz")), "foo.fq.gz");
         assert_eq!(norm_path(Path::new("FOO.FQ.GZ")), "foo.fq.gz");
         assert_eq!(norm_path(Path::new("Foo.Fq.Gz")), "foo.fq.gz");
