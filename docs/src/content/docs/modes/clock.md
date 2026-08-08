@@ -45,3 +45,5 @@ trim_galore --clock A_R1.fq.gz A_R2.fq.gz B_R1.fq.gz B_R2.fq.gz
 ```
 
 Each pair gets a header (`=== Clock pair N of M ===`) and the same output-collision pre-flight that `--paired` runs.
+
+Output files are named from the input's basename alone and written to the current working directory (or `--output_dir` if given), never beside the input. Two inputs sharing a basename therefore collide even when they come from different directories, and the run is refused before anything is written.

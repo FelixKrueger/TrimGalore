@@ -38,3 +38,5 @@ For everything else, prefer the fine-grained `--clip_R1`, `--clip_R2`, `--three_
 Both modes accept multiple input files in a single invocation and process them sequentially. Paired-end mode is not required. `--hardtrim*` operates per-file independently.
 
 `--hardtrim5` and `--hardtrim3` cannot be combined in one invocation; to apply both, run two passes and feed the first trim's output to the second.
+
+Output files are named from the input's basename alone and written to the current working directory (or `--output_dir` if given), never beside the input. Two inputs sharing a basename therefore collide even when they come from different directories, and the run is refused before anything is written.

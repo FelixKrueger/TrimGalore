@@ -28,3 +28,5 @@ trim_galore --implicon A_R1.fq.gz A_R2.fq.gz B_R1.fq.gz B_R2.fq.gz
 ```
 
 Each pair gets a header (`=== IMPLICON pair N of M ===`) and the same output-collision pre-flight (case-insensitive, full-path) that `--paired` runs. Pairwise (R1, R2, R1, R2, …) order is required; don't pass `*R1.fq.gz *R2.fq.gz` globs (those produce all-R1s-then-all-R2s).
+
+Output files are named from the input's basename alone and written to the current working directory (or `--output_dir` if given), never beside the input. Two inputs sharing a basename therefore collide even when they come from different directories, and the run is refused before anything is written.
