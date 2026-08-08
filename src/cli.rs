@@ -931,20 +931,26 @@ impl Cli {
             // 1.ix — case-folded on purpose, not an identity check (#389): a case-variant
             // passthrough IS R1/R2 on APFS/NTFS and would be consumed twice. len == 2 per 1.ii.
             if self.input.len() == 2 {
+                let pt_id = crate::io::path_identity_key(pt);
                 let pt_key = crate::io::collision_key(pt);
-                if let Some(matched) = self
+                // Identity first: a byte-equal input gets the identity diagnosis even
+                // if the other input is a case-variant of it (identity ⊆ collision).
+                if let Some(same) = self
+                    .input
+                    .iter()
+                    .find(|p| crate::io::path_identity_key(p) == pt_id)
+                {
+                    anyhow::bail!(
+                        "--passthrough must be a third file (e.g. the index read), not \
+                         one of the R1/R2 inputs: {} is input {}",
+                        pt.display(),
+                        same.display()
+                    );
+                } else if let Some(matched) = self
                     .input
                     .iter()
                     .find(|p| crate::io::collision_key(p) == pt_key)
                 {
-                    if crate::io::path_identity_key(matched) == crate::io::path_identity_key(pt) {
-                        anyhow::bail!(
-                            "--passthrough must be a third file (e.g. the index read), not \
-                             one of the R1/R2 inputs: {} is input {}",
-                            pt.display(),
-                            matched.display()
-                        );
-                    }
                     anyhow::bail!(
                         "--passthrough matches input {} case-insensitively (for APFS/NTFS \
                          safety): {}. On a case-insensitive filesystem these are the same \
@@ -1883,8 +1889,8 @@ mod tests {
             "1.ix identity-branch prefix missing (#389); got: {err}"
         );
         assert!(
-            err.contains(matched),
-            "matched input {matched} not named (#389); got: {err}"
+            err.contains(&format!("is input {matched}")),
+            "matched input {matched} not named in the matched slot (#389); got: {err}"
         );
         assert!(
             !err.contains("aliases an input"),
@@ -1894,9 +1900,8 @@ mod tests {
 
     #[test]
     fn test_passthrough_rejects_pointing_at_r1() {
-        // Byte-equal is a strict subset of case-folded equality (the fold is pinned
-        // by io::tests::test_norm_path_case_folds); the case-variant branch has its
-        // own lexical test below.
+        // Byte-equal ⊂ case-folded (fold pinned by io::tests::test_norm_path_case_folds);
+        // the case-variant branch has its own lexical test below.
         let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", R1, R1, R2]);
         let err = cli.validate().unwrap_err().to_string();
         assert_passthrough_identity_rejection(&err, R1);
@@ -1910,10 +1915,26 @@ mod tests {
     }
 
     #[test]
+    fn test_passthrough_rejects_dot_slash_spelling_of_input() {
+        // pt and the matched input differ textually here, so the "is input {…}"
+        // assertion discriminates the matched slot rather than echoing pt (#389).
+        let pt = format!("./{R1}");
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--passthrough",
+            pt.as_str(),
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert_passthrough_identity_rejection(&err, R1);
+    }
+
+    #[test]
     fn test_passthrough_rejects_case_variant_of_input() {
-        // The check is lexical, so a case-variant of an UNWRITTEN input path hits
-        // the case-only branch identically on ext4 and APFS: 1.viii needs only the
-        // passthrough file to exist; input existence is validated later (#389).
+        // Lexical check: a case-variant of an UNWRITTEN input hits the case-only branch
+        // on ext4 and APFS alike — only the passthrough must exist at 1.viii (#389).
         let dir = std::env::temp_dir().join(format!("tg_pt_case_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pt = dir.join("r1.fq");

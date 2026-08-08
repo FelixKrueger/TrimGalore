@@ -37,7 +37,7 @@ pub fn is_gzipped(path: &Path) -> bool {
 
 /// Case-folded (ASCII lowercase) string view of a path — the folding component
 /// of `collision_key`, which absolutises first and is what every collision
-/// check hashes (issues #216, #383, #389).
+/// check uses (issues #216, #383, #389).
 ///
 /// Pragmatic trade-off: on opt-in case-sensitive APFS volumes this may
 /// false-positive, but the penalty is a loud early error rather than
@@ -71,7 +71,7 @@ fn lexical_normalise(p: &Path) -> PathBuf {
 
 /// Is this the same file? Case-**sensitive**, because on a case-sensitive filesystem
 /// `X` and `x` are two files and calling them one would reject valid input. Used for
-/// input identity in `Cli::validate` (issue #383).
+/// input identity in `Cli::validate` (issues #383, #389).
 pub fn path_identity_key(p: &Path) -> String {
     lexical_normalise(p).to_string_lossy().into_owned()
 }
