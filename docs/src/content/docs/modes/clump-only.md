@@ -48,8 +48,8 @@ trim_galore --clump_only --output-format ubam --preserve-tags RG,BC,UB sample.ba
 
 The following fields are byte-identical between input and output:
 
-- Read ID (header line for FASTQ; name portion for BAM)
-- Sequence
+- Read ID (header line for FASTQ; name portion for BAM — a space-separated description such as `1:N:0:INDEX` is dropped on uBAM output)
+- Sequence (FASTQ output only; on uBAM output bases are uppercased and IUPAC codes are coerced to `N`)
 - Quality string
 - Aux tags (uBAM only, via `--preserve-tags`) — A/Z/i/f scalars round-trip losslessly. B (array) and H (hex) tags are rejected at BAM-read time by the underlying reader, the same constraint that applies to the trim uBAM path.
 
