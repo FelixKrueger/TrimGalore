@@ -883,10 +883,8 @@ impl Cli {
         }
 
         // --passthrough: 9-item compatibility envelope. Layout mirrors --clumpify
-        // above. Each rejection has a precise user-facing message; case-folded
-        // collision check (1.ix) uses crate::io::collision_key to share the same
-        // APFS/NTFS-aware normalisation as the output-collision pre-flight in
-        // main.rs (issue #216 protection).
+        // above. Each rejection has a precise user-facing message; 1.ix is the
+        // input dual-consume guard (#389) — see its own comment for the key choice.
         if let Some(ref pt) = self.passthrough {
             // 1.i — paired-end required
             if !self.paired {
@@ -930,19 +928,35 @@ impl Cli {
             // 1.viii — file must exist, and must be re-readable (#379): the
             // passthrough stream is opened once to sanity-check and again to read.
             check_restartable_input(pt, "--passthrough file not found")?;
-            // 1.ix — case-folded collision with R1/R2 (issue #216-style APFS/NTFS guard).
-            // self.input.len() == 2 here per 1.ii. The plan's main.rs::run pre-flight
-            // catches case-only output collisions; this catches case-only INPUT aliases
-            // where --passthrough silently dual-consumes one input on a case-insensitive
-            // filesystem.
+            // 1.ix — case-folded on purpose, not an identity check (#389): a case-variant
+            // passthrough IS R1/R2 on APFS/NTFS and would be consumed twice. len == 2 per 1.ii.
             if self.input.len() == 2 {
-                let pt_norm = crate::io::collision_key(pt);
-                if pt_norm == crate::io::collision_key(&self.input[0])
-                    || pt_norm == crate::io::collision_key(&self.input[1])
+                let pt_id = crate::io::path_identity_key(pt);
+                let pt_key = crate::io::collision_key(pt);
+                // Identity first: a byte-equal input gets the identity diagnosis even
+                // if the other input is a case-variant of it (identity ⊆ collision).
+                if let Some(same) = self
+                    .input
+                    .iter()
+                    .find(|p| crate::io::path_identity_key(p) == pt_id)
                 {
                     anyhow::bail!(
-                        "--passthrough cannot point at R1 or R2 (case-insensitive match \
-                         on APFS/NTFS): {} aliases an input file",
+                        "--passthrough must be a third file (e.g. the index read), not \
+                         one of the R1/R2 inputs: {} is input {}",
+                        pt.display(),
+                        same.display()
+                    );
+                } else if let Some(matched) = self
+                    .input
+                    .iter()
+                    .find(|p| crate::io::collision_key(p) == pt_key)
+                {
+                    anyhow::bail!(
+                        "--passthrough matches input {} case-insensitively (for APFS/NTFS \
+                         safety): {}. On a case-insensitive filesystem these are the same \
+                         file and the stream would be consumed twice; if they are genuinely \
+                         two files, rename one so the paths differ by more than letter case.",
+                        matched.display(),
                         pt.display()
                     );
                 }
@@ -1867,24 +1881,83 @@ mod tests {
         assert!(err.contains("--passthrough file not found"), "got: {err}");
     }
 
+    /// Shared 1.ix assertions (#389): normative prefix, matched input named,
+    /// and no unconditional identity claim.
+    fn assert_passthrough_identity_rejection(err: &str, matched: &str) {
+        assert!(
+            err.contains("--passthrough must be a third file"),
+            "1.ix identity-branch prefix missing (#389); got: {err}"
+        );
+        assert!(
+            err.contains(&format!("is input {matched}")),
+            "matched input {matched} not named in the matched slot (#389); got: {err}"
+        );
+        assert!(
+            !err.contains("aliases an input"),
+            "1.ix must not assert identity (#389); got: {err}"
+        );
+    }
+
     #[test]
     fn test_passthrough_rejects_pointing_at_r1() {
-        // 1.ix collision check: the byte-equal case is the strict subset of
-        // case-folded equality, so this also covers the case-folded path —
-        // norm_path() is a single `to_ascii_lowercase()` call which is
-        // trivially correct (and exercised by io::tests in its own right).
-        // True cross-case testing would need a case-insensitive filesystem
-        // which CI doesn't guarantee.
+        // Byte-equal ⊂ case-folded (fold pinned by io::tests::test_norm_path_case_folds);
+        // the case-variant branch has its own lexical test below.
         let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", R1, R1, R2]);
         let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("cannot point at R1 or R2"), "got: {err}");
+        assert_passthrough_identity_rejection(&err, R1);
     }
 
     #[test]
     fn test_passthrough_rejects_pointing_at_r2() {
         let cli = Cli::parse_from(["trim_galore", "--paired", "--passthrough", R2, R1, R2]);
         let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("cannot point at R1 or R2"), "got: {err}");
+        assert_passthrough_identity_rejection(&err, R2);
+    }
+
+    #[test]
+    fn test_passthrough_rejects_dot_slash_spelling_of_input() {
+        // pt and the matched input differ textually here, so the "is input {…}"
+        // assertion discriminates the matched slot rather than echoing pt (#389).
+        let pt = format!("./{R1}");
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--passthrough",
+            pt.as_str(),
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert_passthrough_identity_rejection(&err, R1);
+    }
+
+    #[test]
+    fn test_passthrough_rejects_case_variant_of_input() {
+        // Lexical check: a case-variant of an UNWRITTEN input hits the case-only branch
+        // on ext4 and APFS alike — only the passthrough must exist at 1.viii (#389).
+        let dir = std::env::temp_dir().join(format!("tg_pt_case_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pt = dir.join("r1.fq");
+        std::fs::write(&pt, "@r\nACGT\n+\nIIII\n").unwrap();
+        let r1 = dir.join("R1.fq");
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--passthrough",
+            pt.to_str().unwrap(),
+            r1.to_str().unwrap(),
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            err.contains("case-insensitively"),
+            "1.ix must state the case-insensitive comparison (#389); got: {err}"
+        );
+        assert!(
+            !err.contains("aliases an input"),
+            "1.ix must not assert identity (#389); got: {err}"
+        );
     }
 
     // ── --output-format (PLAN v2.1 §3.4a) ─────────────────────────────────

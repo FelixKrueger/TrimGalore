@@ -128,6 +128,15 @@
 
 #### Changes
 
+- **The `--passthrough`-matches-R1/R2 message now says what it checks**
+  ([#389](https://github.com/FelixKrueger/TrimGalore/issues/389)). The old text
+  claimed the passthrough file "aliases an input file" unconditionally — false on
+  a case-sensitive filesystem, where the two spellings can be two real files. The
+  message is now subcase-specific: pointing at an input directly says the
+  passthrough must be a third file (e.g. the index read); a case-variant match
+  states the comparison is case-insensitive (APFS/NTFS safety) and suggests a
+  rename. Which runs are accepted or rejected is unchanged.
+
 - **A file given twice on one command line is now rejected**
   ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
   `trim_galore sample.fastq.gz sample.fastq.gz` previously trimmed the file
