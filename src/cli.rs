@@ -178,22 +178,24 @@ pub struct Cli {
     #[clap(long = "clumpify")]
     pub clumpify: bool,
 
-    /// Lossless reorder-only specialty mode: reorder FASTQ or unaligned BAM
-    /// (uBAM) records by canonical 16-mer minimizer for compression-friendly
-    /// grouping, WITHOUT any trimming, filtering, adapter detection, or record
-    /// modification. Every input record appears in the output byte-identically
-    /// — name, sequence, quality, plus any aux tags named in `--preserve-tags`
-    /// on uBAM; only file-level order changes. Output is `*_clumped.fq(.gz)`
-    /// (SE) or `*_clumped_{1,2}.fq(.gz)` (PE), or under `--output-format ubam`
-    /// a single `*_clumped.bam` (SE) and ONE interleaved `*_clumped.bam` per
-    /// pair (PE). A short `*_clumping_report.txt` is emitted (distinct from
-    /// `*_trimming_report.txt` to keep downstream nf-core/MultiQC scanners
-    /// unconfused).
+    /// Reorder-only specialty mode: reorder FASTQ or unaligned BAM (uBAM)
+    /// records by canonical 16-mer minimizer for compression-friendly grouping,
+    /// WITHOUT any trimming, filtering or adapter detection — only file-level
+    /// order changes. FASTQ in / FASTQ out is byte-identical (header, sequence,
+    /// quality). uBAM output is lossless per record body but not byte-identical:
+    /// the space-separated header description is dropped, bases are uppercased,
+    /// IUPAC codes become `N`, and aux tags survive only when named in
+    /// `--preserve-tags`. uBAM input requires `--output-format ubam`. Output is
+    /// `*_clumped.fq(.gz)` (SE) or `*_clumped_{1,2}.fq(.gz)` (PE), or under
+    /// `--output-format ubam` a single `*_clumped.bam` (SE) and ONE interleaved
+    /// `*_clumped.bam` per pair (PE). A short `*_clumping_report.txt` is emitted
+    /// (distinct from `*_trimming_report.txt` to keep downstream
+    /// nf-core/MultiQC scanners unconfused).
     ///
     /// Composes with `--compression` (FASTQ output only), `--memory`,
     /// `--cores`, `--paired`, `--fastqc`, `--dont_gzip` (FASTQ output only),
-    /// `--basename`, `--output-format ubam`, and `--preserve-tags` (uBAM
-    /// only). Trimming/filtering flags (`-a`, `--length`, `--rrbs`, `--polyA`,
+    /// `--basename`, `--output-format ubam`, and `--preserve-tags` (requires at
+    /// least one uBAM input; an error otherwise). Trimming/filtering flags (`-a`, `--length`, `--rrbs`, `--polyA`,
     /// `--polyG`, `--trim-n`, `--clip_*`, `--nextseq`, `--rename`,
     /// `--discard_untrimmed`, `--consider_already_trimmed`, other specialty
     /// modes, `--passthrough`, `--retain_unpaired`) are rejected, as is
@@ -202,17 +204,17 @@ pub struct Cli {
     /// ignored on this path (mode does no trimming; matches how `--hardtrim5`
     /// treats trim flags today).
     ///
-    /// Contract-scope note: byte-identity applies to header + sequence +
-    /// quality bytes. The plus-line (line 3 of each record) is normalized
-    /// to bare `+` on output; CRLF line endings are normalized to LF. Both
-    /// normalizations are codebase-wide behaviours, inherited from the
-    /// FASTQ reader/writer. On uBAM output a `@PG` record is appended to the
-    /// header, so whole-file identity is not preserved — record bodies are.
+    /// Contract-scope note, FASTQ output: byte-identity applies to header +
+    /// sequence + quality bytes. The plus-line (line 3 of each record) is
+    /// normalized to bare `+` on output; CRLF line endings are normalized to
+    /// LF. Both normalizations are codebase-wide behaviours, inherited from the
+    /// FASTQ reader/writer. On uBAM output the per-record normalizations listed
+    /// above apply, and a `@PG` record is appended to the header, so whole-file
+    /// identity is not preserved.
     ///
-    /// FASTQ and uBAM input are both supported, but uBAM input requires
-    /// `--output-format ubam` (the FASTQ output path would drop aux tags).
-    /// Paired mode takes two files, or — with `--output-format ubam` — a
-    /// single interleaved uBAM.
+    /// Paired mode takes two FASTQ files (multi-pair supported), or — with
+    /// `--output-format ubam` — a single interleaved uBAM. Two separate uBAM
+    /// files are refused; combine them mate-adjacent first.
     #[clap(long = "clump_only")]
     pub clump_only: bool,
 

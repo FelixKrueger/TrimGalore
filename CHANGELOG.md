@@ -151,11 +151,18 @@
   paired run writes **one** interleaved `*_clumped.bam`, not two mate files, so
   anyone scripting against `_clumped_{1,2}.fq.gz` was misled. The whole block is
   now format-aware: per-format filenames, `--compression` and `--dont_gzip`
-  marked FASTQ-output-only, `--preserve-tags` named as the aux-tag opt-in, the
-  appended `@PG` record noted as the reason whole-file identity does not hold on
-  BAM output, and uBAM input documented as requiring `--output-format ubam`. The
+  marked FASTQ-output-only, `--preserve-tags` documented as requiring a uBAM
+  input, and uBAM input documented as requiring `--output-format ubam`. The
   `--output-format ubam` value description also gained the two rejections it was
-  missing (`--retain_unpaired`, `--dont_gzip`). No behaviour change.
+  missing (`--retain_unpaired`, `--dont_gzip`).
+
+  The fidelity claim is now scoped honestly, which is the correction most worth
+  reading: FASTQ in / FASTQ out is byte-identical, but **uBAM output is lossless
+  per record body and not byte-identical** — the space-separated header
+  description is dropped (so a standard Illumina `1:N:0:INDEX` field does not
+  survive), bases are uppercased, IUPAC codes become `N`, and aux tags survive
+  only when named in `--preserve-tags`. All four are long-standing writer
+  behaviours; only the documentation changes here. No behaviour change.
 
 - **The `--passthrough`-matches-R1/R2 message now says what it checks**
   ([#389](https://github.com/FelixKrueger/TrimGalore/issues/389)). The old text
