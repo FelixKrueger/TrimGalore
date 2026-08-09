@@ -70,7 +70,9 @@ The input `@HD` / `@PG` header chain is propagated verbatim, and a trim_galore `
 @PG	ID:trim_galore	VN:<version>	CL:<command-line>
 ```
 
-uBAM-in → uBAM-out is therefore **not** byte-identical to the input — provenance is preserved by *adding* to history, same treatment as samtools / Picard. The output records themselves round-trip losslessly.
+uBAM-in → uBAM-out is therefore **not** byte-identical to the input — provenance is preserved by *adding* to history, same treatment as samtools / Picard. Record bodies round-trip losslessly on that path, apart from IUPAC degenerate bases, which are coerced to `N` on read (a warning is emitted).
+
+Coming **from FASTQ**, uBAM output applies three further normalisations, because a BAM record cannot represent everything a FASTQ header can: header text after the first space is dropped (BAM read names cannot contain whitespace), lowercase bases are uppercased, and IUPAC codes are coerced to `N`. Aux tags are carried only when named in `--preserve-tags`. A one-time `NOTE:` is printed when a header description is dropped.
 
 ### Aux-tag round-trip with `--preserve-tags`
 

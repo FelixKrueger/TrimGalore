@@ -256,6 +256,9 @@ pub struct Cli {
     /// aux tags propagated from uBAM inputs (when `--preserve-tags` is set).
     /// uBAM output is always single-threaded; some flag combinations are
     /// rejected (see `--help` and the startup diagnostics for details).
+    /// From FASTQ input, record bodies are preserved but not byte-identically:
+    /// header text after the first space is dropped (BAM read names cannot
+    /// contain whitespace), bases are uppercased, and IUPAC codes become `N`.
     #[clap(long = "output-format", value_enum, default_value_t = OutputFormat::Fastq)]
     pub output_format: OutputFormat,
 

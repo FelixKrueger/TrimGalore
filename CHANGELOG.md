@@ -5,6 +5,31 @@
 
 #### Bug fixes
 
+- **The uBAM path's IUPAC warning told users the wrong direction, and could
+  suppress the right one** ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)).
+  One message served two opposite code paths. On FASTQ→uBAM it announced "input
+  uBAM … coerced to N for FASTQ output" — both halves false — and on uBAM→uBAM
+  the read-side message named a FASTQ output that did not exist. Worse, a single
+  process-wide guard meant a run with **mixed FASTQ and uBAM inputs** (legal, and
+  the documented remedy for `--preserve-tags` with all-FASTQ input) printed
+  whichever message came first and silently suppressed the other: with the FASTQ
+  file first, the user was told the wrong direction *and* never told about the
+  genuine uBAM coercion. Each direction now has its own text and its own guard,
+  and the read-side wording is output-neutral ("coerced to N on read").
+
+- **uBAM output silently dropped FASTQ header descriptions**
+  ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)). BAM read names
+  cannot contain whitespace, so everything after the first space is discarded —
+  frequently the original instrument identifier or an Illumina `1:N:0:INDEX`
+  field. This is required by the format and is not new; it was simply never
+  disclosed. A one-time `NOTE:` now reports it and echoes the text that was
+  dropped, so what is lost is visible rather than inferred. Nothing fires when
+  there is nothing to drop (whitespace-free headers, or a bare trailing space).
+  The uBAM section of the output guide and `--output-format`'s own help also
+  stated or implied lossless round-tripping; both now name the three FASTQ→uBAM
+  normalizations (description dropped, bases uppercased, IUPAC coerced).
+
+
 - **`--clump_only --paired` no longer silently overwrites one mate's clumping
   report with the other's**
   ([#391](https://github.com/FelixKrueger/TrimGalore/issues/391)). Primaries
