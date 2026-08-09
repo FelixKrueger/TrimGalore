@@ -92,20 +92,23 @@ fn planned_secondary_outputs(
     cli: &Cli,
     output_dir: Option<&Path>,
     gzip: bool,
-) -> Result<Vec<std::path::PathBuf>> {
+) -> Result<Vec<naming::PlannedOutput>> {
     let mut v = Vec::new();
     for input in &cli.input {
+        let src = || naming::OutputSource::Input(input.clone());
         if !cli.no_report_file {
-            v.push(naming::report_name(input, output_dir));
-            v.push(naming::json_report_name(input, output_dir));
+            v.push((naming::report_name(input, output_dir), src()));
+            v.push((naming::json_report_name(input, output_dir), src()));
         }
         if let Some(ref barcode_file) = cli.demux {
             let barcodes = demux::read_barcode_file(barcode_file)?;
             let trimmed =
                 naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
-            v.extend(demux::demux_output_paths(
-                &trimmed, &barcodes, gzip, output_dir,
-            ));
+            v.extend(
+                demux::demux_output_paths(&trimmed, &barcodes, gzip, output_dir)
+                    .into_iter()
+                    .map(|p| (p, src())),
+            );
         }
     }
     Ok(v)
@@ -119,13 +122,19 @@ fn clump_report_candidates(
     no_report_file: bool,
     report_inputs: &[impl AsRef<Path>],
     output_dir: Option<&Path>,
-) -> Vec<std::path::PathBuf> {
+) -> Vec<naming::PlannedOutput> {
     if no_report_file {
         return Vec::new();
     }
     report_inputs
         .iter()
-        .map(|input| naming::clumping_report_name(input.as_ref(), output_dir))
+        .map(|input| {
+            let input = input.as_ref();
+            (
+                naming::clumping_report_name(input, output_dir),
+                naming::OutputSource::Input(input.to_path_buf()),
+            )
+        })
         .collect()
 }
 
@@ -136,16 +145,19 @@ fn planned_hardtrim_outputs(
     end: specialty::HardtrimEnd,
     output_dir: Option<&Path>,
     gzip: bool,
-) -> Vec<std::path::PathBuf> {
+) -> Vec<naming::PlannedOutput> {
     cli.input
         .iter()
-        .map(|input| match cli.output_format {
-            trim_galore::cli::OutputFormat::Fastq => {
-                specialty::hardtrim_output_name(input, keep, end, output_dir, gzip)
-            }
-            trim_galore::cli::OutputFormat::UBam => {
-                specialty::hardtrim_bam_output_name(input, keep, end, output_dir)
-            }
+        .map(|input| {
+            let path = match cli.output_format {
+                trim_galore::cli::OutputFormat::Fastq => {
+                    specialty::hardtrim_output_name(input, keep, end, output_dir, gzip)
+                }
+                trim_galore::cli::OutputFormat::UBam => {
+                    specialty::hardtrim_bam_output_name(input, keep, end, output_dir)
+                }
+            };
+            (path, naming::OutputSource::Input(input.clone()))
         })
         .collect()
 }
@@ -485,9 +497,16 @@ fn main() -> Result<()> {
             "Clock",
             Some(CWD_OUTPUT_HINT),
             |r1, r2| {
+                let src = naming::OutputSource::Pair(r1.to_path_buf(), r2.to_path_buf());
                 vec![
-                    specialty::clock_output_name(r1, "R1", output_dir, gzip),
-                    specialty::clock_output_name(r2, "R2", output_dir, gzip),
+                    (
+                        specialty::clock_output_name(r1, "R1", output_dir, gzip),
+                        src.clone(),
+                    ),
+                    (
+                        specialty::clock_output_name(r2, "R2", output_dir, gzip),
+                        src,
+                    ),
                 ]
             },
             |r1, r2| specialty::clock(r1, r2, gzip, output_dir, cli.cores, cli.compression),
@@ -500,9 +519,16 @@ fn main() -> Result<()> {
             "IMPLICON",
             Some(CWD_OUTPUT_HINT),
             |r1, r2| {
+                let src = naming::OutputSource::Pair(r1.to_path_buf(), r2.to_path_buf());
                 vec![
-                    specialty::implicon_output_name(r1, umi_len, "R1", output_dir, gzip),
-                    specialty::implicon_output_name(r2, umi_len, "R2", output_dir, gzip),
+                    (
+                        specialty::implicon_output_name(r1, umi_len, "R1", output_dir, gzip),
+                        src.clone(),
+                    ),
+                    (
+                        specialty::implicon_output_name(r2, umi_len, "R2", output_dir, gzip),
+                        src,
+                    ),
                 ]
             },
             |r1, r2| {
@@ -554,7 +580,9 @@ fn main() -> Result<()> {
                             let (o1, o2) = naming::clumped_paired_output_names(
                                 r1, r2, output_dir, basename, gzip,
                             );
-                            let mut v = vec![o1, o2];
+                            let src =
+                                naming::OutputSource::Pair(r1.to_path_buf(), r2.to_path_buf());
+                            let mut v = vec![(o1, src.clone()), (o2, src)];
                             v.extend(clump_report_candidates(
                                 cli.no_report_file,
                                 &[r1, r2],
@@ -581,10 +609,15 @@ fn main() -> Result<()> {
                     )?;
                 } else {
                     // SE FASTQ pre-flight (issues #216, #383).
-                    let mut planned: Vec<std::path::PathBuf> = cli
+                    let mut planned: Vec<naming::PlannedOutput> = cli
                         .input
                         .iter()
-                        .map(|input| naming::clumped_output_name(input, output_dir, basename, gzip))
+                        .map(|input| {
+                            (
+                                naming::clumped_output_name(input, output_dir, basename, gzip),
+                                naming::OutputSource::Input(input.clone()),
+                            )
+                        })
                         .collect();
                     // #391 — reports join so the input check covers them too.
                     planned.extend(clump_report_candidates(
@@ -621,11 +654,14 @@ fn main() -> Result<()> {
                         // its condition is a strict subset of the `--paired`
                         // N=1 non-BAM guard in main() — and was retired with
                         // #363. Retained note so the absence is intentional.
-                        let mut planned = vec![naming::clumped_paired_bam_output_name(
-                            &cli.input[0],
-                            None,
-                            output_dir,
-                            basename,
+                        let mut planned = vec![(
+                            naming::clumped_paired_bam_output_name(
+                                &cli.input[0],
+                                None,
+                                output_dir,
+                                basename,
+                            ),
+                            naming::OutputSource::Input(cli.input[0].clone()),
                         )];
                         // #391 — defensive symmetry: with one input the report (filename
                         // plus a suffix) can never alias it; the arm keeps its siblings' shape.
@@ -658,13 +694,16 @@ fn main() -> Result<()> {
                         // two-BAM-vs-mixed distinction right, and the model for
                         // the shared helper (#363).
                         // Multi-pair collision pre-flight (case-folded per issue #216).
-                        let mut planned: Vec<std::path::PathBuf> = Vec::new();
+                        let mut planned: Vec<naming::PlannedOutput> = Vec::new();
                         for chunk in cli.input.chunks(2) {
-                            planned.push(naming::clumped_paired_bam_output_name(
-                                &chunk[0],
-                                Some(&chunk[1]),
-                                output_dir,
-                                basename,
+                            planned.push((
+                                naming::clumped_paired_bam_output_name(
+                                    &chunk[0],
+                                    Some(&chunk[1]),
+                                    output_dir,
+                                    basename,
+                                ),
+                                naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone()),
                             ));
                             // #391 — ONE report per pair, keyed on the pair's first input
                             // (clump_only.rs writes clumping_report_name(inputs[0], …)).
@@ -718,9 +757,12 @@ fn main() -> Result<()> {
                     }
                 } else {
                     // SE BAM. Case-folded collision pre-flight across inputs.
-                    let mut planned: Vec<std::path::PathBuf> = Vec::new();
+                    let mut planned: Vec<naming::PlannedOutput> = Vec::new();
                     for input in &cli.input {
-                        planned.push(naming::clumped_bam_output_name(input, output_dir, basename));
+                        planned.push((
+                            naming::clumped_bam_output_name(input, output_dir, basename),
+                            naming::OutputSource::Input(input.clone()),
+                        ));
                     }
                     // #391 — reports join so the input check covers them too.
                     planned.extend(clump_report_candidates(
@@ -788,7 +830,7 @@ fn main() -> Result<()> {
 
     if cli.paired {
         // Pre-flight across pairs before any I/O; see io::collision_key for the key.
-        let mut planned: Vec<std::path::PathBuf> = Vec::new();
+        let mut planned: Vec<naming::PlannedOutput> = Vec::new();
         for chunk in cli.input.chunks(2) {
             let (o1, o2) = naming::paired_end_output_names(
                 &chunk[0],
@@ -797,7 +839,12 @@ fn main() -> Result<()> {
                 cli.basename.as_deref(),
                 gzip,
             );
-            let mut candidates = vec![o1, o2];
+            // Uniform Pair for paired primaries (#397 decision C2): _val_1 takes its
+            // stem from R1 but its directory from R1 too, and _val_2 mixes both — naming
+            // one mate would encode a claim about which supplies the directory, which is
+            // exactly what #398 may change.
+            let pair_src = naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone());
+            let mut candidates = vec![(o1, pair_src.clone()), (o2, pair_src.clone())];
             if cli.retain_unpaired {
                 let (u1, u2) = naming::unpaired_output_names(
                     &chunk[0],
@@ -806,27 +853,31 @@ fn main() -> Result<()> {
                     cli.basename.as_deref(),
                     gzip,
                 );
-                candidates.push(u1);
-                candidates.push(u2);
+                candidates.push((u1, pair_src.clone()));
+                candidates.push((u2, pair_src));
             }
             // --passthrough adds a third output path per pair. v1 only
             // supports a single pair (Cli::validate enforces input.len() == 2
             // when passthrough is set), so this either contributes zero or
             // one extra candidate to the collision set.
             if let Some(ref pt_input) = cli.passthrough {
-                candidates.push(naming::passthrough_output_name(
-                    pt_input,
-                    output_dir,
-                    cli.basename.as_deref(),
-                    gzip,
+                candidates.push((
+                    naming::passthrough_output_name(
+                        pt_input,
+                        output_dir,
+                        cli.basename.as_deref(),
+                        gzip,
+                    ),
+                    naming::OutputSource::Input(pt_input.clone()),
                 ));
             }
             // #388 — report names carry no _val_ discriminator, so two inputs
             // with distinct primaries can still collide on reports.
             if !cli.no_report_file {
                 for input in [&chunk[0], &chunk[1]] {
-                    candidates.push(naming::report_name(input, output_dir));
-                    candidates.push(naming::json_report_name(input, output_dir));
+                    let src = naming::OutputSource::Input(input.clone());
+                    candidates.push((naming::report_name(input, output_dir), src.clone()));
+                    candidates.push((naming::json_report_name(input, output_dir), src));
                 }
             }
             planned.extend(candidates);
@@ -893,11 +944,19 @@ fn main() -> Result<()> {
         // Single-end: process each input file independently
         // (matches Perl TrimGalore behavior of looping over all positional args)
         // #383 — SE trim was the only trim path without the #216 pre-flight.
-        let planned: Vec<std::path::PathBuf> = cli
+        let planned: Vec<naming::PlannedOutput> = cli
             .input
             .iter()
             .map(|input| {
-                naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip)
+                (
+                    naming::single_end_output_name(
+                        input,
+                        output_dir,
+                        cli.basename.as_deref(),
+                        gzip,
+                    ),
+                    naming::OutputSource::Input(input.clone()),
+                )
             })
             .collect();
         let mut planned = planned;
@@ -1919,19 +1978,23 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
         // two-BAM case from the mixed case (#363). The per-pair loop that used to
         // stand here emitted the two-BAM message for either.
         // Pre-flight: one BAM output per pair; collision on case-folded path.
-        let mut planned: Vec<std::path::PathBuf> = Vec::new();
+        let mut planned: Vec<naming::PlannedOutput> = Vec::new();
         for chunk in cli.input.chunks(2) {
-            planned.push(naming::paired_bam_output_name(
-                &chunk[0],
-                &chunk[1],
-                output_dir,
-                cli.basename.as_deref(),
+            planned.push((
+                naming::paired_bam_output_name(
+                    &chunk[0],
+                    &chunk[1],
+                    output_dir,
+                    cli.basename.as_deref(),
+                ),
+                naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone()),
             ));
             // #388 — same report-collision hole as the FASTQ paired path.
             if !cli.no_report_file {
                 for input in [&chunk[0], &chunk[1]] {
-                    planned.push(naming::report_name(input, output_dir));
-                    planned.push(naming::json_report_name(input, output_dir));
+                    let src = naming::OutputSource::Input(input.clone());
+                    planned.push((naming::report_name(input, output_dir), src.clone()));
+                    planned.push((naming::json_report_name(input, output_dir), src));
                 }
             }
         }
@@ -1978,17 +2041,23 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
 
     // Single-end loop.
     // #383 — same hole as the FASTQ SE loop.
-    let mut planned: Vec<std::path::PathBuf> = cli
+    let mut planned: Vec<naming::PlannedOutput> = cli
         .input
         .iter()
-        .map(|input| naming::single_end_bam_output_name(input, output_dir, cli.basename.as_deref()))
+        .map(|input| {
+            (
+                naming::single_end_bam_output_name(input, output_dir, cli.basename.as_deref()),
+                naming::OutputSource::Input(input.clone()),
+            )
+        })
         .collect();
     // #409 — run_ubam_output_single writes both trimming reports too; without them
     // an input named like one is overwritten before it is read.
     if !cli.no_report_file {
         for input in &cli.input {
-            planned.push(naming::report_name(input, output_dir));
-            planned.push(naming::json_report_name(input, output_dir));
+            let src = naming::OutputSource::Input(input.clone());
+            planned.push((naming::report_name(input, output_dir), src.clone()));
+            planned.push((naming::json_report_name(input, output_dir), src));
         }
     }
     naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
@@ -2543,11 +2612,11 @@ fn run_specialty_paired<NameFn, RunFn>(
     mut run_pair: RunFn,
 ) -> Result<()>
 where
-    NameFn: FnMut(&Path, &Path) -> Vec<std::path::PathBuf>,
+    NameFn: FnMut(&Path, &Path) -> Vec<naming::PlannedOutput>,
     RunFn: FnMut(&Path, &Path) -> Result<()>,
 {
     // Pre-flight across pairs before any I/O; see io::collision_key for the key.
-    let mut planned: Vec<std::path::PathBuf> = Vec::new();
+    let mut planned: Vec<naming::PlannedOutput> = Vec::new();
     for chunk in cli.input.chunks(2) {
         planned.extend(pair_outputs(&chunk[0], &chunk[1]));
     }

@@ -85,41 +85,111 @@ pub fn collision_key(p: &Path) -> String {
 const GENERIC_ADVICE: &str = "Check that inputs produce distinct output paths \
                               (e.g., different source directories or `--output_dir`).";
 
+/// Which input(s) a planned output is named from. The pre-flight cannot tell a user to
+/// "rename one input" without it (#397).
+#[derive(Clone, Debug)]
+pub enum OutputSource {
+    /// Named from one input: reports, SE primaries, `--demux` per-barcode files.
+    Input(PathBuf),
+    /// Named from a pair. Paired primaries take the filename from one mate and the
+    /// directory from R1, so neither mate alone explains the path.
+    Pair(PathBuf, PathBuf),
+}
+
+impl OutputSource {
+    /// Case-**sensitive** identity, for "did these two candidates come from the same
+    /// input?". Folding here would call `X` and `x` one source on a case-sensitive
+    /// filesystem — the D8/D13 mistake, in a new place.
+    fn identity(&self) -> String {
+        match self {
+            OutputSource::Input(p) => path_identity_key(p),
+            // `\0` cannot occur in a path, so it cannot make two distinct pairs collide.
+            OutputSource::Pair(a, b) => {
+                format!("{}\0{}", path_identity_key(a), path_identity_key(b))
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for OutputSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputSource::Input(p) => write!(f, "{}", p.display()),
+            OutputSource::Pair(a, b) => write!(f, "{} + {}", a.display(), b.display()),
+        }
+    }
+}
+
+/// A prospective output path and the input(s) it is named from.
+pub type PlannedOutput = (PathBuf, OutputSource);
+
 /// Reject duplicate output paths, or an output that would overwrite an input, before
 /// any file is opened. Called by every `main.rs` dispatch path that writes more than
 /// one file: SE trim, `--paired` trim, `--hardtrim5/3`, `--clock`/`--implicon` and
 /// `--clump_only` — all four output formats. A new dispatch path needs a call here too.
+///
+/// Each candidate carries the input it is named from, so a refusal can name the files the
+/// user has to change (#397). Note what the tuple does and does not buy: it makes an
+/// *unattributed* candidate impossible, but it cannot detect a *missing* one — which is
+/// what #383, #385, #388, #391 and #409 all were.
 pub fn preflight_output_collisions(
-    planned: &[PathBuf],
+    planned: &[PlannedOutput],
     inputs: &[PathBuf],
     hint: Option<&str>,
 ) -> Result<()> {
     let input_keys: std::collections::HashMap<String, &PathBuf> =
         inputs.iter().map(|p| (collision_key(p), p)).collect();
-    let mut seen: std::collections::HashMap<String, PathBuf> =
+    let mut seen: std::collections::HashMap<String, PlannedOutput> =
         std::collections::HashMap::with_capacity(planned.len());
 
-    for p in planned {
-        let key = collision_key(p);
+    for (path, source) in planned {
+        let key = collision_key(path);
         if let Some(input) = input_keys.get(&key) {
             anyhow::bail!(
-                "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                 this run would write output to {}, which is also one of its inputs. \
+                "Output path collision (case-insensitive, for APFS/NTFS safety): the output \
+                 named from {} would be written to {}, which is also one of its inputs. \
                  If that file is an earlier run's output, drop it from the input list; \
                  otherwise use `--output_dir` to write elsewhere.",
+                source,
                 input.display()
             );
         }
-        if let Some(existing) = seen.insert(key, p.clone()) {
-            // The hint replaces the generic advice; on CWD-naming modes the generic
-            // advice is false, so appending would contradict itself.
-            anyhow::bail!(
-                "Output path collision (case-insensitive, for APFS/NTFS safety): \
-                 {} and {} would be written to the same file. {}",
-                existing.display(),
-                p.display(),
-                hint.unwrap_or(GENERIC_ADVICE)
-            );
+        if let Some((prev_path, prev_source)) = seen.insert(key, (path.clone(), source.clone())) {
+            let same_path = prev_path == *path;
+            let same_source = prev_source.identity() == source.identity();
+            if same_path && same_source {
+                // 2c — one input feeding two candidates. The hint is deliberately ignored:
+                // "rename one input" cannot be followed when there is only one to rename.
+                anyhow::bail!(
+                    "Output path collision (case-insensitive, for APFS/NTFS safety): two \
+                     outputs named from {} would be written to the same file, {}. List each \
+                     input once — a file that appears in more than one pair is reported once \
+                     per pair — or pass `--no_report_file` if only the reports collide.",
+                    source,
+                    path.display()
+                );
+            } else if same_path {
+                // 2a — two sources, one rendered path: print the path once.
+                anyhow::bail!(
+                    "Output path collision (case-insensitive, for APFS/NTFS safety): the \
+                     outputs named from {} and {} would be written to the same file, {}. {}",
+                    prev_source,
+                    source,
+                    path.display(),
+                    hint.unwrap_or(GENERIC_ADVICE)
+                );
+            } else {
+                // 2b — the spellings differ (fold-equal or `./x` vs `x`), so show both.
+                anyhow::bail!(
+                    "Output path collision (case-insensitive, for APFS/NTFS safety): {} \
+                     (from {}) and {} (from {}) would be written to the same file. {}",
+                    prev_path.display(),
+                    prev_source,
+                    path.display(),
+                    source,
+                    hint.unwrap_or(GENERIC_ADVICE)
+                );
+            }
         }
     }
     Ok(())
@@ -1028,9 +1098,21 @@ mod tests {
         PathBuf::from(s)
     }
 
+    /// A planned output attributed to its own synthetic input (#397). Distinct
+    /// sources on purpose: these cases are about two *different* inputs racing for
+    /// one path, which is shape 2a/2b — `po_same` covers the one-input shape 2c.
+    fn po(s: &str) -> PlannedOutput {
+        (pb(s), OutputSource::Input(pb(&format!("src_of_{s}"))))
+    }
+
+    /// Two planned outputs from the *same* input — shape 2c.
+    fn po_from(src: &str, s: &str) -> PlannedOutput {
+        (pb(s), OutputSource::Input(pb(src)))
+    }
+
     #[test]
     fn preflight_accepts_distinct_outputs() {
-        let planned = [pb("a_trimmed.fq.gz"), pb("b_trimmed.fq.gz")];
+        let planned = [po("a_trimmed.fq.gz"), po("b_trimmed.fq.gz")];
         let inputs = [pb("a.fastq.gz"), pb("b.fastq.gz")];
         assert!(preflight_output_collisions(&planned, &inputs, None).is_ok());
     }
@@ -1039,14 +1121,14 @@ mod tests {
     fn preflight_accepts_empty_and_single() {
         assert!(preflight_output_collisions(&[], &[], None).is_ok());
         assert!(
-            preflight_output_collisions(&[pb("a_trimmed.fq.gz")], &[pb("a.fastq.gz")], None)
+            preflight_output_collisions(&[po("a_trimmed.fq.gz")], &[pb("a.fastq.gz")], None)
                 .is_ok()
         );
     }
 
     #[test]
     fn preflight_rejects_identical_outputs() {
-        let planned = [pb("x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        let planned = [po("x_trimmed.fq.gz"), po("x_trimmed.fq.gz")];
         let err = preflight_output_collisions(&planned, &[], None)
             .unwrap_err()
             .to_string();
@@ -1061,7 +1143,7 @@ mod tests {
     /// in case cannot coexist on APFS.
     #[test]
     fn preflight_rejects_case_only_variants() {
-        let planned = [pb("Sample_trimmed.fq.gz"), pb("SAMPLE_trimmed.fq.gz")];
+        let planned = [po("Sample_trimmed.fq.gz"), po("SAMPLE_trimmed.fq.gz")];
         let err = preflight_output_collisions(&planned, &[], None)
             .unwrap_err()
             .to_string();
@@ -1075,7 +1157,7 @@ mod tests {
     /// one file, so the reported bug survived its own fix.
     #[test]
     fn preflight_rejects_dot_slash_alias() {
-        let planned = [pb("./x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        let planned = [po("./x_trimmed.fq.gz"), po("x_trimmed.fq.gz")];
         let err = preflight_output_collisions(&planned, &[], None)
             .unwrap_err()
             .to_string();
@@ -1089,7 +1171,10 @@ mod tests {
     #[test]
     fn preflight_rejects_absolute_versus_relative_alias() {
         let abs = std::env::current_dir().unwrap().join("x_trimmed.fq.gz");
-        let planned = [abs, pb("x_trimmed.fq.gz")];
+        let planned = [
+            (abs, OutputSource::Input(pb("src_abs"))),
+            po("x_trimmed.fq.gz"),
+        ];
         let err = preflight_output_collisions(&planned, &[], None)
             .unwrap_err()
             .to_string();
@@ -1099,11 +1184,36 @@ mod tests {
         );
     }
 
+    /// #397 shape 2c — two candidates from ONE input. "Rename one input" cannot be
+    /// followed here, so this branch supplies its own advice and ignores the
+    /// call-site hint, exactly as the output-vs-input branch already does.
+    #[test]
+    fn preflight_same_source_collision_replaces_the_advice() {
+        let planned = [
+            po_from("d/x.fq", "d/x.fq_report.txt"),
+            po_from("d/x.fq", "d/x.fq_report.txt"),
+        ];
+        let err = preflight_output_collisions(&planned, &[], Some("EXTRA-HINT."))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("would be written to the same file"),
+            "got: {err}"
+        );
+        assert!(err.contains("List each input once"), "got: {err}");
+        assert!(
+            !err.contains("EXTRA-HINT.") && !err.contains("different source directories"),
+            "2c supplies its own advice and must not carry the hint: {err}"
+        );
+        // The one source is named, and the path appears once, not twice.
+        assert!(err.contains("d/x.fq"), "got: {err}");
+    }
+
     /// REGRESSION (#383). An output that would overwrite an input gets its own
     /// message: "same file" is untrue here and its remedies do not apply.
     #[test]
     fn preflight_rejects_output_that_aliases_an_input() {
-        let planned = [pb("s_trimmed.fq.gz")];
+        let planned = [po("s_trimmed.fq.gz")];
         let inputs = [pb("s.fastq.gz"), pb("s_trimmed.fq.gz")];
         let err = preflight_output_collisions(&planned, &inputs, None)
             .unwrap_err()
@@ -1121,7 +1231,7 @@ mod tests {
     /// The alias check is keyed the same way, so a `./` spelling still catches it.
     #[test]
     fn preflight_rejects_input_alias_across_spellings() {
-        let planned = [pb("./s_trimmed.fq.gz")];
+        let planned = [po("./s_trimmed.fq.gz")];
         let inputs = [pb("s_trimmed.fq.gz")];
         assert!(preflight_output_collisions(&planned, &inputs, None).is_err());
     }
@@ -1131,7 +1241,7 @@ mod tests {
     /// reported bug reproducing through its own fix.
     #[test]
     fn preflight_rejects_dotdot_alias() {
-        let planned = [pb("a/../x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        let planned = [po("a/../x_trimmed.fq.gz"), po("x_trimmed.fq.gz")];
         assert!(preflight_output_collisions(&planned, &[], None).is_err());
     }
 
@@ -1139,13 +1249,19 @@ mod tests {
     /// differing only below a kept `..` stay distinct.
     #[test]
     fn preflight_keeps_unfoldable_paths_distinct() {
-        let planned = [pb("../x_trimmed.fq.gz"), pb("../y_trimmed.fq.gz")];
+        let planned = [po("../x_trimmed.fq.gz"), po("../y_trimmed.fq.gz")];
         assert!(preflight_output_collisions(&planned, &[], None).is_ok());
     }
 
     #[test]
     fn preflight_appends_hint_only_when_given() {
-        let planned = [pb("x_trimmed.fq.gz"), pb("x_trimmed.fq.gz")];
+        // Two *different* inputs racing for one path — shape 2a, which is where the
+        // hint applies. Shape 2c (one input, two candidates) deliberately carries
+        // neither hint nor generic advice; pinned separately below.
+        let planned = [
+            po_from("srcA.fq", "x_trimmed.fq.gz"),
+            po_from("srcB.fq", "x_trimmed.fq.gz"),
+        ];
         let with = preflight_output_collisions(&planned, &[], Some("EXTRA-HINT."))
             .unwrap_err()
             .to_string();
