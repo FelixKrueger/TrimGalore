@@ -83,7 +83,7 @@ Typical uses:
 - `--preserve-tags CB,UB` — 10X cell / UMI barcodes for single-cell
 - `--preserve-tags RG,LB,BC` — read-group and library metadata
 
-FASTQ input silently ignores `--preserve-tags` (there are no source tags to carry).
+FASTQ input has no source tags to carry, so `--preserve-tags` does nothing there — and it is not silent: on its own it warns, and combined with `--output-format ubam` it is a hard error (the flag was asked for explicitly, so there is no pressure-valve for the otherwise-invisible no-op).
 
 ### Feature compatibility
 
