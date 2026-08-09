@@ -881,12 +881,7 @@ fn write_one_record(path: &Path, header: &str, seq: &str) {
 }
 
 fn run_capturing_stderr(cwd: &Path, args: &[&str]) -> String {
-    let out = Command::new(binary())
-        .current_dir(cwd)
-        .args(args)
-        .output()
-        .expect("failed to run trim_galore");
-    String::from_utf8_lossy(&out.stderr).to_string()
+    run_in(cwd, args).1
 }
 
 /// #406 — FASTQ→uBAM must name its own direction. The old shared message said
@@ -994,6 +989,17 @@ fn run_in(cwd: &Path, args: &[&str]) -> (bool, String) {
     )
 }
 
+/// Every filename in `dir`, sorted — for asserting a refusal wrote nothing at all
+/// rather than merely not writing one expected name.
+fn dir_listing(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("output dir unreadable")
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    names.sort();
+    names
+}
+
 /// #408 — FASTQ input cannot represent the annotation in a BAM read name, so the
 /// combination is refused before anything is written.
 #[test]
@@ -1020,17 +1026,52 @@ fn rename_into_ubam_refused_for_fastq_input() {
         "--rename + uBAM output + FASTQ input must exit non-zero"
     );
     assert!(
-        err.contains("--rename cannot be honoured") && err.contains("--output-format ubam"),
+        err.contains("--rename is refused") && err.contains("--output-format ubam"),
         "expected the #408 refusal in stderr:\n{err}"
     );
+    // The whole listing, not one filename: the refusal precedes every writer, so
+    // the trimming reports must be absent too.
+    assert_eq!(
+        dir_listing(&dir),
+        vec!["sp.fastq".to_string()],
+        "a refused run must write nothing"
+    );
+}
+
+/// #408 — `--rename` alone appends nothing (`append_to_id` is reached only under a
+/// clip flag), so refusing it would break wrappers that pass the flag
+/// unconditionally.
+#[test]
+fn rename_without_clip_flag_is_accepted_into_ubam() {
+    let dir = fresh_tmpdir("tg_408_no_clip_accepted");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(&dir, &["--rename", "--output-format", "ubam", "sp.fastq"]);
     assert!(
-        !dir.join("sp_trimmed.bam").exists(),
-        "the refusal must precede every writer; sp_trimmed.bam was created"
+        ok,
+        "--rename with no clip flag is a no-op, not an error:\n{err}"
+    );
+    assert!(
+        dir.join("sp_trimmed.bam").exists(),
+        "the run should have produced sp_trimmed.bam"
+    );
+    let tuples = bam_tuples(&dir.join("sp_trimmed.bam"));
+    let name = String::from_utf8_lossy(&tuples.first().expect("no records").0).to_string();
+    assert!(
+        !name.contains(":clip5:") && !name.contains(":clip3:"),
+        "nothing should have been appended; got {name}"
     );
 }
 
 /// #408 — the gate must not become blanket: uBAM in is lossless by SAM spec
 /// (read names carry no description), so the annotation lands on the QNAME.
+///
+/// Complements `ubam_out_rename_with_preserve_tags_keeps_tags_intact`, which runs
+/// the same invocation to assert the mirror property — that the annotation did
+/// *not* land inside the last preserved tag. Neither is redundant.
 #[test]
 fn rename_into_ubam_accepted_for_ubam_input() {
     let dir = fresh_tmpdir("tg_408_ubam_accepted");
@@ -1115,8 +1156,40 @@ fn rename_into_ubam_refused_for_hardtrim_fastq_input() {
     );
     assert!(!ok, "the hardtrim path must be refused too");
     assert!(
-        err.contains("--rename cannot be honoured"),
+        err.contains("--rename is refused"),
         "expected the #408 refusal on the hardtrim path:\n{err}"
+    );
+    assert_eq!(
+        dir_listing(&dir),
+        vec!["sp.fastq".to_string()],
+        "the specialty arm must also write nothing"
+    );
+}
+
+/// #408 — `--hardtrim3` is a separate `append_to_id` site from `--hardtrim5`.
+#[test]
+fn rename_into_ubam_refused_for_hardtrim3_fastq_input() {
+    let dir = fresh_tmpdir("tg_408_hardtrim3_refused");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(
+        &dir,
+        &[
+            "--hardtrim3",
+            "20",
+            "--rename",
+            "--output-format",
+            "ubam",
+            "sp.fastq",
+        ],
+    );
+    assert!(!ok, "the hardtrim3 path must be refused too");
+    assert!(
+        err.contains("--rename is refused"),
+        "expected the #408 refusal on the hardtrim3 path:\n{err}"
     );
 }
 
@@ -1146,7 +1219,40 @@ fn clump_only_rename_keeps_its_own_message() {
         "expected the --clump_only message:\n{err}"
     );
     assert!(
-        !err.contains("--rename cannot be honoured"),
+        !err.contains("--rename is refused"),
         "the #408 guard must not pre-empt the mode-specific message:\n{err}"
+    );
+}
+
+/// #408 — the guard sits after the two structural pair checks, so a broken pair
+/// reports its own defect rather than a lecture about `:clip5:` representability.
+#[test]
+fn paired_single_fastq_keeps_its_structural_message() {
+    let dir = fresh_tmpdir("tg_408_paired_single_fastq");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(
+        &dir,
+        &[
+            "--paired",
+            "--rename",
+            "--clip_R1",
+            "3",
+            "--output-format",
+            "ubam",
+            "sp.fastq",
+        ],
+    );
+    assert!(!ok, "--paired with one FASTQ must be refused");
+    assert!(
+        err.contains("--paired with a single input file"),
+        "expected the structural message, not the #408 one:\n{err}"
+    );
+    assert!(
+        !err.contains("--rename is refused"),
+        "the #408 guard must not pre-empt the structural check:\n{err}"
     );
 }

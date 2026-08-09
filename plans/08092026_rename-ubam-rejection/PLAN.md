@@ -144,6 +144,36 @@ Implemented as specified. Surface: `CHANGELOG.md` +18, `docs/…/guide/outputs.m
 - **#2** The by-name grep for the five new tests appeared to show `rename_into_ubam_accepted_for_ubam_input` missing. It had in fact run — the test binary's own stdout interleaved on the line, breaking the `^test` anchor. Re-ran with `-- --exact`: 1 passed, 32 filtered out. A grep artefact, not a missing test.
 - **#3** `cargo clippy … | tail` reported success with `CLIPPY EXIT=` empty — `${PIPESTATUS[0]}` is bash, and zsh silently yielded nothing. Re-ran unpiped: exit 0, but in **0.18 s** with no mention of the edited target, i.e. a cache hit. Injected a deliberate `unused_variable` into the new test block; clippy flagged it at `:1001`, proving the target *is* linted. Removed the probe, re-ran with `-D warnings` (cache now invalid, 2.90 s, recompiled): exit 0, zero warnings.
 
+## Code-review round (2026-08-09, `3f1b0fe` → reviewed → revised)
+
+Dual independent reviewers, reports at `CODE_REVIEW_A.md` / `CODE_REVIEW_B.md`. Both APPROVE; neither found a Critical or High. Both verified the executable change independently — A via a `git archive` control build and a standalone Python BGZF parser, B via an isolated `CARGO_TARGET_DIR` plus an injected-warning control proving clippy could fail. No factual contradiction between them; the one divergence was severity on the pre-emption finding (A Medium, B Low).
+
+**Acted on, all of it (Felix's call):**
+
+| Finding | Change |
+|---|---|
+| A-L1 / B-L-1 — the gate pre-empted two better structural messages | Relocated to just after `reject_bam_format_mismatch_in_pair`. `--paired`-with-one-FASTQ and mixed-pair now report their own defect, including #363's deliberate "check for a mis-typed filename" hint. Verified by hand and pinned by `paired_single_fastq_keeps_its_structural_message`. The `#363` comment's "this is the last point before `ensure_output_dir`" was made accurate ("ahead of"), since it no longer is |
+| A-M1 / B-M-1 — the message's headline asserted impossibility where the annotation demonstrably survives, contradicting its own next sentence | Reframed as a format-level refusal that states its own granularity and why it is coarse (a per-record decision would leave a partial BAM). Mirrored in the docs |
+| A-L2(b) / B-M-1(2) — **`--rename` with no clip flag was refused although it is a pure no-op** | Gate narrowed with a clip-flag conjunct. Enumerated every `--rename`-driven `append_to_id` site before writing it — `trimmer.rs:264/273` under `clip_5`/`clip_3`, `specialty.rs:62/106/166/219` under hardtrim — so the list is complete and cannot let a lossy run through. `--clock`/`--implicon` append unconditionally, not via `--rename`, and are rejected with uBAM at validate time. New test `rename_without_clip_flag_is_accepted_into_ubam` |
+| B-L-6 — **my CHANGELOG claim "`--basename` — a flag the guide did not document at all" was false** | Corrected: it had no dedicated section in `guide/outputs.md`, but is documented at `modes/clump-only.md:79` and `modes/passthrough.md:28`. The "output filename stem" misquote fixed to "input filename stem in the output names" |
+| B-L-3 — the new `--basename` paragraph overclaimed | Now a table incl. the uBAM forms (`BASE_trimmed.bam`, `BASE_val.bam` — verified at `io.rs:286-295`), plus the two limits B confirmed by running: reports keep input-derived names, and specialty modes ignore the flag entirely (`grep -c basename src/specialty.rs` → 0) |
+| B-L-4 — "Annotating read IDs" named one incompatibility of two | `--clump_only`'s refusal added |
+| A-D4 / B-L-5 — the compatibility bullet was the only multi-sentence entry, and its siting note was redundant with the preamble the same commit rewrote | Trimmed to one clause, cross-linked to the fuller section |
+| A-D5 — `--rename`'s `--help` was silent on the restriction | Two clauses added, matching `--preserve-tags`' precedent |
+| A-T1 / A-T2 — "nothing written" asserted via one filename | Both refusal arms now assert the whole directory listing via a new `dir_listing` helper. Verified by hand that an absent `-o` dir is not created either |
+| A — `--hardtrim3` claimed in the CHANGELOG, untested | `rename_into_ubam_refused_for_hardtrim3_fastq_input` added |
+| A-S1 — two near-identical uBAM-acceptance tests | Cross-referenced so neither reads as redundant. The C1 guard itself still untouched |
+| B-L-2 — `run_in` duplicated `run_capturing_stderr` | The latter now delegates to the former; its five existing callers unchanged |
+
+**Deferred to follow-up issues, not this change:**
+
+- **B-M-2** — A5 ("BAM read names cannot carry whitespace") is a spec property, not one this code enforces. B built a spec-violating uBAM with samtools and confirmed exit 0 with the annotation *and* the preserved `CB` tag silently dropped, on the arm this gate admits. Pre-existing and unchanged here — B confirmed the behaviour is identical with and without the commit — but it is the one hole in the assumption the gate rests on. A one-line whitespace `bail!` in `bam_record_to_fastq` would make A5 true of the code for every mode.
+- Carrying the annotation as a BAM aux tag, which both plan reviewers expected the refusal to invite.
+
+**Plan inaccuracy B caught, no code effect:** the "six call sites in `specialty.rs`" count includes the `--clock`/`--implicon` pairs, which are unconditional rather than `--rename`-driven. The `--rename`-gated specialty sites number four.
+
+**Verification after the revision:** `cargo test` **578 passed / 0 failed** (570 baseline + 8 new tests); fmt clean; `clippy --all-targets --release -D warnings` exit 0. All eight new tests plus the untouched C1 guard confirmed individually by exact name.
+
 ## Self-Review (r2)
 
 - **What r1 got wrong, owned:** it deferred A2's grep and A2 was false — the assumption I explicitly flagged as unverified was the one that broke the patch, for the second time this session. It mis-framed a spec guarantee as luck, which is what made the blanket scope look free. Its remediation advice named `samtools import`, which reproduces the loss. And it called the loss "silent" one merge after we shipped the notice that reports it — regressing #406's own principle in the changelog entry directly below it.
