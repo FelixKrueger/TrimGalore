@@ -8,7 +8,7 @@
 //! the entire scalar DP fill is wasted work. To recover that cost
 //! without giving up byte-identity, the public entry-point
 //! [`find_3prime_adapter`] runs a Myers' bit-parallel prefilter first
-//! ([`myers_proves_no_match`]). The prefilter is *conservative*: it
+//! (`myers_proves_no_match`, private). The prefilter is *conservative*: it
 //! only short-circuits when its O(n) bit-vector walk can rigorously
 //! prove that **no** match exists, considering both the full-adapter
 //! case (last DP row) and the partial-overlap case (last DP column).
