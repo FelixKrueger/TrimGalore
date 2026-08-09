@@ -341,7 +341,7 @@ fn main() -> Result<()> {
     //
     // Sited here for the same reason as the `--phred64` guard above: the
     // decision needs `input_formats`, which `Cli::validate()` cannot see. The
-    // position matters beyond that, though — this is the last point before
+    // position matters beyond that, though — this is ahead of
     // `ensure_output_dir` (below), the three output-collision pre-flights, and
     // every dispatch branch. The three guards this replaces all sat *past* that
     // line: the trim-path one fired only after adapter auto-detection had
@@ -371,6 +371,36 @@ fn main() -> Result<()> {
             (false, false) => PairedShape::Trim,
         };
         reject_bam_format_mismatch_in_pair(&cli.input, &input_formats, shape)?;
+    }
+
+    // #408 — format-gated, so it cannot live in `Cli::validate()`; sited after the
+    // two structural pair checks above so those report their own defect first. The
+    // clip-flag list must match every `--rename`-driven `append_to_id` site
+    // (`trimmer.rs` clip_5/clip_3, `specialty.rs` hardtrim) — without one of them
+    // set, `--rename` appends nothing and there is nothing to lose.
+    if cli.rename
+        && matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam)
+        && (cli.clip_r1.is_some()
+            || cli.clip_r2.is_some()
+            || cli.three_prime_clip_r1.is_some()
+            || cli.three_prime_clip_r2.is_some()
+            || cli.hardtrim5.is_some()
+            || cli.hardtrim3.is_some())
+        && input_formats
+            .iter()
+            .any(|f| !matches!(f, InputFormat::UnalignedBam))
+    {
+        anyhow::bail!(
+            "--rename is refused with --output-format ubam when any input is FASTQ. \
+             Whether the annotation can be represented depends on the individual \
+             header: the :clip5:/:clip3: suffix is appended to the end of the read ID, \
+             so a header carrying text after the first space puts the annotation inside \
+             that text, and BAM read names cannot contain whitespace, so none of that \
+             tail reaches the output. The whole run is refused rather than decided per \
+             record, because a mid-stream refusal would leave a partial BAM behind. Use \
+             FASTQ output, or drop --rename. uBAM input is unaffected: BAM read names \
+             carry no description, so there the annotation lands on the name itself."
+        );
     }
 
     // Output gzip mode. Mirror Perl: by default the output's compression

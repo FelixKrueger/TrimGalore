@@ -1026,8 +1026,7 @@ fn emit_iupac_warning_write_once() {
 
 /// One-time disclosure that a FASTQ header description was not carried into uBAM
 /// output. Echoes the text actually dropped, because what is lost varies: an
-/// instrument identifier, an Illumina index field, or — see #408 — `--rename`'s
-/// own `:clip5:` annotation.
+/// instrument identifier, or an Illumina `1:N:0:INDEX` field.
 fn emit_description_dropped_once(dropped: &str) {
     static SEEN: OnceLock<()> = OnceLock::new();
     SEEN.get_or_init(|| {

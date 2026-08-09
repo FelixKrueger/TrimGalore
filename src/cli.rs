@@ -299,6 +299,8 @@ pub struct Cli {
 
     /// Add clipped sequences to read IDs for --clip_R1/R2, --three_prime_clip_R1/R2, and --hardtrim5/3.
     /// Appends :clip5:SEQ and/or :clip3:SEQ to the read ID (each half only when that side was clipped). Useful for UMI handling.
+    /// Refused with --output-format ubam when any input is FASTQ, because a BAM read name cannot hold the
+    /// annotation once the header carries a description; also refused by --clump_only, which does not mutate IDs.
     #[clap(long = "rename")]
     pub rename: bool,
 
