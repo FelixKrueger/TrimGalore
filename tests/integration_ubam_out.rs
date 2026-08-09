@@ -978,3 +978,175 @@ fn plain_header_does_not_trigger_the_notice() {
         "a header with no description must not fire the notice:\n{err}"
     );
 }
+
+// ── #408: --rename into uBAM, gated on input format ───────────────────────
+
+/// Run in `cwd`, returning exit-success and stderr.
+fn run_in(cwd: &Path, args: &[&str]) -> (bool, String) {
+    let out = Command::new(binary())
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("failed to run trim_galore");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+/// #408 — FASTQ input cannot represent the annotation in a BAM read name, so the
+/// combination is refused before anything is written.
+#[test]
+fn rename_into_ubam_refused_for_fastq_input() {
+    let dir = fresh_tmpdir("tg_408_fastq_refused");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(
+        &dir,
+        &[
+            "--rename",
+            "--clip_R1",
+            "3",
+            "--output-format",
+            "ubam",
+            "sp.fastq",
+        ],
+    );
+    assert!(
+        !ok,
+        "--rename + uBAM output + FASTQ input must exit non-zero"
+    );
+    assert!(
+        err.contains("--rename cannot be honoured") && err.contains("--output-format ubam"),
+        "expected the #408 refusal in stderr:\n{err}"
+    );
+    assert!(
+        !dir.join("sp_trimmed.bam").exists(),
+        "the refusal must precede every writer; sp_trimmed.bam was created"
+    );
+}
+
+/// #408 — the gate must not become blanket: uBAM in is lossless by SAM spec
+/// (read names carry no description), so the annotation lands on the QNAME.
+#[test]
+fn rename_into_ubam_accepted_for_ubam_input() {
+    let dir = fresh_tmpdir("tg_408_ubam_accepted");
+    let output = Command::new(binary())
+        .args([
+            "--clip_R1",
+            "5",
+            "--rename",
+            "--output-format",
+            "ubam",
+            "--preserve-tags",
+            "CB,UB",
+        ])
+        .arg("test_files/ubam_test_with_tags.bam")
+        .arg("-o")
+        .arg(&dir)
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        output.status.success(),
+        "uBAM input must still be accepted:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let tuples = bam_tuples(&dir.join("ubam_test_with_tags_trimmed.bam"));
+    let first = tuples.first().expect("expected at least one record");
+    let name = String::from_utf8_lossy(&first.0);
+    assert!(
+        name.contains(":clip5:"),
+        "the annotation must reach the QNAME on the uBAM path; got {name}"
+    );
+    assert!(
+        first.4.iter().any(|(tag, _)| tag.as_slice() == b"UB"),
+        "preserved aux tags must survive alongside the annotation"
+    );
+}
+
+/// #408 — no over-reach: FASTQ output keeps its Perl-matching ID format, which
+/// appends after the header description rather than splicing into the name.
+#[test]
+fn rename_with_fastq_output_still_annotates_the_id() {
+    let dir = fresh_tmpdir("tg_408_fastq_out");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(&dir, &["--rename", "--clip_R1", "3", "sp.fastq"]);
+    assert!(
+        ok,
+        "FASTQ output must be untouched by the #408 guard:\n{err}"
+    );
+
+    let out = std::fs::read_to_string(dir.join("sp_trimmed.fq")).expect("trimmed FASTQ missing");
+    let id = out.lines().next().expect("empty output");
+    assert_eq!(
+        id, "@withspace 1:N:0:ACGTAC:clip5:ACG",
+        "the FASTQ-path ID format must not change"
+    );
+}
+
+/// #408 — `--hardtrim5` reaches `append_to_id` via specialty.rs and loses the
+/// annotation the same way, so the same guard must cover it.
+#[test]
+fn rename_into_ubam_refused_for_hardtrim_fastq_input() {
+    let dir = fresh_tmpdir("tg_408_hardtrim_refused");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(
+        &dir,
+        &[
+            "--hardtrim5",
+            "20",
+            "--rename",
+            "--output-format",
+            "ubam",
+            "sp.fastq",
+        ],
+    );
+    assert!(!ok, "the hardtrim path must be refused too");
+    assert!(
+        err.contains("--rename cannot be honoured"),
+        "expected the #408 refusal on the hardtrim path:\n{err}"
+    );
+}
+
+/// #408 — the guard sits behind `Cli::validate()`, so `--clump_only` keeps its
+/// own mode-specific message instead of being pre-empted by a mechanical one.
+#[test]
+fn clump_only_rename_keeps_its_own_message() {
+    let dir = fresh_tmpdir("tg_408_clump_only_msg");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--rename",
+            "--output-format",
+            "ubam",
+            "sp.fastq",
+        ],
+    );
+    assert!(!ok, "--clump_only --rename must still be refused");
+    assert!(
+        err.contains("byte-identically"),
+        "expected the --clump_only message:\n{err}"
+    );
+    assert!(
+        !err.contains("--rename cannot be honoured"),
+        "the #408 guard must not pre-empt the mode-specific message:\n{err}"
+    );
+}

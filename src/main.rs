@@ -313,6 +313,24 @@ fn main() -> Result<()> {
              The flag is ignored for FASTQ input."
         );
     }
+    // #408 — sited here rather than in `Cli::validate()` §3.4a because the rule is
+    // format-gated, and validate() cannot see `input_formats`. Same reason as §3.4b.
+    if cli.rename
+        && matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam)
+        && input_formats
+            .iter()
+            .any(|f| !matches!(f, InputFormat::UnalignedBam))
+    {
+        anyhow::bail!(
+            "--rename cannot be honoured with --output-format ubam when any input is \
+             FASTQ. The :clip5:/:clip3: annotation is appended to the end of the read \
+             ID, so whenever a FASTQ header carries text after the first space the \
+             annotation lands in that text — and BAM read names cannot contain \
+             whitespace, so none of that tail can be represented in the output. Use \
+             FASTQ output, or drop --rename. uBAM input is unaffected: BAM read names \
+             carry no description, so there the annotation lands on the name itself."
+        );
+    }
     if cli.passthrough.is_some() && any_bam {
         anyhow::bail!(
             "--passthrough is not supported with uBAM input in this release. \

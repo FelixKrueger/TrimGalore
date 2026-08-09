@@ -87,7 +87,7 @@ FASTQ input has no source tags to carry, so `--preserve-tags` does nothing there
 
 ### Feature compatibility
 
-Most FASTQ-shaped features work with uBAM output. Rejected at CLI-validate time (v1 scope):
+Most FASTQ-shaped features work with uBAM output. Rejected at startup, before anything is written (v1 scope):
 
 - `--dont_gzip` — gzip flag is FASTQ-output-specific; uBAM is BGZF-framed unconditionally
 - `--clock`, `--implicon` — specialty modes encode UMI in the FASTQ header, which can't round-trip through the BAM record
@@ -95,14 +95,19 @@ Most FASTQ-shaped features work with uBAM output. Rejected at CLI-validate time 
 - `--passthrough` — carrier FASTQ shape is FASTQ-specific
 - `--retain_unpaired` — would produce singleton BAMs; not in v1
 - `--clumpify` — in-place reorder is FASTQ-shape-specific (note: `--clump_only --output-format ubam` **is** supported — see [Clump-only](/modes/clump-only/))
+- `--rename` — **only when at least one input is FASTQ.** The `:clip5:`/`:clip3:` annotation is appended to the end of the read ID, so a FASTQ header carrying text after the first space puts the annotation inside that text — and BAM read names cannot contain whitespace, so none of that tail survives. uBAM input is accepted: BAM read names carry no description, so the annotation lands on the name itself. This one is checked after input-format detection rather than at CLI-validate time, because the rule depends on the format
 
 ## Output directory
 
 `--output_dir DIR` writes outputs to `DIR/` instead of the current working directory. The trimmed FASTQ filename stem is unchanged; only the parent directory differs.
 
-## Renaming outputs
+## Custom output basename
 
-`--rename PREFIX` replaces the input filename stem in the output names. Useful for pipelines that thread sample IDs through trimming separately from input filenames.
+`--basename BASE` replaces the input filename stem in the output names — `BASE_trimmed.fq.gz` for single-end, `BASE_val_1.fq.gz` / `BASE_val_2.fq.gz` for paired-end. Useful for pipelines that thread sample IDs through trimming separately from input filenames. Only valid for one file (single-end) or one pair (paired-end); longer input lists are refused, because the output naming would be ambiguous.
+
+## Annotating read IDs
+
+`--rename` does not affect filenames. It is a boolean that appends `:clip5:SEQ` and/or `:clip3:SEQ` to the **read IDs**, recording the bases removed by `--clip_R1/R2`, `--three_prime_clip_R1/R2` or `--hardtrim5/3` — each half only when that side was clipped. Commonly used to keep UMIs recoverable downstream. Not available with `--output-format ubam` when any input is FASTQ (see [Feature compatibility](#feature-compatibility) above).
 
 ## FastQC
 

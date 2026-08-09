@@ -5,6 +5,24 @@
 
 #### Bug fixes
 
+- **`--rename` was neutralised by `--output-format ubam` on FASTQ input, with no
+  flag-specific diagnostic**
+  ([#408](https://github.com/FelixKrueger/TrimGalore/issues/408)). `--rename`
+  appends `:clip5:SEQ`/`:clip3:SEQ` to the end of the read ID. When a FASTQ header
+  carries text after the first space the annotation lands inside that text — and
+  BAM read names cannot contain whitespace, so the whole tail was discarded and
+  the explicitly-requested annotation went with it. The combination is now refused
+  when at least one input is FASTQ, including on the `--hardtrim5`/`--hardtrim3`
+  paths, which reach the same annotation code via `specialty.rs`. **uBAM input is
+  unaffected and keeps working**: BAM read names carry no description by spec, so
+  there the annotation lands on the name itself and preserved aux tags round-trip
+  intact. The header-description notice added for #406 did report the dropped
+  text, but a user who passed `--rename` had no reason to connect a general note
+  about header descriptions to their own annotation being gone. The output guide
+  is corrected alongside: it described `--rename` as `--rename PREFIX` replacing
+  the output filename stem, which is `--basename` — a flag the guide did not
+  document at all.
+
 - **`--output-format ubam` no longer destroys an input named like a trimming
   report** ([#409](https://github.com/FelixKrueger/TrimGalore/issues/409)).
   `trim_galore --output-format ubam sample.fastq sample.fastq_trimming_report.txt`
