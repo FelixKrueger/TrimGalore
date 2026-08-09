@@ -1,3 +1,7 @@
+//! Trim Galore's library target exists so the binary and the integration tests can
+//! reach internals. Its surface is an implementation detail and carries no semver
+//! guarantee: modules are `pub` for reachability, not as a published API (#402).
+
 pub mod adapter;
 pub mod alignment;
 pub mod bam;

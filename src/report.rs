@@ -30,7 +30,7 @@ pub struct TrimStats {
     pub too_many_n: usize,
     /// Reads written to output
     pub reads_written: usize,
-    /// Per-adapter length distributions: adapter_length_counts[adapter_idx][match_len] = count
+    /// Per-adapter length distributions: `adapter_length_counts[adapter_idx][match_len]` = count
     pub adapter_length_counts: Vec<Vec<usize>>,
     /// RRBS: reads trimmed 2bp from 3' end (adapter contamination at MspI site)
     pub rrbs_trimmed_3prime: usize,
