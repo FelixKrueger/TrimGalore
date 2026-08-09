@@ -714,7 +714,11 @@ fn parse_name_and_data(id: &str) -> Result<(Vec<u8>, Data)> {
             // Tab: rest is the aux tag tail (from BamReader::next_record).
             (name_str, Some(rest))
         } else {
-            // Space: rest is descriptive FASTQ annotation — discard.
+            // Space: rest is descriptive FASTQ annotation — discard. Gated on
+            // non-empty: a trailing space drops nothing (#406).
+            if !rest.is_empty() {
+                emit_description_dropped_once(rest);
+            }
             (name_str, None)
         }
     } else {
@@ -794,7 +798,7 @@ fn parse_tag_value(type_code: u8, raw: &str) -> Result<BufValue> {
 
 /// Validate + normalise a FASTQ-side sequence for BAM writing, per PLAN
 /// §3.3 step 3. Coerces lowercase to uppercase, IUPAC degenerate bases
-/// (R/Y/M/K/S/W/B/D/H/V) to N (warning emitted once), and rejects `=`
+/// (R/Y/M/K/S/W/B/D/H/V) to N (write-side warning emitted once), and rejects `=`
 /// plus any non-IUPAC byte. Symmetric with the read-side
 /// `bam_record_to_fastq` validation.
 fn validate_and_normalize_seq_for_write(seq: &[u8]) -> Result<Vec<u8>> {
@@ -820,7 +824,7 @@ fn validate_and_normalize_seq_for_write(seq: &[u8]) -> Result<Vec<u8>> {
         }
     }
     if iupac_seen {
-        emit_iupac_warning_once();
+        emit_iupac_warning_write_once();
     }
     Ok(out)
 }
@@ -862,7 +866,7 @@ pub fn peek_header(path: &Path) -> Result<Header> {
 /// - Must be unmapped (`is_unmapped()` true; per-record check resolves
 ///   PLAN-REVIEW B-Crit-4 first-record-only contradiction).
 /// - Must NOT be reverse-complemented / secondary / supplementary.
-/// - Sequence must be non-empty; IUPAC codes coerced to N, `=` rejected.
+/// - Sequence must be non-empty; IUPAC codes coerced to N on read, `=` rejected.
 /// - Qual length must match seq length (or be all-`0xFF` / empty — missing).
 fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord> {
     let flags = rec.flags();
@@ -941,7 +945,7 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
         }
     }
     if iupac_seen {
-        emit_iupac_warning_once();
+        emit_iupac_warning_read_once();
     }
 
     // Qual — raw Phred (0–93) + 33 → Sanger ASCII. Missing qual (BAM convention:
@@ -992,13 +996,50 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
     Ok(FastqRecord { id, seq, qual })
 }
 
-fn emit_iupac_warning_once() {
+/// Read-side IUPAC coercion (uBAM in). Output-neutral on purpose: this fires for
+/// uBAM→FASTQ and uBAM→uBAM alike, so it names where the coercion happens rather
+/// than a destination that may not exist (#406).
+fn emit_iupac_warning_read_once() {
     static SEEN: OnceLock<()> = OnceLock::new();
     SEEN.get_or_init(|| {
         eprintln!(
             "WARNING: input uBAM contains IUPAC degenerate bases (R/Y/M/K/S/W/B/D/H/V); \
-             coerced to N for FASTQ output. This is legitimate in PacBio HiFi, \
-             ONT Dorado, and 10x cellranger uBAMs."
+             coerced to N on read. This is legitimate in PacBio HiFi, ONT Dorado, \
+             and 10x cellranger uBAMs."
+        );
+    });
+}
+
+/// Write-side IUPAC coercion (FASTQ in, uBAM out). Guarded separately from the
+/// read side so a mixed FASTQ+uBAM run reports both, rather than whichever
+/// direction happened to come first (#406).
+fn emit_iupac_warning_write_once() {
+    static SEEN: OnceLock<()> = OnceLock::new();
+    SEEN.get_or_init(|| {
+        eprintln!(
+            "WARNING: input FASTQ contains IUPAC degenerate bases (R/Y/M/K/S/W/B/D/H/V); \
+             coerced to N in the uBAM output. This is legitimate in PacBio HiFi, \
+             ONT Dorado, and 10x cellranger data."
+        );
+    });
+}
+
+/// One-time disclosure that a FASTQ header description was not carried into uBAM
+/// output. Echoes the text actually dropped, because what is lost varies: an
+/// instrument identifier, an Illumina index field, or — see #408 — `--rename`'s
+/// own `:clip5:` annotation.
+fn emit_description_dropped_once(dropped: &str) {
+    static SEEN: OnceLock<()> = OnceLock::new();
+    SEEN.get_or_init(|| {
+        let shown: String = if dropped.chars().count() > 60 {
+            format!("{}…", dropped.chars().take(60).collect::<String>())
+        } else {
+            dropped.to_string()
+        };
+        eprintln!(
+            "NOTE: BAM read names cannot contain whitespace, so FASTQ header text after \
+             the first space is not carried into uBAM output. First dropped: \"{}\"",
+            shown
         );
     });
 }
