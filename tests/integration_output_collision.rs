@@ -1368,3 +1368,65 @@ fn clump_paired_bam_rejects_report_that_aliases_an_input() {
     );
     assert_dir_holds_only(&dir, &["x.fq", "y.fq", "x.fq_clumping_report.txt", "z.fq"]);
 }
+
+// ── SE uBAM-output trim: reports join the pre-flight (#409) ───────────────
+
+/// #409 — the uBAM twin of `se_trim_rejects_output_that_aliases_a_report_input`.
+/// Before the fix this run overwrote input 2 with input 1's trimming report and
+/// only then failed reading it, so the error blamed the input for not being
+/// FASTQ when the run had just made that true.
+#[test]
+fn se_trim_ubam_rejects_output_that_aliases_a_report_input() {
+    let dir = tempdir("409_ubam_alias_report");
+    write_fastq(&dir.join("sample.fastq"), "SRC");
+    write_fastq(&dir.join("sample.fastq_trimming_report.txt"), "REPORTY");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--output-format",
+            "ubam",
+            "sample.fastq",
+            "sample.fastq_trimming_report.txt",
+        ],
+    );
+    assert!(!ok, "expected rejection:\n{stderr}");
+    assert!(
+        stderr.contains(ALIAS_MSG),
+        "expected alias wording:\n{stderr}"
+    );
+    // The data-loss assertion: the victim must still hold its own reads.
+    assert_eq!(
+        count_reads_from(&dir.join("sample.fastq_trimming_report.txt"), "REPORTY"),
+        40,
+        "input 2 was overwritten — this is the #409 data loss"
+    );
+    assert_dir_holds_only(&dir, &["sample.fastq", "sample.fastq_trimming_report.txt"]);
+}
+
+/// Acceptance sibling: with reports off, nothing collides and the run proceeds.
+#[test]
+fn se_trim_ubam_accepts_report_alias_with_no_report_file() {
+    let dir = tempdir("409_ubam_alias_ok");
+    write_fastq(&dir.join("sample.fastq"), "SRC");
+    write_fastq(&dir.join("sample.fastq_trimming_report.txt"), "REPORTY");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--output-format",
+            "ubam",
+            "--no_report_file",
+            "sample.fastq",
+            "sample.fastq_trimming_report.txt",
+        ],
+    );
+    assert!(ok, "expected success:\n{stderr}");
+    assert_eq!(
+        count_reads_from(&dir.join("sample.fastq_trimming_report.txt"), "REPORTY"),
+        40
+    );
+    assert!(dir.join("sample_trimmed.bam").is_file());
+    assert!(
+        dir.join("sample.fastq_trimming_report_trimmed.bam")
+            .is_file()
+    );
+}

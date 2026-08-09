@@ -5,6 +5,18 @@
 
 #### Bug fixes
 
+- **`--output-format ubam` no longer destroys an input named like a trimming
+  report** ([#409](https://github.com/FelixKrueger/TrimGalore/issues/409)).
+  `trim_galore --output-format ubam sample.fastq sample.fastq_trimming_report.txt`
+  overwrote input 2 with input 1's trimming report and only then failed reading
+  it — so the error ("not recognised as FASTQ") described damage the run had just
+  caused, and gave the user no hint their file was gone. The single-end uBAM
+  arm's collision pre-flight planned only the primary `.bam` outputs; the two
+  trimming reports it also writes never entered the candidate list, so the
+  output-vs-input check could not see them. The single-end FASTQ path was never
+  affected — it routes secondaries through the same helper the pre-flight reads.
+  Fifth instance of the family behind #383, #385, #388 and #391.
+
 - **`--clump_only --paired` no longer silently overwrites one mate's clumping
   report with the other's**
   ([#391](https://github.com/FelixKrueger/TrimGalore/issues/391)). Primaries

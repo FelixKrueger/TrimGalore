@@ -1978,11 +1978,19 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
 
     // Single-end loop.
     // #383 — same hole as the FASTQ SE loop.
-    let planned: Vec<std::path::PathBuf> = cli
+    let mut planned: Vec<std::path::PathBuf> = cli
         .input
         .iter()
         .map(|input| naming::single_end_bam_output_name(input, output_dir, cli.basename.as_deref()))
         .collect();
+    // #409 — run_ubam_output_single writes both trimming reports too; without them
+    // an input named like one is overwritten before it is read.
+    if !cli.no_report_file {
+        for input in &cli.input {
+            planned.push(naming::report_name(input, output_dir));
+            planned.push(naming::json_report_name(input, output_dir));
+        }
+    }
     naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
     for (i, input) in cli.input.iter().enumerate() {
         if i > 0 {
