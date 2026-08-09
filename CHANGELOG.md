@@ -178,6 +178,21 @@
 
 #### Changes
 
+- **Output-collision refusals now name the inputs you have to change**
+  ([#397](https://github.com/FelixKrueger/TrimGalore/issues/397)). The pre-flight
+  compared prospective output paths without recording which input each was named
+  from, so a report collision printed the same path twice — `out/reads.fq_trimming_report.txt
+  and out/reads.fq_trimming_report.txt would be written to the same file` — and then
+  advised "rename one input" without being able to say which. Refusals now carry
+  that provenance: two inputs racing for one path name both, aliased spellings show
+  both paths *and* both sources, and an output that would clobber an input names the
+  input its output was derived from. One case gains genuinely new advice: where a
+  single file supplies two colliding candidates (a file passed as a mate of two
+  different pairs, which validation permits), "rename one input" was impossible to
+  follow, so that branch now says to list each input once. Which runs are accepted
+  or refused is unchanged.
+
+
 - **`--preserve-tags`' help no longer says "ignored" for a case that aborts**
   ([#407](https://github.com/FelixKrueger/TrimGalore/issues/407)). With all-FASTQ
   inputs it is a warning, but combined with `--output-format ubam` it is a hard

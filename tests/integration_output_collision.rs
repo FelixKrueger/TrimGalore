@@ -874,9 +874,41 @@ fn paired_rejects_same_filename_r1_r2_into_shared_output_dir() {
         stderr.contains(DUP_MSG),
         "expected collision wording:\n{stderr}"
     );
+    // #397 — the message must name BOTH inputs the user has to choose between.
+    // Before provenance it printed the colliding path twice and named neither.
+    assert!(
+        stderr.contains("A/reads.fq") && stderr.contains("B/reads.fq"),
+        "the refusal must name both source inputs:\n{stderr}"
+    );
     assert!(
         std::fs::read_dir(&out).unwrap().next().is_none(),
         "a refused run must write nothing"
+    );
+}
+
+/// #397 — one file passed as a mate of two different pairs. `validate` permits it
+/// (only exact duplicate pairs are rejected), and the old message told the user to
+/// "rename one input", which cannot be done for a file colliding with itself.
+#[test]
+fn paired_one_file_in_two_pairs_gets_followable_advice() {
+    let dir = tempdir("397_same_source");
+    write_fastq(&dir.join("A.fq"), "A");
+    write_fastq(&dir.join("B.fq"), "B");
+    write_fastq(&dir.join("C.fq"), "C");
+    let (ok, stderr) = run_in(&dir, &["--paired", "A.fq", "B.fq", "B.fq", "C.fq"]);
+    assert!(!ok, "expected rejection:\n{stderr}");
+    assert!(stderr.contains(DUP_MSG), "got:\n{stderr}");
+    assert!(
+        stderr.contains("two outputs named from") && stderr.contains("B.fq"),
+        "must attribute both candidates to the one input:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("List each input once"),
+        "must give advice that can actually be followed:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("rename one input"),
+        "the unfollowable advice must be gone:\n{stderr}"
     );
 }
 
