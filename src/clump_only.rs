@@ -871,7 +871,7 @@ struct PairedInputSetup {
 ///   error, matching the trim uBAM path at `main.rs:1502-1514`).
 ///
 /// Output is ONE interleaved BAM (`<stem>_clumped.bam`) with records written
-/// mate-adjacent (R1[i], R2[i], R1[i+1], R2[i+1], …) per samtools/Picard/fgbio
+/// mate-adjacent (`R1[i]`, `R2[i]`, `R1[i+1]`, `R2[i+1]`, …) per samtools/Picard/fgbio
 /// convention. Pair lockstep is preserved by construction (single call to
 /// `sort_paired_by_key`).
 ///

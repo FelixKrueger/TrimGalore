@@ -142,6 +142,15 @@
 
 #### Changes
 
+- **`--preserve-tags`' help no longer says "ignored" for a case that aborts**
+  ([#407](https://github.com/FelixKrueger/TrimGalore/issues/407)). With all-FASTQ
+  inputs it is a warning, but combined with `--output-format ubam` it is a hard
+  error — the help said only "Ignored for FASTQ input", giving no reason to expect
+  the run to stop. Also, `--hardtrim5/3`'s help now shows the output-suffix
+  placeholder in backticks (`` `.<N>bp_5prime.fq(.gz)` ``), matching the
+  convention the rest of the help text already uses.
+
+
 - **`--clump_only`'s `--help` text no longer contradicts the shipped uBAM
   support** ([#400](https://github.com/FelixKrueger/TrimGalore/issues/400)). The
   block predated the uBAM arms and still listed `--output-format ubam` among the
@@ -229,8 +238,14 @@
   duplicate-pair check, the duplicate-input check and the `--passthrough` alias
   check all compared paths more weakly than the collision pre-flight did, so
   `trim_galore --paired ./a_R1.fq a_R1.fq` exited 0 and wrote two byte-identical
-  files labelled as a validated R1/R2 pair. All four now use the same key as the
-  pre-flight.
+  files labelled as a validated R1/R2 pair. All four now normalise paths the same
+  way as the pre-flight, so any two spellings of one file are caught. They do not
+  all use the *same* key: the pre-flight compares output paths case-insensitively
+  (`collision_key`), because outputs differing only in case alias each other on
+  APFS/NTFS, while the three input-identity checks preserve case
+  (`path_identity_key`), because on a case-sensitive filesystem `X` and `x` are
+  two real files and folding them would reject valid input. `--passthrough` asks
+  both questions and uses both keys.
 
 - **Case-folded paths are treated as colliding**, which is what makes the
   APFS/NTFS guard work. On an opt-in case-sensitive volume two genuinely distinct
