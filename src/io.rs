@@ -81,6 +81,29 @@ pub fn collision_key(p: &Path) -> String {
     norm_path(&lexical_normalise(p))
 }
 
+/// Set this to any value to make [`preflight_output_collisions`] print the candidate
+/// list it is about to check. Test hook for `tests/integration_preflight_tripwire.rs`,
+/// which asserts that every file a run creates was in that list (#414).
+pub const DUMP_PLANNED_ENV: &str = "TRIM_GALORE_DUMP_PLANNED_OUTPUTS";
+
+/// Line prefix for one dumped candidate.
+pub const DUMP_PLANNED_PREFIX: &str = "TRIM_GALORE_PLANNED\t";
+
+/// Render the dump lines for one candidate list, tagged with the call site.
+///
+/// `site` identifies which of the dispatch arms built this list, so a tripwire failure
+/// can name the candidate list to add to. Pure, so it is testable without touching the
+/// environment.
+///
+/// A path containing a newline would split across lines and defeat the parse; none can
+/// occur in the fixtures, and `display()` is lossy for non-UTF-8 paths either way.
+pub fn dump_planned_lines(planned: &[PlannedOutput], site: &str) -> Vec<String> {
+    planned
+        .iter()
+        .map(|(path, _)| format!("{}{}\t{}", DUMP_PLANNED_PREFIX, site, path.display()))
+        .collect()
+}
+
 /// The directory every output of a paired run lands in: `--output_dir` when given,
 /// else R1's parent.
 ///
@@ -145,11 +168,21 @@ pub type PlannedOutput = (PathBuf, OutputSource);
 /// user has to change (#397). Note what the tuple does and does not buy: it makes an
 /// *unattributed* candidate impossible, but it cannot detect a *missing* one — which is
 /// what #383, #385, #388, #391 and #409 all were.
+/// `#[track_caller]` so the dump can name which dispatch arm built the list.
+#[track_caller]
 pub fn preflight_output_collisions(
     planned: &[PlannedOutput],
     inputs: &[PathBuf],
     hint: Option<&str>,
 ) -> Result<()> {
+    if std::env::var_os(DUMP_PLANNED_ENV).is_some() {
+        let at = std::panic::Location::caller();
+        let site = format!("{}:{}", at.file(), at.line());
+        for line in dump_planned_lines(planned, &site) {
+            eprintln!("{line}");
+        }
+    }
+
     let input_keys: std::collections::HashMap<String, &PathBuf> =
         inputs.iter().map(|p| (collision_key(p), p)).collect();
     let mut seen: std::collections::HashMap<String, PlannedOutput> =
@@ -933,6 +966,41 @@ mod tests {
         );
         // The `.` fallback is reachable only for a root path, which has no parent.
         assert_eq!(pair_output_dir(Path::new("/"), None), PathBuf::from("."));
+    }
+
+    // ── dump_planned_lines (#414) ─────────────────────────────────────────
+
+    /// The pure renderer, tested without touching the environment: `env::set_var` is
+    /// `unsafe` under edition 2024 and would leak into sibling threads under
+    /// `cargo test --release`. The env gate is driven end-to-end from
+    /// `tests/integration_preflight_tripwire.rs` instead.
+    #[test]
+    fn dump_planned_lines_renders_one_line_per_candidate() {
+        let planned: Vec<PlannedOutput> = vec![
+            (
+                PathBuf::from("out/a_trimmed.fq"),
+                OutputSource::Input(PathBuf::from("a.fastq")),
+            ),
+            (
+                PathBuf::from("out/a.fastq_trimming_report.txt"),
+                OutputSource::Input(PathBuf::from("a.fastq")),
+            ),
+        ];
+        let lines = dump_planned_lines(&planned, "src/main.rs:1006");
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[0],
+            "TRIM_GALORE_PLANNED\tsrc/main.rs:1006\tout/a_trimmed.fq"
+        );
+        // The site is repeated on every line so the parse needs no state.
+        for line in &lines {
+            assert!(line.starts_with(DUMP_PLANNED_PREFIX));
+            assert_eq!(line.matches('\t').count(), 2);
+        }
+        // An empty list dumps nothing, so a run that plans nothing is distinguishable
+        // from one that never reached a pre-flight.
+        assert!(dump_planned_lines(&[], "src/main.rs:1").is_empty());
     }
 
     // ── clumped_output_name / clumped_paired_output_names / clumping_report_name ──
