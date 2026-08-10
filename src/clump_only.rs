@@ -532,8 +532,10 @@ pub fn clump_only_paired(
     // Per-mate reports (mirrors --clumpify's per-input report convention).
     // Skipped when the caller passed --no_report_file.
     if !no_report_file {
-        let r1_report = naming::clumping_report_name(input_r1, output_dir);
-        let r2_report = naming::clumping_report_name(input_r2, output_dir);
+        // Both reports land where the primaries do; each keeps its own filename (#398).
+        let pair_dir = naming::pair_output_dir(input_r1, output_dir);
+        let r1_report = naming::clumping_report_name(input_r1, Some(&pair_dir));
+        let r2_report = naming::clumping_report_name(input_r2, Some(&pair_dir));
         let r1_stats = ClumpOnlyStats {
             input_bytes: in_bytes_r1,
             output_bytes: out_bytes_r1,
@@ -1081,7 +1083,10 @@ pub fn clump_only_paired_to_bam_one_pair(
     // or Shape B interleaved) input's stem.
     if !no_report_file {
         let report_input = &inputs[0];
-        let report_path = naming::clumping_report_name(report_input, output_dir);
+        // Keyed on the first input already, so this moves nothing; routed through
+        // `pair_output_dir` so every paired report site derives alike (#398).
+        let pair_dir = naming::pair_output_dir(report_input, output_dir);
+        let report_path = naming::clumping_report_name(report_input, Some(&pair_dir));
         write_clump_only_report(&stats, &report_path, report_input, &output_path)
             .with_context(|| format!("Failed to write report: {}", report_path.display()))?;
     }

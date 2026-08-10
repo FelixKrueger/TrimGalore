@@ -3,6 +3,38 @@
 
 ### Unreleased
 
+#### Changes
+
+- **A paired run now writes every output to one directory**
+  ([#398](https://github.com/FelixKrueger/TrimGalore/issues/398)). Without
+  `--output_dir`, the validated FASTQs already went to Read 1's directory, but each
+  trimming report went beside *its own* mate and `--passthrough`'s carrier output
+  went beside the carrier input — so one pair could scatter across three
+  directories. Reports and the carrier now follow the primaries into Read 1's
+  directory. Filenames are unchanged: each report keeps its own input-derived name,
+  so `*_trimming_report.txt` globs and MultiQC still match. This restores the
+  one-directory-per-run behaviour of v0.6.11, which stripped the input's directory
+  and wrote everything to `--output_dir` — though the anchor differs, since Perl's
+  default was the working directory rather than Read 1's.
+
+  **This refuses some invocations that previously ran.** Output names derive from
+  the input filename alone, so two inputs sharing a filename now resolve to the same
+  report path once co-located, and the run stops before writing anything. The layout
+  this affects is reads split by mate rather than by sample —
+  `--paired R1/s1.fq R2/s1.fq R1/s2.fq R2/s2.fq` — where the *whole* invocation is
+  refused, not just the offending pair. Pass `--output_dir` to collect the outputs
+  somewhere unambiguous; `--no_report_file` also clears it but discards the reports.
+  The per-sample layout (`sampleA/reads_1.fq sampleA/reads_2.fq sampleB/…`) is
+  unaffected, because each pair's Read 1 already sits in its own directory.
+
+  One refusal disappears in the other direction: a single file used as the mate of
+  two pairs whose Read 1s live in different directories no longer collides, because
+  its two reports now resolve into those two directories. That run previously failed
+  and now succeeds; nothing is overwritten.
+
+  Also corrected: the output guide stated that without `--output_dir` files go to
+  the current working directory, which was true only of the specialty modes.
+
 #### Bug fixes
 
 - **`--rename` was neutralised by `--output-format ubam` on FASTQ input, with no
