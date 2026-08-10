@@ -81,6 +81,19 @@ pub fn collision_key(p: &Path) -> String {
     norm_path(&lexical_normalise(p))
 }
 
+/// The directory every output of a paired run lands in: `--output_dir` when given,
+/// else R1's parent.
+///
+/// One derivation for primaries, reports and the `--passthrough` carrier alike (#398).
+/// `parent()` yields `Some("")` for a bare filename, so joined paths stay bare and the
+/// `"."` arm is reachable only for a root path — returning `"."` here would prefix every
+/// path, and every message naming one, with `./`.
+pub fn pair_output_dir(input_r1: &Path, output_dir: Option<&Path>) -> PathBuf {
+    output_dir
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf())
+}
+
 /// Remediation offered when nothing mode-specific applies.
 const GENERIC_ADVICE: &str = "Check that inputs produce distinct output paths \
                               (e.g., different source directories or `--output_dir`).";
@@ -293,9 +306,7 @@ pub fn paired_bam_output_name(
         .unwrap_or_else(|| strip_fastq_extensions(input_r1));
     let filename = format!("{}_val.bam", stem);
 
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = pair_output_dir(input_r1, output_dir);
 
     dir.join(&filename)
 }
@@ -334,9 +345,7 @@ pub fn paired_end_output_names(
     let f1 = format!("{}_val_1{}", stem1, ext);
     let f2 = format!("{}_val_2{}", stem2, ext);
 
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = pair_output_dir(input_r1, output_dir);
 
     (dir.join(&f1), dir.join(&f2))
 }
@@ -365,9 +374,7 @@ pub fn unpaired_output_names(
     let f1 = format!("{}_unpaired_1{}", stem1, ext);
     let f2 = format!("{}_unpaired_2{}", stem2, ext);
 
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = pair_output_dir(input_r1, output_dir);
 
     (dir.join(&f1), dir.join(&f2))
 }
@@ -384,7 +391,11 @@ pub fn unpaired_output_names(
 /// compression in `main.rs`), not the passthrough input's own extension —
 /// output compression is uniform across the three pair outputs, see plan
 /// v2 §Assumptions §11.
+///
+/// The directory comes from `pair_output_dir`, not from the carrier's own parent:
+/// the carrier is one of the pair's three outputs and lands with the other two (#398).
 pub fn passthrough_output_name(
+    input_r1: &Path,
     input_passthrough: &Path,
     output_dir: Option<&Path>,
     basename: Option<&str>,
@@ -401,12 +412,7 @@ pub fn passthrough_output_name(
     };
     let filename = format!("{}{}", stem, ext);
 
-    let dir = output_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| {
-        input_passthrough
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf()
-    });
+    let dir = pair_output_dir(input_r1, output_dir);
     dir.join(&filename)
 }
 
@@ -470,9 +476,7 @@ pub fn clumped_paired_output_names(
     let f1 = format!("{}_clumped_1{}", stem1, ext);
     let f2 = format!("{}_clumped_2{}", stem2, ext);
 
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = pair_output_dir(input_r1, output_dir);
 
     (dir.join(&f1), dir.join(&f2))
 }
@@ -519,9 +523,7 @@ pub fn clumped_paired_bam_output_name(
         .unwrap_or_else(|| strip_fastq_extensions(input_r1));
     let filename = format!("{}_clumped.bam", stem);
 
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input_r1.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = pair_output_dir(input_r1, output_dir);
 
     dir.join(&filename)
 }
@@ -850,53 +852,87 @@ mod tests {
 
     // ── passthrough_output_name (plan v2 Step 2) ──────────────────────────
 
+    /// #398 — stem from the carrier, directory from R1. R1 is deliberately in a
+    /// different directory here; a carrier-anchored implementation passes only when
+    /// the two happen to coincide.
     #[test]
-    fn test_passthrough_output_name_bare() {
+    fn test_passthrough_output_name_takes_r1s_directory() {
+        let r1 = Path::new("/reads/R1.fq.gz");
         let pt = Path::new("/data/I1.fq.gz");
-        let out = passthrough_output_name(pt, None, None, true);
-        assert_eq!(out, PathBuf::from("/data/I1_passthrough.fq.gz"));
+        let out = passthrough_output_name(r1, pt, None, None, true);
+        assert_eq!(out, PathBuf::from("/reads/I1_passthrough.fq.gz"));
     }
 
     #[test]
     fn test_passthrough_output_name_plain() {
+        let r1 = Path::new("/reads/R1.fq.gz");
         let pt = Path::new("/data/I1.fq.gz");
-        let out = passthrough_output_name(pt, None, None, false);
-        assert_eq!(out, PathBuf::from("/data/I1_passthrough.fq"));
+        let out = passthrough_output_name(r1, pt, None, None, false);
+        assert_eq!(out, PathBuf::from("/reads/I1_passthrough.fq"));
     }
 
     #[test]
     fn test_passthrough_output_name_with_output_dir() {
+        let r1 = Path::new("/reads/R1.fq.gz");
         let pt = Path::new("/in/I1.fq.gz");
-        let out = passthrough_output_name(pt, Some(Path::new("/out")), None, true);
+        let out = passthrough_output_name(r1, pt, Some(Path::new("/out")), None, true);
         assert_eq!(out, PathBuf::from("/out/I1_passthrough.fq.gz"));
     }
 
     #[test]
     fn test_passthrough_output_name_with_basename() {
+        let r1 = Path::new("/reads/R1.fq.gz");
         let pt = Path::new("/data/I1.fq.gz");
-        let out = passthrough_output_name(pt, None, Some("foo"), true);
-        assert_eq!(out, PathBuf::from("/data/foo_passthrough.fq.gz"));
+        let out = passthrough_output_name(r1, pt, None, Some("foo"), true);
+        assert_eq!(out, PathBuf::from("/reads/foo_passthrough.fq.gz"));
     }
 
     #[test]
     fn test_passthrough_output_name_basename_with_output_dir() {
+        let r1 = Path::new("/reads/R1.fq.gz");
         let pt = Path::new("/in/I1.fq.gz");
-        let out = passthrough_output_name(pt, Some(Path::new("/out")), Some("foo"), true);
+        let out = passthrough_output_name(r1, pt, Some(Path::new("/out")), Some("foo"), true);
         assert_eq!(out, PathBuf::from("/out/foo_passthrough.fq.gz"));
     }
 
     #[test]
     fn test_passthrough_output_name_all_extensions() {
         // Every FASTQ extension Trim Galore recognises strips cleanly.
+        let r1 = Path::new("/d/R1.fq.gz");
         for (input, expected) in [
             ("/d/s.fastq.gz", "/d/s_passthrough.fq.gz"),
             ("/d/s.fq.gz", "/d/s_passthrough.fq.gz"),
             ("/d/s.fastq", "/d/s_passthrough.fq.gz"),
             ("/d/s.fq", "/d/s_passthrough.fq.gz"),
         ] {
-            let out = passthrough_output_name(Path::new(input), None, None, true);
+            let out = passthrough_output_name(r1, Path::new(input), None, None, true);
             assert_eq!(out, PathBuf::from(expected), "input={input}");
         }
+    }
+
+    // ── pair_output_dir (#398) ────────────────────────────────────────────
+
+    #[test]
+    fn test_pair_output_dir_precedence_and_edges() {
+        // --output_dir wins over R1's parent.
+        assert_eq!(
+            pair_output_dir(Path::new("/reads/R1.fq"), Some(Path::new("/out"))),
+            PathBuf::from("/out")
+        );
+        // Otherwise R1's parent.
+        assert_eq!(
+            pair_output_dir(Path::new("/reads/R1.fq"), None),
+            PathBuf::from("/reads")
+        );
+        // A bare filename has an EMPTY parent, not `.`, so joined paths stay bare —
+        // returning `.` here would prefix every path and message with `./`.
+        assert_eq!(pair_output_dir(Path::new("R1.fq"), None), PathBuf::from(""));
+        assert_eq!(
+            pair_output_dir(Path::new("R1.fq"), None).join("R1.fq_trimming_report.txt"),
+            PathBuf::from("R1.fq_trimming_report.txt")
+        );
+        // The `.` fallback is reachable only for a root path, which has no parent.
+        assert_eq!(pair_output_dir(Path::new("/"), None), PathBuf::from("."));
     }
 
     // ── clumped_output_name / clumped_paired_output_names / clumping_report_name ──

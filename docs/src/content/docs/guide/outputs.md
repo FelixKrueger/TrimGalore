@@ -3,7 +3,7 @@ title: Output files
 description: Naming conventions for trimmed FASTQ files and trimming reports.
 ---
 
-Trim Galore writes one trimmed FASTQ per input, plus a per-input text and JSON trimming report. File naming matches v0.6.x exactly, so existing pipelines continue to work without changes.
+Trim Galore writes one trimmed FASTQ per input, plus a per-input text and JSON trimming report. File naming matches v0.6.x exactly. Output *locations* match it too, with one exception: see [Output directory](#output-directory) for where a paired run's files land when `--output_dir` is not given.
 
 ## Single-end
 
@@ -23,6 +23,8 @@ Trim Galore writes one trimmed FASTQ per input, plus a per-input text and JSON t
 | `R2_val_2.fq.gz` | Validated Read 2. |
 | `R1.fastq.gz_trimming_report.txt` / `.json` | Read 1 report. |
 | `R2.fastq.gz_trimming_report.txt` / `.json` | Read 2 report. Carries the final pair counts. |
+
+All four land in the same directory — `--output_dir` if given, otherwise Read 1's. Each report keeps its own input-derived name; only the directory is shared. See [Output directory](#output-directory).
 
 ## Singleton (unpaired) reads
 
@@ -99,7 +101,23 @@ Most FASTQ-shaped features work with uBAM output. Rejected at startup, before an
 
 ## Output directory
 
-`--output_dir DIR` writes outputs to `DIR/` instead of the current working directory. The trimmed FASTQ filename stem is unchanged; only the parent directory differs.
+`--output_dir DIR` writes every output to `DIR/`. The filename stems are unchanged; only the parent directory differs.
+
+Without `--output_dir`, the trimming modes write beside the **input**: single-end output lands in that input's directory, and for a pair every output — both validated FASTQs, both trimming reports, and the `--passthrough` carrier — lands in **Read 1's** directory. The specialty modes (`--hardtrim5/3`, `--clock`, `--implicon`) are the exception: they always write to the current working directory.
+
+Because output names derive from the input filename alone, two inputs sharing a filename resolve to the same report path once they land in one directory, and the run is refused before anything is written. That affects the layout where reads are split by mate rather than by sample:
+
+```
+R1/sample1.fq  R1/sample2.fq      # refused without --output_dir:
+R2/sample1.fq  R2/sample2.fq      # sample1.fq's two reports collide in R1/
+```
+
+Pass `--output_dir` to collect the outputs somewhere unambiguous. The per-sample layout needs no change, because each pair's Read 1 already sits in its own directory:
+
+```
+sampleA/reads_1.fq  sampleA/reads_2.fq      # unaffected
+sampleB/reads_1.fq  sampleB/reads_2.fq
+```
 
 ## Custom output basename
 

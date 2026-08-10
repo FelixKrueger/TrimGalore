@@ -27,6 +27,8 @@ Output files:
 
 With `--basename foo` set, all three outputs use that basename uniformly: `foo_val_1.fq.gz`, `foo_val_2.fq.gz`, `foo_passthrough.fq.gz`.
 
+All of them, the passthrough output included, are written to `--output_dir` if given and otherwise to **Read 1's** directory — so a carrier file kept apart from the read pair still produces its output alongside them. See [Output files](/guide/outputs/#output-directory).
+
 ## How the sync check works
 
 Every record, Trim Galore extracts an ID prefix from R1, R2, and the passthrough read and compares them three-way. The prefix is *everything after the leading `@`, before the first whitespace, with a trailing `/1` / `/2` / `/3` stripped*. That covers both modern Illumina (`@HEADER 1:N:0:CGATCG` → prefix `HEADER`) and legacy SRA/ENA (`@read/1` `@read/2` `@read/3` → prefix `read`).

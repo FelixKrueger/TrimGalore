@@ -1026,19 +1026,23 @@ fn paired_report_candidates_do_not_over_reject() {
     assert!(dir2.join("sample.fq_trimming_report.txt").is_file());
     assert!(dir2.join("sample.fastq_trimming_report.txt").is_file());
 
-    // T1 minus -o: same filename in different dirs, reports beside their own
-    // inputs. Pins that the candidates honour output_dir = None; a builder
-    // that resolved reports into one directory would over-reject this.
-    let dir3 = tempdir("388_ok_no_odir");
+    // #398 — T1 minus -o is now REFUSED: both reports resolve into R1's directory,
+    // where their identical filenames collide. This block previously asserted the
+    // split layout; co-locating reports is now the specified behaviour. Do NOT
+    // narrow the candidate list to make it green again — that restores the old
+    // paths on the pre-flight side while the writers move. Its clump twin is
+    // `clump_report_candidates_reject_shared_filename_without_output_dir`.
+    let dir3 = tempdir("388_reject_no_odir");
     write_fastq(&dir3.join("A/reads.fq"), "N1");
     write_fastq(&dir3.join("B/reads.fq"), "N2");
     let (ok, stderr) = run_in(&dir3, &["--paired", "A/reads.fq", "B/reads.fq"]);
+    assert!(!ok, "co-located reports must be refused:\n{stderr}");
     assert!(
-        ok,
-        "same filename in two dirs without -o must run:\n{stderr}"
+        stderr.contains("reads.fq_trimming_report.txt"),
+        "the colliding path must be named:\n{stderr}"
     );
-    assert!(dir3.join("A/reads.fq_trimming_report.txt").is_file());
-    assert!(dir3.join("B/reads.fq_trimming_report.txt").is_file());
+    assert_dir_holds_only(&dir3.join("A"), &["reads.fq"]);
+    assert_dir_holds_only(&dir3.join("B"), &["reads.fq"]);
 }
 
 // ── --clump_only: clumping reports join the pre-flight (#391) ─────────────
@@ -1199,23 +1203,52 @@ fn clump_paired_rejects_fold_equal_report_names() {
     );
 }
 
-/// Over-rejection guard: same filename in two dirs WITHOUT -o is legal — both
-/// primaries land in R1's directory, each report beside its own mate. Pins that
-/// the candidates honour output_dir = None; a builder that resolved reports
-/// into one directory would over-reject this.
+/// #398 — same filename in two dirs WITHOUT `-o` is refused: both reports now
+/// resolve into R1's directory, where their identical filenames collide. The
+/// primaries were never the problem (`_clumped_1`/`_clumped_2` keep them apart).
+///
+/// This is the clump twin of `paired_report_candidates_do_not_over_reject`'s third
+/// block. Both were written to catch a builder that co-located reports; #398 makes
+/// co-location the specified behaviour, so both assert the refusal instead. If this
+/// goes red again, fix the writers or the candidates — do NOT narrow the candidate
+/// list, which would restore the split layout on one side only.
 #[test]
-fn clump_report_candidates_do_not_over_reject() {
-    let dir = tempdir("clump_ok_no_odir");
+fn clump_report_candidates_reject_shared_filename_without_output_dir() {
+    let dir = tempdir("clump_reject_no_odir");
     write_fastq(&dir.join("A/reads.fq"), "Q1");
     write_fastq(&dir.join("B/reads.fq"), "Q2");
     let (ok, stderr) = run_in(
         &dir,
         &["--clump_only", "--paired", "A/reads.fq", "B/reads.fq"],
     );
+    assert!(!ok, "co-located reports must be refused:\n{stderr}");
     assert!(
-        ok,
-        "same filename in two dirs without -o must run:\n{stderr}"
+        stderr.contains("reads.fq_clumping_report.txt"),
+        "the colliding path must be named:\n{stderr}"
     );
+    // Refused before any writer: both directories hold only their inputs.
+    assert_dir_holds_only(&dir.join("A"), &["reads.fq"]);
+    assert_dir_holds_only(&dir.join("B"), &["reads.fq"]);
+}
+
+/// #398 — the same pair with `--no_report_file` runs, because only the reports
+/// collided. Keeps the acceptance side of the guard alive.
+#[test]
+fn clump_shared_filename_without_output_dir_runs_without_reports() {
+    let dir = tempdir("clump_no_report_no_odir");
+    write_fastq(&dir.join("A/reads.fq"), "Q1");
+    write_fastq(&dir.join("B/reads.fq"), "Q2");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "--no_report_file",
+            "A/reads.fq",
+            "B/reads.fq",
+        ],
+    );
+    assert!(ok, "only the reports collided:\n{stderr}");
     assert_eq!(
         count_reads_from(&dir.join("A/reads_clumped_1.fq"), "Q1"),
         40
@@ -1226,25 +1259,21 @@ fn clump_report_candidates_do_not_over_reject() {
     );
     assert_dir_holds_only(
         &dir.join("A"),
-        &[
-            "reads.fq",
-            "reads_clumped_1.fq",
-            "reads_clumped_2.fq",
-            "reads.fq_clumping_report.txt",
-        ],
+        &["reads.fq", "reads_clumped_1.fq", "reads_clumped_2.fq"],
     );
-    assert_dir_holds_only(
-        &dir.join("B"),
-        &["reads.fq", "reads.fq_clumping_report.txt"],
-    );
+    assert_dir_holds_only(&dir.join("B"), &["reads.fq"]);
 }
 
-/// Case-free and no `-o`: one file as the mate of two pairs (validate permits
-/// this — only exact duplicate pairs are rejected). Reports collide in the
-/// shared mate's own directory while all four primaries stay distinct, so the
-/// rejection behaves identically on APFS and ext4.
+/// #398 — one file as the mate of two pairs, no `-o`. This was refused before
+/// #398, because both pairs' reports for the shared mate resolved to
+/// `d/x.fq_clumping_report.txt`. Each pair now anchors on its own R1, so the two
+/// reports land in `p/` and `q/` and all eight paths are distinct. Nothing is
+/// overwritten, so continuing to refuse would be over-rejection.
+///
+/// The refusal this replaces was added by #391; the flip is deliberate, not a
+/// weakened assertion.
 #[test]
-fn clump_paired_rejects_shared_mate_report_without_output_dir() {
+fn clump_paired_shared_mate_report_runs_when_pairs_anchor_apart() {
     let dir = tempdir("clump_mate");
     write_fastq(&dir.join("p/a.fq"), "M1");
     write_fastq(&dir.join("d/x.fq"), "MX");
@@ -1260,18 +1289,29 @@ fn clump_paired_rejects_shared_mate_report_without_output_dir() {
             "d/x.fq",
         ],
     );
-    assert!(!ok, "expected rejection:\n{stderr}");
-    assert!(
-        stderr.contains(DUP_MSG),
-        "expected duplicate wording:\n{stderr}"
+    assert!(ok, "eight distinct paths must not be refused:\n{stderr}");
+    // Pair 1 → p/, pair 2 → q/. The shared mate's own directory gains nothing.
+    assert_dir_holds_only(
+        &dir.join("p"),
+        &[
+            "a.fq",
+            "a_clumped_1.fq",
+            "x_clumped_2.fq",
+            "a.fq_clumping_report.txt",
+            "x.fq_clumping_report.txt",
+        ],
     );
-    assert!(
-        stderr.contains("x.fq_clumping_report.txt"),
-        "the colliding path must be the shared mate's report:\n{stderr}"
+    assert_dir_holds_only(
+        &dir.join("q"),
+        &[
+            "b.fq",
+            "b_clumped_1.fq",
+            "x_clumped_2.fq",
+            "b.fq_clumping_report.txt",
+            "x.fq_clumping_report.txt",
+        ],
     );
-    assert_dir_holds_only(&dir.join("p"), &["a.fq"]);
     assert_dir_holds_only(&dir.join("d"), &["x.fq"]);
-    assert_dir_holds_only(&dir.join("q"), &["b.fq"]);
 }
 
 /// `--basename foo` forces `foo_clumped_1`/`foo_clumped_2` primaries — distinct
@@ -1460,5 +1500,199 @@ fn se_trim_ubam_accepts_report_alias_with_no_report_file() {
     assert!(
         dir.join("sample.fastq_trimming_report_trimmed.bam")
             .is_file()
+    );
+}
+
+// ── #398: one output directory per pair ───────────────────────────────────
+
+/// The layout the change is for: mates in different directories, no `-o`. Every
+/// output — both primaries and both reports — lands in R1's directory.
+#[test]
+fn paired_reports_follow_the_primaries_into_r1s_directory() {
+    let dir = tempdir("398_unified");
+    write_fastq(&dir.join("A/r1.fq"), "U1");
+    write_fastq(&dir.join("B/r2.fq"), "U2");
+    let (ok, stderr) = run_in(&dir, &["--paired", "A/r1.fq", "B/r2.fq"]);
+    assert!(ok, "distinct filenames must still run:\n{stderr}");
+    assert_dir_holds_only(
+        &dir.join("A"),
+        &[
+            "r1.fq",
+            "r1_val_1.fq",
+            "r2_val_2.fq",
+            "r1.fq_trimming_report.txt",
+            "r1.fq_trimming_report.json",
+            "r2.fq_trimming_report.txt",
+            "r2.fq_trimming_report.json",
+        ],
+    );
+    assert_dir_holds_only(&dir.join("B"), &["r2.fq"]);
+}
+
+/// The mate-side directory layout (`R1/` and `R2/` rather than per-sample): the
+/// whole invocation is refused, not just the offending pair, because candidates
+/// for every chunk are collected before one pre-flight call.
+#[test]
+fn mate_side_directory_layout_refuses_the_whole_invocation() {
+    let dir = tempdir("398_mate_side");
+    write_fastq(&dir.join("R1/s1.fq"), "A1");
+    write_fastq(&dir.join("R2/s1.fq"), "A2");
+    write_fastq(&dir.join("R1/s2.fq"), "B1");
+    write_fastq(&dir.join("R2/s2.fq"), "B2");
+    let (ok, stderr) = run_in(
+        &dir,
+        &["--paired", "R1/s1.fq", "R2/s1.fq", "R1/s2.fq", "R2/s2.fq"],
+    );
+    assert!(!ok, "co-located reports must be refused:\n{stderr}");
+    // No pair ran: not even the first pair's primaries exist.
+    assert_dir_holds_only(&dir.join("R1"), &["s1.fq", "s2.fq"]);
+    assert_dir_holds_only(&dir.join("R2"), &["s1.fq", "s2.fq"]);
+}
+
+/// The per-sample layout is unaffected — each pair's R1 sits in its own directory,
+/// so nothing collides and each pair's outputs stay with it.
+#[test]
+fn per_sample_directory_layout_is_unaffected() {
+    let dir = tempdir("398_per_sample");
+    write_fastq(&dir.join("sA/reads_1.fq"), "S1");
+    write_fastq(&dir.join("sA/reads_2.fq"), "S2");
+    write_fastq(&dir.join("sB/reads_1.fq"), "T1");
+    write_fastq(&dir.join("sB/reads_2.fq"), "T2");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--paired",
+            "--no_report_file",
+            "sA/reads_1.fq",
+            "sA/reads_2.fq",
+            "sB/reads_1.fq",
+            "sB/reads_2.fq",
+        ],
+    );
+    assert!(ok, "per-sample layout must run:\n{stderr}");
+    // Each pair anchored on its OWN R1 — pair 2 did not land in sA/.
+    assert_eq!(count_reads_from(&dir.join("sA/reads_1_val_1.fq"), "S1"), 40);
+    assert_eq!(count_reads_from(&dir.join("sB/reads_1_val_1.fq"), "T1"), 40);
+    assert!(!dir.join("sA/reads_1_val_1.fq.1").exists());
+}
+
+/// #398 creates a new output-vs-**input** path: R2's report, relocated into R1's
+/// directory, can equal R1's own input. This is #409's shape on a new arm — if the
+/// candidate list had not moved with the writer, the run would destroy an input.
+#[test]
+fn paired_report_that_would_land_on_r1s_input_is_refused() {
+    let dir = tempdir("398_alias_input");
+    write_fastq(&dir.join("A/reads.fq_trimming_report.txt"), "VICTIM");
+    write_fastq(&dir.join("B/reads.fq"), "MATE");
+    let (ok, stderr) = run_in(
+        &dir,
+        &["--paired", "A/reads.fq_trimming_report.txt", "B/reads.fq"],
+    );
+    assert!(
+        !ok,
+        "a report landing on an input must be refused:\n{stderr}"
+    );
+    // The data-loss assertion: content, not just existence — a truncated file exists.
+    assert_eq!(
+        count_reads_from(&dir.join("A/reads.fq_trimming_report.txt"), "VICTIM"),
+        40,
+        "R1's input was overwritten — this is #409's shape on the paired arm"
+    );
+    assert_dir_holds_only(&dir.join("A"), &["reads.fq_trimming_report.txt"]);
+    assert_dir_holds_only(&dir.join("B"), &["reads.fq"]);
+}
+
+/// Acceptance sibling: with reports off there is no report to alias the input.
+#[test]
+fn paired_report_input_alias_accepted_with_no_report_file() {
+    let dir = tempdir("398_alias_ok");
+    write_fastq(&dir.join("A/reads.fq_trimming_report.txt"), "VICTIM");
+    write_fastq(&dir.join("B/reads.fq"), "MATE");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--paired",
+            "--no_report_file",
+            "A/reads.fq_trimming_report.txt",
+            "B/reads.fq",
+        ],
+    );
+    assert!(ok, "expected success:\n{stderr}");
+    assert_eq!(
+        count_reads_from(&dir.join("A/reads.fq_trimming_report.txt"), "VICTIM"),
+        40
+    );
+}
+
+/// The same output-vs-input hazard on the `--clump_only --paired` arm.
+#[test]
+fn clump_paired_report_that_would_land_on_r1s_input_is_refused() {
+    let dir = tempdir("398_clump_alias");
+    write_fastq(&dir.join("A/reads.fq_clumping_report.txt"), "VICTIM");
+    write_fastq(&dir.join("B/reads.fq"), "MATE");
+    let (ok, stderr) = run_in(
+        &dir,
+        &[
+            "--clump_only",
+            "--paired",
+            "A/reads.fq_clumping_report.txt",
+            "B/reads.fq",
+        ],
+    );
+    assert!(
+        !ok,
+        "a report landing on an input must be refused:\n{stderr}"
+    );
+    assert_eq!(
+        count_reads_from(&dir.join("A/reads.fq_clumping_report.txt"), "VICTIM"),
+        40,
+        "R1's input was overwritten"
+    );
+}
+
+/// The trim-mode twin of `clump_paired_shared_mate_report_runs_when_pairs_anchor_apart`,
+/// which had no test before #398 and would otherwise have flipped from refuse to
+/// succeed unobserved.
+#[test]
+fn paired_shared_mate_report_runs_when_pairs_anchor_apart() {
+    let dir = tempdir("398_trim_mate");
+    write_fastq(&dir.join("p/a.fq"), "M1");
+    write_fastq(&dir.join("d/x.fq"), "MX");
+    write_fastq(&dir.join("q/b.fq"), "M2");
+    let (ok, stderr) = run_in(&dir, &["--paired", "p/a.fq", "d/x.fq", "q/b.fq", "d/x.fq"]);
+    assert!(ok, "eight distinct paths must not be refused:\n{stderr}");
+    assert!(dir.join("p/a.fq_trimming_report.txt").is_file());
+    assert!(dir.join("p/x.fq_trimming_report.txt").is_file());
+    assert!(dir.join("q/b.fq_trimming_report.txt").is_file());
+    assert!(dir.join("q/x.fq_trimming_report.txt").is_file());
+    // The shared mate's own directory gains nothing.
+    assert_dir_holds_only(&dir.join("d"), &["x.fq"]);
+}
+
+/// A bare-filename R1 has an EMPTY parent, so paths stay bare. A `pair_output_dir`
+/// that returned `.` would prefix every path here with `./`.
+#[test]
+fn bare_filename_r1_keeps_paths_unprefixed() {
+    let dir = tempdir("398_bare");
+    write_fastq(&dir.join("r1.fq"), "Z1");
+    write_fastq(&dir.join("r2.fq"), "Z2");
+    let (ok, stderr) = run_in(&dir, &["--paired", "r1.fq", "r2.fq"]);
+    assert!(ok, "expected success:\n{stderr}");
+    assert!(
+        !stderr.contains("./r1.fq_trimming_report.txt"),
+        "paths must not gain a ./ prefix:\n{stderr}"
+    );
+    assert_dir_holds_only(
+        &dir,
+        &[
+            "r1.fq",
+            "r2.fq",
+            "r1_val_1.fq",
+            "r2_val_2.fq",
+            "r1.fq_trimming_report.txt",
+            "r1.fq_trimming_report.json",
+            "r2.fq_trimming_report.txt",
+            "r2.fq_trimming_report.json",
+        ],
     );
 }

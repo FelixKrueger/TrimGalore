@@ -34,9 +34,18 @@ fn fresh_tmpdir(slug: &str) -> PathBuf {
 /// the three paths. Uses plain `.fq` (no gzip) for test speed — the binary's
 /// gzip mode is decided per the R1 input extension, so plain in → plain out.
 fn write_fixture(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
-    let r1 = dir.join("r1.fq");
-    let r2 = dir.join("r2.fq");
-    let i1 = dir.join("i1.fq");
+    write_fixture_at(&dir.join("r1.fq"), &dir.join("r2.fq"), &dir.join("i1.fq"))
+}
+
+/// As `write_fixture`, but with the three paths given explicitly so they can live
+/// in different directories (#398).
+fn write_fixture_at(r1: &Path, r2: &Path, i1: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let (r1, r2, i1) = (r1.to_path_buf(), r2.to_path_buf(), i1.to_path_buf());
+    for p in [&r1, &r2, &i1] {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+    }
 
     // 30 records. Every 3rd has a short R1 (under length cutoff 20) so it
     // gets dropped — exercises both Pass and Discard branches and
@@ -199,6 +208,60 @@ fn passthrough_without_paired_rejected() {
     assert!(
         stderr.contains("--passthrough requires --paired"),
         "unexpected stderr: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #398 — the carrier is one of the pair's three outputs, so with no `--output_dir`
+/// it lands in R1's directory rather than beside its own input. The carrier lives in
+/// a third directory here; anchoring it on its own parent would put the output in
+/// `C/`, and the R2 report would name that path.
+#[test]
+fn passthrough_output_follows_r1s_directory() {
+    let dir = fresh_tmpdir("tg_pt_398_dir");
+    let (r1, r2, i1) = write_fixture_at(
+        &dir.join("A/r1.fq"),
+        &dir.join("A/r2.fq"),
+        &dir.join("C/i1.fq"),
+    );
+
+    let out = Command::new(binary())
+        .arg("--paired")
+        .arg("--passthrough")
+        .arg(&i1)
+        .arg(&r1)
+        .arg(&r2)
+        .output()
+        .expect("spawn trim_galore");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "expected success:\nstderr:\n{stderr}");
+
+    let in_r1_dir = dir.join("A/i1_passthrough.fq");
+    let beside_carrier = dir.join("C/i1_passthrough.fq");
+    assert!(
+        in_r1_dir.is_file(),
+        "carrier output should be in R1's directory\nstderr:\n{stderr}"
+    );
+    assert!(
+        !beside_carrier.exists(),
+        "carrier output must not be written beside its own input"
+    );
+    assert_eq!(
+        count_records(&in_r1_dir),
+        count_records(&dir.join("A/r1_val_1.fq"))
+    );
+
+    // The R2 report embeds the carrier's output path, so it moves too.
+    let r2_report_text =
+        std::fs::read_to_string(dir.join("A/r2.fq_trimming_report.txt")).unwrap_or_default();
+    assert!(
+        r2_report_text.contains("i1_passthrough.fq"),
+        "R2 report should name the carrier output:\n{r2_report_text}"
+    );
+    assert!(
+        !r2_report_text.contains("C/i1_passthrough.fq"),
+        "R2 report still names the old carrier-anchored path:\n{r2_report_text}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

@@ -54,12 +54,14 @@ type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, 
 
 /// Hint for the sites whose report names carry no positional discriminator:
 /// paired trim (FASTQ and uBAM out) and `--clump_only --paired` (#391).
-const PAIRED_REPORT_HINT: &str = "Outputs and reports are named from the input \
-                                  filename alone, so inputs sharing a filename can \
-                                  collide when --output_dir (or a shared input \
-                                  directory) sends them to one place — rename one \
-                                  input, or pass --no_report_file if only the \
-                                  reports collide.";
+const PAIRED_REPORT_HINT: &str = "Every output of a pair — validated reads, reports, \
+                                  and the --passthrough carrier — is written to \
+                                  --output_dir, or to Read 1's directory when that is \
+                                  not given. Names come from the input filename alone, \
+                                  so inputs sharing a filename collide wherever they \
+                                  live: rename one input, give the pairs distinct \
+                                  --output_dir runs, or pass --no_report_file if only \
+                                  the reports collide.";
 
 /// CWD-output modes' remediation; see `PAIRED_REPORT_HINT` for the paired sites.
 const CWD_OUTPUT_HINT: &str = "This mode writes output to the current working directory, \
@@ -613,10 +615,11 @@ fn main() -> Result<()> {
                             let src =
                                 naming::OutputSource::Pair(r1.to_path_buf(), r2.to_path_buf());
                             let mut v = vec![(o1, src.clone()), (o2, src)];
+                            let pair_dir = naming::pair_output_dir(r1, output_dir);
                             v.extend(clump_report_candidates(
                                 cli.no_report_file,
                                 &[r1, r2],
-                                output_dir,
+                                Some(&pair_dir),
                             ));
                             v
                         },
@@ -737,10 +740,13 @@ fn main() -> Result<()> {
                             ));
                             // #391 — ONE report per pair, keyed on the pair's first input
                             // (clump_only.rs writes clumping_report_name(inputs[0], …)).
+                            // Keyed on R1 already, so `pair_output_dir` moves nothing here;
+                            // routed through it so every paired site derives alike (#398).
+                            let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
                             planned.extend(clump_report_candidates(
                                 cli.no_report_file,
                                 std::slice::from_ref(&chunk[0]),
-                                output_dir,
+                                Some(&pair_dir),
                             ));
                         }
                         naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
@@ -871,9 +877,9 @@ fn main() -> Result<()> {
             );
             // Uniform Pair for paired primaries (#397 decision C2): _val_1 takes its
             // stem from R1 but its directory from R1 too, and _val_2 mixes both — naming
-            // one mate would encode a claim about which supplies the directory, which is
-            // exactly what #398 may change.
+            // one mate would encode a claim about which supplies the directory.
             let pair_src = naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone());
+            let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
             let mut candidates = vec![(o1, pair_src.clone()), (o2, pair_src.clone())];
             if cli.retain_unpaired {
                 let (u1, u2) = naming::unpaired_output_names(
@@ -893,6 +899,7 @@ fn main() -> Result<()> {
             if let Some(ref pt_input) = cli.passthrough {
                 candidates.push((
                     naming::passthrough_output_name(
+                        &chunk[0],
                         pt_input,
                         output_dir,
                         cli.basename.as_deref(),
@@ -903,11 +910,16 @@ fn main() -> Result<()> {
             }
             // #388 — report names carry no _val_ discriminator, so two inputs
             // with distinct primaries can still collide on reports.
+            //
+            // `Input`, not `Pair`, even though the directory now comes from R1 (#398):
+            // two distinct sources on one path select the message that says which two
+            // inputs collided, where `Pair` would select the "list each input once"
+            // text — wrong advice when renaming one input does fix it.
             if !cli.no_report_file {
                 for input in [&chunk[0], &chunk[1]] {
                     let src = naming::OutputSource::Input(input.clone());
-                    candidates.push((naming::report_name(input, output_dir), src.clone()));
-                    candidates.push((naming::json_report_name(input, output_dir), src));
+                    candidates.push((naming::report_name(input, Some(&pair_dir)), src.clone()));
+                    candidates.push((naming::json_report_name(input, Some(&pair_dir)), src));
                 }
             }
             planned.extend(candidates);
@@ -1496,8 +1508,8 @@ fn run_paired(
     // --passthrough wiring (plan v2 Step 8). Compute the third output path
     // when active and eprintln! it for visibility, matching the R1/R2 idiom.
     let passthrough_input: Option<&Path> = cli.passthrough.as_deref();
-    let passthrough_output: Option<std::path::PathBuf> =
-        passthrough_input.map(|pt| naming::passthrough_output_name(pt, output_dir, basename, gzip));
+    let passthrough_output: Option<std::path::PathBuf> = passthrough_input
+        .map(|pt| naming::passthrough_output_name(input_r1, pt, output_dir, basename, gzip));
     if let (Some(pt_in), Some(pt_out)) = (passthrough_input, passthrough_output.as_deref()) {
         eprintln!("  Passthrough: {} → {}", pt_in.display(), pt_out.display());
     }
@@ -1726,14 +1738,17 @@ fn run_paired(
             })
             .collect();
 
+        // Both mates' reports land where the primaries do (#398). Each keeps its own
+        // input-derived filename; only the directory is shared.
+        let pair_dir = naming::pair_output_dir(input_r1, output_dir);
         let r1 = PairedReportFile {
-            txt_path: naming::report_name(input_r1, output_dir),
-            json_path: naming::json_report_name(input_r1, output_dir),
+            txt_path: naming::report_name(input_r1, Some(&pair_dir)),
+            json_path: naming::json_report_name(input_r1, Some(&pair_dir)),
             input_filename: all_input_filenames[0].clone(),
         };
         let r2 = PairedReportFile {
-            txt_path: naming::report_name(input_r2, output_dir),
-            json_path: naming::json_report_name(input_r2, output_dir),
+            txt_path: naming::report_name(input_r2, Some(&pair_dir)),
+            json_path: naming::json_report_name(input_r2, Some(&pair_dir)),
             input_filename: all_input_filenames[1].clone(),
         };
 
@@ -2021,10 +2036,11 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
             ));
             // #388 — same report-collision hole as the FASTQ paired path.
             if !cli.no_report_file {
+                let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
                 for input in [&chunk[0], &chunk[1]] {
                     let src = naming::OutputSource::Input(input.clone());
-                    planned.push((naming::report_name(input, output_dir), src.clone()));
-                    planned.push((naming::json_report_name(input, output_dir), src));
+                    planned.push((naming::report_name(input, Some(&pair_dir)), src.clone()));
+                    planned.push((naming::json_report_name(input, Some(&pair_dir)), src));
                 }
             }
         }
@@ -2348,14 +2364,15 @@ fn run_ubam_output_paired_two_files(
             .to_string();
         let all_input_filenames = vec![r1_filename.clone(), r2_filename.clone()];
 
+        let pair_dir = naming::pair_output_dir(input_r1, output_dir);
         let r1_desc = PairedReportFile {
-            txt_path: naming::report_name(input_r1, output_dir),
-            json_path: naming::json_report_name(input_r1, output_dir),
+            txt_path: naming::report_name(input_r1, Some(&pair_dir)),
+            json_path: naming::json_report_name(input_r1, Some(&pair_dir)),
             input_filename: r1_filename,
         };
         let r2_desc = PairedReportFile {
-            txt_path: naming::report_name(input_r2, output_dir),
-            json_path: naming::json_report_name(input_r2, output_dir),
+            txt_path: naming::report_name(input_r2, Some(&pair_dir)),
+            json_path: naming::json_report_name(input_r2, Some(&pair_dir)),
             input_filename: r2_filename,
         };
 
