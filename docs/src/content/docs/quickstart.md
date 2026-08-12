@@ -67,6 +67,20 @@ trim_galore --output-format ubam --preserve-tags CB,UB sample.bam
 
 Paired uBAM output is a single interleaved BAM (`<stem>_val.bam`), matching samtools/Picard/fgbio convention. See [Output files](/guide/outputs/#ubam-output---output-format-ubam) for the full contract.
 
+### Read names containing whitespace
+
+A read name containing whitespace is refused, **on every output format** — including FASTQ output, where a space or tab loses nothing today but a newline silently desynchronises the whole file. Trim Galore reads a FASTQ header as ending at the first whitespace, so an aux-tag tail after it cannot be carried, and a newline splits one record across five lines. Whitespace other than a space inside a preserved aux-tag value is refused for the same reason; a space in a tag value is legal and unaffected.
+
+The SAM specification forbids whitespace in QNAME, but samtools will build such a file. For names containing spaces only, samtools can rewrite them:
+
+```bash
+samtools view -h in.bam \
+  | awk 'BEGIN{FS=OFS="\t"} /^@/{print; next} {gsub(/ /,"_",$1); print}' \
+  | samtools view -b -o fixed.bam -
+```
+
+`FS="\t"` is essential. Without it `$1` stops at the first space, the substitution matches nothing, and the file comes out unchanged — `samtools view -b` accepts it and Trim Galore still refuses it. A name containing a tab or newline cannot be represented in SAM text at all, so it has to be corrected at source.
+
 ## Common combinations
 
 ```bash

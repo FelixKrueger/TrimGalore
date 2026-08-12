@@ -808,3 +808,34 @@ fn phred64_clump_only_bam_input_rejected() {
         "expected a --phred64 rejection"
     );
 }
+
+/// `--clump_only` promises byte-identical preservation, so a dropped aux-tag tail
+/// would break the contract `cli.rs` cites when refusing `--rename`. The refusal
+/// reaches this path through the same `BamReader`.
+#[test]
+fn clump_only_ubam_refuses_whitespace_qname() {
+    let dir = fresh_tmpdir("ws_qname");
+    let output = Command::new(binary())
+        .args([
+            "--clump_only",
+            "--output-format",
+            "ubam",
+            "--preserve-tags",
+            "CB",
+        ])
+        .arg("-o")
+        .arg(&dir)
+        .arg(fixture("ubam_ws_qname.bam"))
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "--clump_only must inherit the whitespace-QNAME refusal, not silently drop the tag"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("read name contains whitespace"),
+        "expected the whitespace message on the --clump_only path, got: {}",
+        stderr
+    );
+}
