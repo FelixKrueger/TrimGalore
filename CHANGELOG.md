@@ -5,6 +5,11 @@
 
 #### Changes
 
+- **A BAM read name containing whitespace, or whitespace other than a space inside a preserved
+  aux-tag value, is now refused on every output format**
+  ([#415](https://github.com/FelixKrueger/TrimGalore/issues/415)) — see the uBAM section of the
+  docs for the samtools recipe that rewrites space-bearing names.
+
 - **A paired run now writes every output to one directory**
   ([#398](https://github.com/FelixKrueger/TrimGalore/issues/398)). Without
   `--output_dir`, the validated FASTQs already went to Read 1's directory, but each

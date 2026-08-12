@@ -862,6 +862,49 @@ pub fn peek_header(path: &Path) -> Result<Header> {
     Ok(header)
 }
 
+/// Reject a BAM read name holding a byte that breaks the FASTQ id it becomes.
+///
+/// The chosen set is `u8::is_ascii_whitespace` — what `parse_name_and_data`,
+/// `fastq::read_id_prefix` and the id's one-line framing split on. VT sits deliberately
+/// outside it; `append_to_id`'s `trim_end` does strip a trailing one.
+fn reject_whitespace_in_qname(name: &[u8]) -> Result<()> {
+    if name.iter().any(u8::is_ascii_whitespace) {
+        let shown = String::from_utf8_lossy(name);
+        bail!(
+            "BAM read name contains whitespace: \"{}\". Trim Galore reads a FASTQ header as \
+             ending at the first whitespace, so any --preserve-tags aux tags after it are lost \
+             on uBAM output, and a newline would break the FASTQ record structure. The SAM \
+             specification forbids whitespace in QNAME. Rename the reads before trimming — the \
+             uBAM section of the docs gives a samtools recipe for space-only names; a tab or \
+             newline in a name cannot be expressed in SAM text at all.",
+            shown.escape_debug()
+        );
+    }
+    Ok(())
+}
+
+/// Reject bytes in an appended `TYPE:VALUE` that would break the FASTQ id holding it.
+///
+/// The QNAME boundary set minus space, which `Z`'s `[ !-~]*` grammar makes legal: a tab
+/// would forge a tag field and a newline would break the single-line id.
+fn reject_framing_in_tag_value(text: &str) -> Result<()> {
+    if text.bytes().any(|b| b != b' ' && b.is_ascii_whitespace()) {
+        // `Z` values are unbounded, so borrow the 60-char cap the description notice uses.
+        let shown = if text.chars().count() > 60 {
+            format!("{}…", text.chars().take(60).collect::<String>())
+        } else {
+            text.to_string()
+        };
+        bail!(
+            "aux tag value cannot pass through the FASTQ header: \"{}\". A tab would forge a \
+             tag field and a newline would break the single-line read ID; spaces are legal and \
+             unaffected. Fix the tag at source.",
+            shown.escape_debug()
+        );
+    }
+    Ok(())
+}
+
 /// Convert one BAM record to a `FastqRecord`. Per-record validation:
 /// - Must be unmapped (`is_unmapped()` true; per-record check resolves
 ///   PLAN-REVIEW B-Crit-4 first-record-only contradiction).
@@ -894,6 +937,7 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
     if name.is_empty() {
         bail!("BAM record has empty read name");
     }
+    reject_whitespace_in_qname(name)?;
     let id_body = std::str::from_utf8(name).context("BAM record name is not valid UTF-8")?;
     let mut id = format!("@{}", id_body);
 
@@ -916,7 +960,8 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
                 id.push('\t');
                 id.push_str(tag_name);
                 id.push(':');
-                append_tag_type_and_value(&mut id, &value)?;
+                append_tag_type_and_value(&mut id, &value)
+                    .with_context(|| format!("aux tag '{}'", tag_name))?;
             }
         }
     }
@@ -1027,6 +1072,9 @@ fn emit_iupac_warning_write_once() {
 /// One-time disclosure that a FASTQ header description was not carried into uBAM
 /// output. Echoes the text actually dropped, because what is lost varies: an
 /// instrument identifier, or an Illumina `1:N:0:INDEX` field.
+///
+/// "FASTQ" is unconditional: BAM input cannot reach this, because a whitespace QNAME is
+/// refused and the tab introducing a tag tail always precedes any space in a tag value.
 fn emit_description_dropped_once(dropped: &str) {
     static SEEN: OnceLock<()> = OnceLock::new();
     SEEN.get_or_init(|| {
@@ -1044,8 +1092,12 @@ fn emit_description_dropped_once(dropped: &str) {
 }
 
 /// Format `{TYPE}:{VALUE}` for one BAM aux field, matching `samtools fastq -T`.
+///
+/// Every arm's output is scanned before returning, so no type code can route text into the
+/// FASTQ id unchecked.
 fn append_tag_type_and_value(out: &mut String, value: &Value<'_>) -> Result<()> {
     use std::fmt::Write;
+    let start = out.len();
     match value {
         Value::Character(c) => write!(out, "A:{}", *c as char).unwrap(),
         Value::Int8(v) => write!(out, "i:{}", v).unwrap(),
@@ -1080,7 +1132,7 @@ fn append_tag_type_and_value(out: &mut String, value: &Value<'_>) -> Result<()> 
             );
         }
     }
-    Ok(())
+    reject_framing_in_tag_value(&out[start..])
 }
 
 #[cfg(test)]
@@ -1402,6 +1454,110 @@ mod tests {
         assert!(
             msg.contains("hex") || msg.contains("H:"),
             "expected hex-tag rejection from read-side emitter, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn qname_boundary_bytes_rejected() {
+        for (label, name) in [
+            ("space", b"read one".as_slice()),
+            ("tab", b"read\tone"),
+            ("LF", b"read\none"),
+            ("CR", b"read\rone"),
+            ("FF", b"read\x0Cone"),
+        ] {
+            assert!(
+                reject_whitespace_in_qname(name).is_err(),
+                "{} must be rejected in a QNAME",
+                label
+            );
+        }
+    }
+
+    #[test]
+    fn qname_non_boundary_bytes_accepted() {
+        // VT is accepted by decision, not by derivation: widening the set here would
+        // over-reject files that work today.
+        for (label, name) in [
+            ("plain", b"read_one".as_slice()),
+            ("VT", b"read\x0Bone"),
+            ("at-sign", b"read@one"),
+            ("non-ASCII", "read\u{e9}one".as_bytes()),
+        ] {
+            assert!(
+                reject_whitespace_in_qname(name).is_ok(),
+                "{} must be accepted in a QNAME",
+                label
+            );
+        }
+    }
+
+    #[test]
+    fn qname_error_escapes_invisible_bytes() {
+        let err = reject_whitespace_in_qname(b"read\tone").expect_err("tab must be rejected");
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("read\\tone"),
+            "error must show the offending byte escaped, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn tag_value_framing_bytes_rejected() {
+        for (label, value) in [
+            ("tab", "AAA\tCCC"),
+            ("LF", "AAA\nCCC"),
+            ("CR", "AAA\rCCC"),
+            ("FF", "AAA\x0CCCC"),
+        ] {
+            assert!(
+                reject_framing_in_tag_value(value).is_err(),
+                "{} must be rejected in a Z tag value",
+                label
+            );
+        }
+    }
+
+    #[test]
+    fn tag_value_space_accepted() {
+        // `Z` is `[ !-~]*`, so a space is legal — and the tab introducing the tag
+        // precedes it, leaving `parse_name_and_data` able to split the tail.
+        assert!(reject_framing_in_tag_value("has a space").is_ok());
+    }
+
+    #[test]
+    fn read_side_emitter_rejects_newline_in_character_tag() {
+        // `A` writes its raw byte into the same id as `Z`, so it needs the same guard.
+        let value = Value::Character(b'\n');
+        let mut buf = String::new();
+        let err = append_tag_type_and_value(&mut buf, &value)
+            .expect_err("a newline in an A value must be rejected by the read-side emitter");
+        assert!(
+            format!("{:#}", err).contains("cannot pass through the FASTQ header"),
+            "expected the framing rejection, got: {:#}",
+            err
+        );
+    }
+
+    #[test]
+    fn read_side_emitter_accepts_printable_character_tag() {
+        let mut buf = String::new();
+        append_tag_type_and_value(&mut buf, &Value::Character(b'+')).unwrap();
+        assert_eq!(buf, "A:+");
+    }
+
+    #[test]
+    fn read_side_emitter_rejects_newline_in_string_tag() {
+        let value = Value::String(bstr::BStr::new(b"AAA\nCCC"));
+        let mut buf = String::new();
+        let err = append_tag_type_and_value(&mut buf, &value)
+            .expect_err("a newline in a Z value must be rejected by the read-side emitter");
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("AAA\\nCCC"),
+            "expected the escaped value in the message, got: {}",
             msg
         );
     }

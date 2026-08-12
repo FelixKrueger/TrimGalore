@@ -52,6 +52,64 @@ samtools flagstat test_files/ubam_paired_test.bam # 20 total, 20 unmapped, 10 re
 
 Provenance: SRR24827378 (RRBS). See `BS-seq_10K_R{1,2}.fastq.gz` for the source.
 
+## Malformed-read-name uBAM fixtures (#415)
+
+Eight fixtures for the whitespace refusal, used by `tests/integration_ubam.rs`
+and `tests/integration_clump_only_ubam.rs`. In the multi-record fixtures the
+offending record sits **after the first record or pair**, so record 1 clears the
+sanity-check peek and the failure lands in the trimming loop.
+
+| Fixture | Shape |
+|---|---|
+| `ubam_ws_qname.bam` | 1 record, space in QNAME |
+| `ubam_ws_qname_late.bam` | 3 records, space in record 2's QNAME |
+| `ubam_ws_qname_paired.bam` | 2 interleaved pairs, space in the second pair's QNAME (record 3) |
+| `ubam_tagvalue_space.bam` | 1 record, `CB:Z:has a space` — acceptance twin for the space exemption |
+| `ubam_lf_qname.bam` | 3 records, newline in record 2's QNAME |
+| `ubam_lf_tagvalue.bam` | 3 records, newline inside record 2's `CB:Z` value |
+| `ubam_lf_atag.bam` | 3 records, newline inside record 2's `XA:A` value |
+| `ubam_atag_ok.bam` | 3 records, printable `XA:A` values — acceptance twin for the `A` arm |
+
+The first four are samtools-built (requires `samtools`; not a runtime dep).
+`--no-PG` keeps the header free of the build path, so the recipes below reproduce
+the committed bytes exactly:
+
+```sh
+S=ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+Q=IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+{ printf '@HD\tVN:1.6\n'
+  printf 'name with space\t4\t*\t0\t0\t*\t*\t0\t0\t%s\t%s\tCB:Z:AAACCC\n' "$S" "$Q"
+} | samtools view --no-PG -b -o test_files/ubam_ws_qname.bam -
+```
+
+`ubam_ws_qname_late.bam` adds clean `readA` / `readC` records around
+`readB with space`; `ubam_ws_qname_paired.bam` uses flags `77`/`141` for
+`pairA` then `pairB with space`; `ubam_tagvalue_space.bam` is one `readA` with
+`CB:Z:has a space`.
+
+The last four cannot be built with samtools. SAM text is line-delimited, so it
+cannot express a newline in a QNAME or a tag value; BAM stores both as byte fields,
+so the records are packed by hand. noodles' *record encoder* rejects any read name
+outside `[!-?A-~]{1,254}`, but its `bgzf::Writer` is a plain sink, so only the
+framing comes from noodles — see `examples/mk_bam_fixture.rs`:
+
+```sh
+cargo run --quiet --example mk_bam_fixture -- lf_qname    > test_files/ubam_lf_qname.bam
+cargo run --quiet --example mk_bam_fixture -- lf_tagvalue > test_files/ubam_lf_tagvalue.bam
+cargo run --quiet --example mk_bam_fixture -- lf_atag     > test_files/ubam_lf_atag.bam
+cargo run --quiet --example mk_bam_fixture -- atag_ok     > test_files/ubam_atag_ok.bam
+```
+
+Verify — the record count is the probe that fails on the wrong input, because an
+embedded newline makes one record occupy two output lines:
+
+```sh
+samtools view test_files/ubam_lf_qname.bam | wc -l              # 4 lines for 3 records
+samtools view test_files/ubam_lf_qname.bam | sed -n '2,3p'       # readB / EVIL, split
+```
+
+CI needs no samtools: all eight are committed.
+
 ## uBAM output reference fixtures
 
 `ubam_out_se_REFERENCE.bam` (SE) and `ubam_out_pe_REFERENCE.bam` (PE,

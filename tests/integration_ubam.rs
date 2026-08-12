@@ -256,3 +256,348 @@ fn paired_with_single_fastq_rejected() {
         stderr
     );
 }
+
+// ---------------------------------------------------------------------------
+// #415 — whitespace in a BAM read name, and framing bytes in a Z tag value.
+//
+// Each case names the entry point it pins. Three entry points run before the
+// trimming loop (sanity check, adapter detection, poly-G scan), so a fixture
+// whose first record is the offender never reaches the writer; `-a` plus
+// `--no_poly_g` skips both scans and is the arm a >1M-read file always takes.
+// ---------------------------------------------------------------------------
+
+/// Skip adapter auto-detection and the poly-G scan so the trimming loop is reached.
+const SKIP_PRESCANS: [&str; 3] = ["-a", "AGATCGGAAGAGC", "--no_poly_g"];
+
+#[test]
+fn ws_qname_refused_at_sanity_check_entry_point() {
+    let dir = fresh_tmpdir("tg_415_sanity");
+    let output = Command::new(binary())
+        .args(["--output-format", "ubam", "--preserve-tags", "CB"])
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_ws_qname.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(!output.status.success(), "whitespace QNAME must be refused");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("read name contains whitespace") && stderr.contains("name with space"),
+        "message must name the defect and the offending name, got: {}",
+        stderr
+    );
+    // Record 1 is the offender, so the refusal precedes any writer.
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.contains("_trimmed") || n.contains("_val"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "refusal at the sanity check must write nothing, found: {:?}",
+        leftovers
+    );
+}
+
+#[test]
+fn ws_qname_refused_in_trimming_loop_ubam_out_leaves_partial() {
+    let dir = fresh_tmpdir("tg_415_loop_ubam");
+    let output = Command::new(binary())
+        .args(["--output-format", "ubam", "--preserve-tags", "CB"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_ws_qname_late.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(!output.status.success(), "whitespace QNAME must be refused");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("BAM record 2"),
+        "must be caught in the trimming loop at record 2, not at the sanity check, got: {}",
+        stderr
+    );
+    // The writer opens before the read loop, so record 1 is already on disk.
+    // Asserted, not desired — the cure spans all per-record bails and is tracked
+    // separately.
+    let partial = dir.join("ubam_ws_qname_late_trimmed.bam");
+    let bytes = std::fs::read(&partial).expect("a mid-stream refusal leaves a partial uBAM behind");
+    // What makes the residue a data-integrity problem is that it is indistinguishable
+    // from a complete BAM: bgzf's Drop finalises it, EOF marker included.
+    const BGZF_EOF: &[u8] = &[
+        0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02,
+        0x00, 0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    assert!(
+        bytes.ends_with(BGZF_EOF),
+        "the partial carries a valid BGZF EOF marker, so nothing downstream flags it ({} bytes)",
+        bytes.len()
+    );
+}
+
+#[test]
+fn ws_qname_refused_in_trimming_loop_fastq_out() {
+    let dir = fresh_tmpdir("tg_415_loop_fastq");
+    let output = Command::new(binary())
+        .args(["--preserve-tags", "CB"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_ws_qname_late.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    // The widened scope: FASTQ output loses no tag text today, and is refused anyway.
+    assert!(
+        !output.status.success(),
+        "the refusal is read-side, so FASTQ output is refused too"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("read name contains whitespace"),
+        "expected the whitespace message on the FASTQ-output path, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn ws_qname_refused_via_threaded_reader() {
+    let dir = fresh_tmpdir("tg_415_threaded");
+    let output = Command::new(binary())
+        .args(["--cores", "2"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_ws_qname_late.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    // `--cores 2` is the only route to the threaded single-stream reader.
+    assert!(!output.status.success(), "whitespace QNAME must be refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("read name contains whitespace"),
+        "expected the whitespace message from the threaded reader, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn ws_qname_refused_via_interleaved_deinterleaver() {
+    let dir = fresh_tmpdir("tg_415_deinterleaved");
+    let output = Command::new(binary())
+        .arg("--paired")
+        .args(SKIP_PRESCANS)
+        .args(["-a2", "AGATCGGAAGAGC"])
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_ws_qname_paired.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(!output.status.success(), "whitespace QNAME must be refused");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("read name contains whitespace"),
+        "expected the whitespace message, got: {}",
+        stderr
+    );
+    // Record 3 is the first read of the second pair — proves the de-interleaver
+    // reported it, not the sanity check (which only ever sees record 1).
+    assert!(
+        stderr.contains("BAM record 3"),
+        "must come from the de-interleaver at record 3, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn lf_in_qname_refused_end_to_end() {
+    let dir = fresh_tmpdir("tg_415_lf_qname");
+    let output = Command::new(binary())
+        .args(["--preserve-tags", "CB"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_lf_qname.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    // A newline in a read name would split one record across five lines,
+    // desynchronising every 4-line-block reader after it.
+    assert!(!output.status.success(), "LF in a QNAME must be refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("read name contains whitespace") && stderr.contains("readB\\nEVIL"),
+        "message must show the newline escaped, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn lf_in_tag_value_refused_end_to_end() {
+    let dir = fresh_tmpdir("tg_415_lf_tag");
+    let output = Command::new(binary())
+        .args(["--preserve-tags", "CB"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_lf_tagvalue.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "a newline in a preserved Z value corrupts framing the same way a QNAME newline does"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // `aux tag 'CB'` comes from the call site, not the predicate — asserting the bare
+    // prefix would also match the predicate's own wording and pin nothing.
+    assert!(
+        stderr.contains("aux tag 'CB'") && stderr.contains("AAA\\nCCC"),
+        "message must name the tag and show the escaped value, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn lf_in_character_tag_value_refused_end_to_end() {
+    // `A` values reach the same id as `Z` values through a different match arm.
+    let dir = fresh_tmpdir("tg_415_lf_atag");
+    let output = Command::new(binary())
+        .args(["--preserve-tags", "XA"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_lf_atag.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        !output.status.success(),
+        "a newline in an A tag value corrupts framing the same way a Z value does"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("aux tag 'XA'") && stderr.contains("cannot pass through"),
+        "message must name the tag and the framing failure, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn printable_character_tags_round_trip() {
+    // The acceptance twin for the A arm — green whether or not the guard is present,
+    // so it pins carriage rather than refusal.
+    let dir = fresh_tmpdir("tg_415_atag_ok");
+    let output = Command::new(binary())
+        .args(["--preserve-tags", "XA"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_atag_ok.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        output.status.success(),
+        "printable A values must not be refused, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tuples = read_fastq_tuples(&dir.join("ubam_atag_ok_trimmed.fq"));
+    assert_eq!(tuples.len(), 3);
+    let tags: Vec<&str> = tuples.iter().map(|t| t.0.as_str()).collect();
+    assert!(
+        tags[0].ends_with("XA:A:+") && tags[1].ends_with("XA:A:-"),
+        "A values must reach the header intact, got: {:?}",
+        tags
+    );
+}
+
+#[test]
+fn clean_tag_value_with_space_still_accepted() {
+    // A space is legal in a `Z` value, and the tab introducing the tag precedes
+    // it — so the tag tail still parses. Guards against reusing the QNAME set.
+    let dir = fresh_tmpdir("tg_415_tag_space");
+    let output = Command::new(binary())
+        .args(["--preserve-tags", "CB"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg("test_files/ubam_tagvalue_space.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        output.status.success(),
+        "a space in a Z tag value must stay legal, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tuples = read_fastq_tuples(&dir.join("ubam_tagvalue_space_trimmed.fq"));
+    assert_eq!(tuples.len(), 1);
+    assert!(
+        tuples[0].0.contains("CB:Z:has a space"),
+        "the space-bearing tag must survive, got id: {:?}",
+        tuples[0].0
+    );
+
+    // uBAM out is the harder direction: `parse_name_and_data` has to re-split the tail
+    // around the space rather than treat it as a description boundary.
+    let ubam_dir = fresh_tmpdir("tg_415_tag_space_ubam");
+    let output = Command::new(binary())
+        .args(["--output-format", "ubam", "--preserve-tags", "CB"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&ubam_dir)
+        .arg("test_files/ubam_tagvalue_space.bam")
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        output.status.success(),
+        "uBAM round-trip of a space-bearing Z value must succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut decoded = Vec::new();
+    std::io::Read::read_to_end(
+        &mut noodles::bgzf::Reader::new(
+            std::fs::File::open(ubam_dir.join("ubam_tagvalue_space_trimmed.bam")).unwrap(),
+        ),
+        &mut decoded,
+    )
+    .unwrap();
+    assert!(
+        decoded.windows(15).any(|w| w == b"CBZhas a space\0"),
+        "the space-bearing Z value must round-trip into the output BAM's aux data"
+    );
+}
+
+#[test]
+fn description_notice_wording_is_fastq_input_only() {
+    // No space reaches `parse_name_and_data` from BAM input, so #406's "FASTQ
+    // header text" wording is unconditionally accurate; this pins the one
+    // direction that still reaches it.
+    let dir = fresh_tmpdir("tg_415_notice");
+    let fq = dir.join("desc.fastq");
+    std::fs::write(
+        &fq,
+        "@readA 1:N:0:CGATCG\n\
+         ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n\
+         +\n\
+         IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n",
+    )
+    .unwrap();
+    let output = Command::new(binary())
+        .args(["--output-format", "ubam"])
+        .args(SKIP_PRESCANS)
+        .arg("-o")
+        .arg(&dir)
+        .arg(&fq)
+        .output()
+        .expect("trim_galore failed to run");
+    assert!(
+        output.status.success(),
+        "a FASTQ description is legitimate and must still be dropped with a notice, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("FASTQ header text"),
+        "the #406 notice must still fire on FASTQ input, got: {}",
+        stderr
+    );
+}
