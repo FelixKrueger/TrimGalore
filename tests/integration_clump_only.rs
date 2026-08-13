@@ -398,3 +398,27 @@ fn silently_accepts_error_rate_flag() -> Result<()> {
     // same silent-accept semantics as -q under --clump_only.
     assert_silently_accepts("silent_e", &["-e", "0.05"])
 }
+
+/// #421 — `--fastqc_args` alone must activate FastQC on the `--clump_only` drivers.
+#[test]
+fn clump_only_fastqc_args_alone_produces_a_report() -> Result<()> {
+    let dir = tempdir("fastqc_args_only");
+    let status = Command::new(binary())
+        .args(["--clump_only", "--fastqc_args", "--quiet"])
+        .arg(fixture("BS-seq_10K_R1.fastq.gz"))
+        .arg("-o")
+        .arg(&dir)
+        .status()?;
+    assert!(status.success(), "--clump_only --fastqc_args must succeed");
+
+    let reports: Vec<String> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.contains("_fastqc."))
+        .collect();
+    assert_eq!(
+        reports.len(),
+        2,
+        "expected _fastqc.html + _fastqc.zip, got {reports:?}"
+    );
+    Ok(())
+}

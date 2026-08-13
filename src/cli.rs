@@ -327,6 +327,10 @@ pub struct Cli {
     /// Run FastQC on the trimmed output files (built in via the bundled
     /// fastqc-rust library; no external Java or FastQC binary needed).
     /// Produces FastQC 0.12.1-compatible *_fastqc.html / *_fastqc.zip artifacts.
+    /// Rejected with the specialty modes (--hardtrim5/3, --clock, --implicon) and with
+    /// --paired given a single input file (the interleaved-uBAM path) writing FASTQ output,
+    /// none of which write a report. For the last, --output-format ubam does produce one;
+    /// otherwise run FastQC separately.
     #[clap(long = "fastqc")]
     pub fastqc: bool,
 
@@ -579,6 +583,14 @@ impl Cli {
             }
         }
         Ok(())
+    }
+
+    /// Whether the run asked for FastQC.
+    ///
+    /// `--fastqc_args`' "Implies --fastqc" is doc text, not a clap `requires`, so `fastqc`
+    /// alone is false on an args-only run.
+    pub fn fastqc_requested(&self) -> bool {
+        self.fastqc || self.fastqc_args.is_some()
     }
 
     /// Validate CLI arguments after parsing.
@@ -1042,6 +1054,47 @@ impl Cli {
                 None => {
                     crate::adapter::parse_adapter_specs_quiet(&self.adapter2)?;
                 }
+            }
+        }
+
+        // #421 — these arms reach no `fastqc::run` call site. Last of the fallible checks,
+        // so malformed values and invalid input lists report their own defect first.
+        if self.fastqc_requested() {
+            if self.hardtrim5.is_some() {
+                anyhow::bail!(
+                    "--fastqc is not supported with --hardtrim5, which writes no QC report; \
+                     run FastQC separately on the hardtrimmed output, or drop --fastqc"
+                );
+            }
+            if self.hardtrim3.is_some() {
+                anyhow::bail!(
+                    "--fastqc is not supported with --hardtrim3, which writes no QC report; \
+                     run FastQC separately on the hardtrimmed output, or drop --fastqc"
+                );
+            }
+            if self.clock {
+                anyhow::bail!(
+                    "--fastqc is not supported with --clock, which writes no QC report; \
+                     run FastQC separately on the UMI-processed output, or drop --fastqc"
+                );
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!(
+                    "--fastqc is not supported with --implicon, which writes no QC report; \
+                     run FastQC separately on the UMI-processed output, or drop --fastqc"
+                );
+            }
+            if self.paired
+                && self.input.len() == 1
+                && !matches!(self.output_format, OutputFormat::UBam)
+                && !self.clump_only
+            {
+                anyhow::bail!(
+                    "--fastqc is not supported with --paired and a single input file: that \
+                     shape is the interleaved-uBAM paired path, which writes FASTQ output with \
+                     no QC report. Pass Read 1 and Read 2 as two files, or — for a genuine \
+                     interleaved uBAM — add --output-format ubam, which does produce a report"
+                );
             }
         }
 
@@ -2141,6 +2194,204 @@ mod tests {
         assert!(
             err.contains("--retain_unpaired") && err.contains("--output-format ubam"),
             "expected retain_unpaired+ubam rejection, got: {err}"
+        );
+    }
+
+    // ── #421: --fastqc refused where no `fastqc::run` call site is reachable ──
+
+    const IP_BAM: &str = "test_files/ubam_paired_test.bam";
+
+    #[test]
+    fn fastqc_plus_hardtrim5_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim5", "20", "--fastqc", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--fastqc") && err.contains("--hardtrim5"),
+            "expected fastqc+hardtrim5 rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_hardtrim3_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim3", "20", "--fastqc", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--fastqc") && err.contains("--hardtrim3"),
+            "expected fastqc+hardtrim3 rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_clock_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", "--paired", "--fastqc", R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--fastqc") && err.contains("--clock"),
+            "expected fastqc+clock rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_implicon_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--implicon", "--paired", "--fastqc", R1, R2]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--fastqc") && err.contains("--implicon"),
+            "expected fastqc+implicon rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_paired_single_file_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", "--fastqc", IP_BAM]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--fastqc") && err.contains("single input file"),
+            "expected fastqc+paired-single-file rejection, got: {err}"
+        );
+        // The two-file remedy comes first: the likelier mistake is a forgotten Read 2,
+        // and that user's file is no uBAM.
+        let two_files = err.find("two files").expect("two-file remedy missing");
+        let ubam = err
+            .find("--output-format ubam")
+            .expect("uBAM remedy missing");
+        assert!(two_files < ubam, "two-file remedy must lead, got: {err}");
+    }
+
+    /// `--fastqc_args`' "Implies --fastqc" is doc text, not a clap `requires`, so a refusal
+    /// keyed on `fastqc` alone would leave this shape silently ignored.
+    #[test]
+    fn fastqc_args_alone_also_rejected() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--hardtrim5",
+            "20",
+            "--fastqc_args",
+            "--quiet",
+            R1,
+        ]);
+        assert!(!cli.fastqc, "--fastqc_args must not set the fastqc flag");
+        assert!(
+            cli.fastqc_requested(),
+            "but it must count as requesting FastQC"
+        );
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(err.contains("--fastqc"), "expected rejection, got: {err}");
+    }
+
+    // ── #421 acceptance twins: these arms do reach `fastqc::run` ──
+
+    #[test]
+    fn fastqc_plus_paired_ubam_output_single_file_accepted() {
+        // One flag apart from `fastqc_plus_paired_single_file_rejected`, and capable:
+        // `main.rs` routes uBAM output above the interleaved-FASTQ arm.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--output-format",
+            "ubam",
+            "--fastqc",
+            IP_BAM,
+        ]);
+        assert!(cli.validate().is_ok(), "capable arm must stay accepted");
+    }
+
+    #[test]
+    fn fastqc_plus_paired_ubam_output_two_files_accepted() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--output-format",
+            "ubam",
+            "--fastqc",
+            R1,
+            R2,
+        ]);
+        assert!(cli.validate().is_ok(), "capable arm must stay accepted");
+    }
+
+    /// Arm 5 excludes `--clump_only` so `main.rs`'s own "requires two FASTQ input files"
+    /// message wins. Without this, only an integration test guards the term.
+    #[test]
+    fn fastqc_plus_clump_only_paired_single_file_not_refused_here() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clump_only",
+            "--paired",
+            "--fastqc",
+            IP_BAM,
+        ]);
+        assert!(
+            cli.validate().is_ok(),
+            "validate must defer to main.rs's clump_only diagnosis"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_paired_fastq_output_accepted() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", "--fastqc", R1, R2]);
+        assert!(
+            cli.validate().is_ok(),
+            "plain paired FASTQ + --fastqc is the commonest FastQC run; it must stay accepted"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_single_end_accepted() {
+        let cli = Cli::parse_from(["trim_galore", "--fastqc", R1]);
+        assert!(
+            cli.validate().is_ok(),
+            "SE trim + --fastqc must stay accepted"
+        );
+    }
+
+    #[test]
+    fn fastqc_plus_clump_only_accepted() {
+        let cli = Cli::parse_from(["trim_galore", "--clump_only", "--fastqc", R1]);
+        assert!(cli.validate().is_ok(), "clump_only reaches fastqc::run");
+    }
+
+    // ── #421: the guards sit below the value and input-list checks ──
+
+    #[test]
+    fn hardtrim5_range_error_precedes_the_fastqc_refusal() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim5", "0", "--fastqc", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("between 1 and 999"),
+            "a malformed value must report its own defect first, got: {err}"
+        );
+    }
+
+    /// `--adapter2` is parsed inside `validate`, so the guard block has to sit below it.
+    /// Spelled long: `parse_from` bypasses `rewrite_perl_short_flags`, so `-a2` would be
+    /// read as an input path.
+    #[test]
+    fn malformed_adapter2_precedes_the_fastqc_refusal() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--fastqc",
+            "--adapter2",
+            "NOT!A!SEQ",
+            IP_BAM,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("only DNA characters"),
+            "a malformed adapter value must report its own defect first, got: {err}"
+        );
+    }
+
+    /// Without `--paired`, so this reaches `--clock`'s own `validate_paired_input` rather
+    /// than the `"Paired-end"` call that fires first whenever `--paired` is set.
+    #[test]
+    fn odd_input_count_precedes_the_fastqc_refusal() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", "--fastqc", R1, R2, R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--clock mode requires"),
+            "a structurally invalid input list must report first, got: {err}"
         );
     }
 

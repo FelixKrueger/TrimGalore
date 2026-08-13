@@ -31,9 +31,10 @@
 //! subset, so no `_fastqc/` directory appears, and `--svg` sets a rendering flag without
 //! writing an `.svg` file.
 //!
-//! `--fastqc` is a silent no-op on `--hardtrim5/3`, `--clock`, `--implicon` and on
-//! paired FASTQ output from a single interleaved uBAM ([#421]). Those arms are marked
-//! `fastqc_incapable`; do not pair them with a FastQC flag expecting artefacts.
+//! `--hardtrim5/3`, `--clock`, `--implicon` and paired FASTQ output from a single
+//! interleaved uBAM reach no `fastqc::run` call site, so `Cli::validate` refuses a FastQC
+//! flag on them ([#421]). `refuses_fastqc_on_every_arm_that_cannot_run_it` pins all five;
+//! every arm that accepts the flag therefore produces artefacts, so the rule is unconditional.
 //!
 //! [#421]: https://github.com/FelixKrueger/TrimGalore/issues/421
 //!
@@ -215,8 +216,8 @@ fn is_fastqc_artifact(path: &Path) -> bool {
     name.ends_with("_fastqc.html") || name.ends_with("_fastqc.zip")
 }
 
-/// Production's gate is `cli.fastqc || cli.fastqc_args.is_some()` (`main.rs:1458` and
-/// four siblings). The disjunction is load-bearing: `--fastqc_args`' "Implies --fastqc"
+/// Production's gate is `Cli::fastqc_requested()`, called at every `fastqc::run` site.
+/// The disjunction inside it is load-bearing: `--fastqc_args`' "Implies --fastqc"
 /// is doc text with no clap `requires`, so `cli.fastqc` is false on an args-only run
 /// while FastQC still runs. Deriving the predicate here, once, from the args keeps one
 /// source of truth for it.
@@ -235,7 +236,6 @@ struct Tripwire<'a> {
     /// file, the last two being what #389 and #409 were about.
     guarded: &'a [&'a str],
     arm: Arm,
-    fastqc_capable: bool,
 }
 
 /// What a case observed, for the few tests that assert something extra.
@@ -251,17 +251,11 @@ impl<'a> Tripwire<'a> {
             args,
             guarded,
             arm: Arm::Planned,
-            fastqc_capable: true,
         }
     }
 
     fn unplanned(mut self) -> Self {
         self.arm = Arm::Unplanned;
-        self
-    }
-
-    fn fastqc_incapable(mut self) -> Self {
-        self.fastqc_capable = false;
         self
     }
 
@@ -302,14 +296,7 @@ impl<'a> Tripwire<'a> {
             panic!("{}: {msg}\nstderr:\n{stderr}", self.tag);
         }
 
-        if let Err(msg) = compare(
-            &root,
-            &created,
-            &planned,
-            self.args,
-            self.arm,
-            self.fastqc_capable,
-        ) {
+        if let Err(msg) = compare(&root, &created, &planned, self.args, self.arm) {
             panic!("{}: {msg}\nstderr:\n{stderr}", self.tag);
         }
 
@@ -345,7 +332,6 @@ fn compare(
     planned: &[(String, PathBuf)],
     args: &[&str],
     arm: Arm,
-    fastqc_capable: bool,
 ) -> Result<(), String> {
     // T4 — liveness. `main.rs:215-230` routes clap's
     // DisplayHelpOnMissingArgumentOrSubcommand to stdout with exit 0, so a case whose
@@ -361,22 +347,12 @@ fn compare(
         .partition(|p| active && is_fastqc_artifact(p));
 
     // The allowance is self-policing, so it cannot quietly widen into the drain this
-    // test dies in. Scoped to arms that can reach `fastqc::run` at all: unscoped, it
-    // would go red on a legitimate specialty case (#421), and a provably-wrong red is
-    // the strongest argument for deleting a guard.
-    match (active, fastqc_capable) {
-        (true, true) if allowed.is_empty() => {
-            return Err("a FastQC flag is set but no FastQC artefact was written; \
-                        the allowance is masking a broken case"
-                .into());
-        }
-        (true, false) if !allowed.is_empty() => {
-            return Err(format!(
-                "arm is marked fastqc_incapable but produced {allowed:?}; \
-                 #421 may have been fixed — drop the marker"
-            ));
-        }
-        _ => {}
+    // test dies in. Unconditional: every arm that accepts a FastQC flag reaches
+    // `fastqc::run`, because `Cli::validate` refuses the ones that do not.
+    if active && allowed.is_empty() {
+        return Err("a FastQC flag is set but no FastQC artefact was written; \
+                    the allowance is masking a broken case"
+            .into());
     }
     // An allowance that swallowed the whole write set would leave T1 comparing empty sets.
     if rest.is_empty() {
@@ -810,7 +786,6 @@ fn hardtrim5_fastq() {
         &["--hardtrim5", "20", "in/a.fastq"],
         &["in/a.fastq"],
     )
-    .fastqc_incapable()
     .run(|root| write_fastq(&root.join("in/a.fastq"), "A_"));
 }
 
@@ -821,7 +796,6 @@ fn hardtrim5_ubam() {
         &["--hardtrim5", "20", "--output-format", "ubam", "in/a.fastq"],
         &["in/a.fastq"],
     )
-    .fastqc_incapable()
     .run(|root| write_fastq(&root.join("in/a.fastq"), "A_"));
 }
 
@@ -832,7 +806,6 @@ fn hardtrim3_fastq() {
         &["--hardtrim3", "20", "a.fastq", "b.fastq"],
         &["a.fastq", "b.fastq"],
     )
-    .fastqc_incapable()
     .run(stage_se2);
 }
 
@@ -843,7 +816,6 @@ fn hardtrim3_ubam() {
         &["--hardtrim3", "20", "--output-format", "ubam", "a.fastq"],
         &["a.fastq"],
     )
-    .fastqc_incapable()
     .run(stage_se);
 }
 
@@ -863,7 +835,6 @@ fn clock_multipair() {
         ],
         &["c1_R1.fastq", "c1_R2.fastq", "c2_R1.fastq", "c2_R2.fastq"],
     )
-    .fastqc_incapable()
     .run(|root| {
         for p in ["c1", "c2"] {
             write_fastq(&root.join(format!("{p}_R1.fastq")), "S_");
@@ -879,7 +850,6 @@ fn implicon_pair() {
         &["--implicon", "--paired", "i_R1.fastq", "i_R2.fastq"],
         &["i_R1.fastq", "i_R2.fastq"],
     )
-    .fastqc_incapable()
     .run(|root| {
         write_fastq(&root.join("i_R1.fastq"), "S_");
         write_fastq(&root.join("i_R2.fastq"), "S_");
@@ -910,6 +880,20 @@ fn clump_only_paired_no_report_file() {
         &["s_R1.fastq", "s_R2.fastq"],
     )
     .run(stage_pair);
+}
+
+/// #421 — `--fastqc_args` alone must reach `fastqc::run` on the `--clump_only` drivers.
+/// This is the case whose absence let the sixth arm ship: the file's own rule requires a
+/// FastQC-flagged run to write artefacts, and no case paired `--clump_only` with the
+/// args-only spelling.
+#[test]
+fn clump_only_se_fastqc_args_only() {
+    Tripwire::new(
+        "clump_only_se_fastqc_args_only",
+        &["--clump_only", "--fastqc_args", "--quiet", "a.fastq"],
+        &["a.fastq"],
+    )
+    .run(stage_se);
 }
 
 // ── sites 661 / 706 / 752 / 809 — clump_only ─────────────────────────────────
@@ -1025,7 +1009,6 @@ fn orphan_paired_fastq_from_interleaved_bam() {
         &["ip.bam"],
     )
     .unplanned()
-    .fastqc_incapable()
     .run(|root| copy_fixture("ubam_paired_test.bam", &root.join("ip.bam")));
 }
 
@@ -1040,7 +1023,6 @@ fn orphan_paired_fastq_retain_unpaired() {
         &["ip.bam"],
     )
     .unplanned()
-    .fastqc_incapable()
     .run(|root| copy_fixture("ubam_paired_test.bam", &root.join("ip.bam")));
 }
 
@@ -1073,7 +1055,7 @@ fn comparison_reports_an_unplanned_path() {
         .collect();
     let planned = synthetic_planned("src/main.rs:1006", &["a_trimmed.fq"]);
 
-    let err = compare(&root, &created, &planned, &["a.fastq"], Arm::Planned, true)
+    let err = compare(&root, &created, &planned, &["a.fastq"], Arm::Planned)
         .expect_err("an unplanned created path must fail");
 
     assert!(err.contains("a.fastq_trimming_report.txt"), "{err}");
@@ -1094,7 +1076,7 @@ fn comparison_accepts_overplanning() {
         &["s_R1_val_1.fq", "s_R1_unpaired_1.fq", "s_R2_unpaired_2.fq"],
     );
 
-    compare(&root, &created, &planned, &["--paired"], Arm::Planned, true)
+    compare(&root, &created, &planned, &["--paired"], Arm::Planned)
         .expect("planned may legitimately exceed created");
 }
 
@@ -1107,7 +1089,6 @@ fn comparison_rejects_an_empty_run() {
         &synthetic_planned("src/main.rs:1006", &["a_trimmed.fq"]),
         &["a.fastq"],
         Arm::Planned,
-        true,
     )
     .expect_err("a run that created nothing must fail, not pass vacuously");
     assert!(err.contains("never reached its arm"), "{err}");
@@ -1117,7 +1098,7 @@ fn comparison_rejects_an_empty_run() {
 fn comparison_rejects_a_missing_dump() {
     let root = case_root("cmp_nodump");
     let created: BTreeSet<PathBuf> = [PathBuf::from("a_trimmed.fq")].into_iter().collect();
-    let err = compare(&root, &created, &[], &["a.fastq"], Arm::Planned, true)
+    let err = compare(&root, &created, &[], &["a.fastq"], Arm::Planned)
         .expect_err("an empty candidate list must fail on a planned arm");
     assert!(err.contains("hook did not fire"), "{err}");
 }
@@ -1179,7 +1160,7 @@ fn comparison_rejects_two_sites_in_one_run() {
     let mut planned = synthetic_planned("src/main.rs:1006", &["a_trimmed.fq"]);
     planned.push(("src/main.rs:927".into(), PathBuf::from("b_val_1.fq")));
 
-    let err = compare(&root, &created, &planned, &["a.fastq"], Arm::Planned, true)
+    let err = compare(&root, &created, &planned, &["a.fastq"], Arm::Planned)
         .expect_err("two dumped sites in one run must fail");
     assert!(err.contains("two pre-flights"), "{err}");
 }
@@ -1194,7 +1175,7 @@ fn comparison_rejects_stray_fastqc_artifacts() {
     let planned = synthetic_planned("src/main.rs:1006", &["a_trimmed.fq"]);
 
     // No FastQC flag, so the allowance must not apply and the artefact is unplanned.
-    let err = compare(&root, &created, &planned, &["a.fastq"], Arm::Planned, true)
+    let err = compare(&root, &created, &planned, &["a.fastq"], Arm::Planned)
         .expect_err("a _fastqc artefact with no FastQC flag must fail");
     assert!(err.contains("no FastQC flag"), "{err}");
 }
@@ -1213,7 +1194,6 @@ fn comparison_rejects_an_allowance_that_takes_everything() {
         &planned,
         &["--fastqc", "a.fastq"],
         Arm::Planned,
-        true,
     )
     .expect_err("an allowance covering every created file leaves T1 vacuous");
     assert!(err.contains("nothing left to check"), "{err}");
@@ -1252,7 +1232,7 @@ fn hook_is_inert_when_env_unset_and_that_goes_red() {
 
     // And with no dump to compare against, the comparison must fail rather than pass.
     let created = snapshot(&root2);
-    compare(&root2, &created, &[], &["a.fastq"], Arm::Planned, true)
+    compare(&root2, &created, &[], &["a.fastq"], Arm::Planned)
         .expect_err("no dump must fail the comparison, not pass it");
 }
 
@@ -1368,4 +1348,44 @@ fn a_refused_run_writes_nothing() {
         created.is_empty(),
         "a refused run must write nothing, found {created:?}"
     );
+}
+
+#[test]
+fn refuses_fastqc_on_every_arm_that_cannot_run_it() {
+    // One case per arm that `Cli::validate` refuses a FastQC flag on (#421).
+    let cases: &[(&str, &[&str])] = &[
+        ("hardtrim5", &["--hardtrim5", "20", "--fastqc", "a.fastq"]),
+        ("hardtrim3", &["--hardtrim3", "20", "--fastqc", "a.fastq"]),
+        (
+            "clock",
+            &["--clock", "--paired", "--fastqc", "r1.fastq", "r2.fastq"],
+        ),
+        (
+            "implicon",
+            &["--implicon", "--paired", "--fastqc", "r1.fastq", "r2.fastq"],
+        ),
+        ("paired_interleaved", &["--paired", "--fastqc", "ip.bam"]),
+    ];
+
+    for (label, args) in cases {
+        let root = case_root(&format!("refuses_fastqc_{label}"));
+        write_fastq(&root.join("a.fastq"), "A_");
+        write_fastq(&root.join("r1.fastq"), "R1_");
+        write_fastq(&root.join("r2.fastq"), "R2_");
+        copy_fixture("ubam_paired_test.bam", &root.join("ip.bam"));
+        let before = snapshot(&root);
+
+        let (ok, stderr) = run_arm(&root, args);
+
+        assert!(!ok, "{label}: a FastQC flag must be refused here\n{stderr}");
+        assert!(
+            stderr.contains("--fastqc is not supported"),
+            "{label}: expected the FastQC refusal:\n{stderr}"
+        );
+        let created: Vec<PathBuf> = snapshot(&root).difference(&before).cloned().collect();
+        assert!(
+            created.is_empty(),
+            "{label}: a refused run must write nothing, found {created:?}"
+        );
+    }
 }
