@@ -255,7 +255,7 @@ pub fn clump_only_single(
     cores: usize,
     memory_budget_bytes: u64,
     compression: u32,
-    fastqc: bool,
+    fastqc_requested: bool,
     fastqc_args: Option<&str>,
     no_report_file: bool,
 ) -> Result<ClumpOnlyStats> {
@@ -370,7 +370,7 @@ pub fn clump_only_single(
 
     // Optional FastQC — new plumbing (specialty modes previously returned
     // before the fastqc::run call in main.rs).
-    if fastqc {
+    if fastqc_requested {
         fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
     }
 
@@ -392,7 +392,7 @@ pub fn clump_only_paired(
     cores: usize,
     memory_budget_bytes: u64,
     compression: u32,
-    fastqc: bool,
+    fastqc_requested: bool,
     fastqc_args: Option<&str>,
     no_report_file: bool,
 ) -> Result<ClumpOnlyStats> {
@@ -550,7 +550,7 @@ pub fn clump_only_paired(
         write_clump_only_report(&r2_stats, &r2_report, input_r2, &out_r2_path)?;
     }
 
-    if fastqc {
+    if fastqc_requested {
         fastqc::run(&out_r1_path, fastqc_args, output_dir, cores.max(1))?;
         fastqc::run(&out_r2_path, fastqc_args, output_dir, cores.max(1))?;
     }
@@ -739,7 +739,7 @@ pub fn clump_only_single_to_bam(
     memory_budget_bytes: u64,
     preserve_tags: &[String],
     command_line: &str,
-    fastqc: bool,
+    fastqc_requested: bool,
     fastqc_args: Option<&str>,
     no_report_file: bool,
     input_phred_offset: u8,
@@ -841,7 +841,7 @@ pub fn clump_only_single_to_bam(
             .with_context(|| format!("Failed to write report: {}", report_path.display()))?;
     }
 
-    if fastqc {
+    if fastqc_requested {
         // fastqc-rust reads BAM natively (verified against fastqc-rust-1.0.1
         // src/runner.rs — accepts .bam/.ubam extensions + --format bam).
         fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
@@ -889,7 +889,7 @@ pub fn clump_only_paired_to_bam_one_pair(
     memory_budget_bytes: u64,
     preserve_tags: &[String],
     command_line: &str,
-    fastqc: bool,
+    fastqc_requested: bool,
     fastqc_args: Option<&str>,
     no_report_file: bool,
     input_phred_offset: u8,
@@ -1091,7 +1091,7 @@ pub fn clump_only_paired_to_bam_one_pair(
             .with_context(|| format!("Failed to write report: {}", report_path.display()))?;
     }
 
-    if fastqc {
+    if fastqc_requested {
         fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
     }
 

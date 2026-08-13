@@ -633,7 +633,7 @@ fn main() -> Result<()> {
                                 cli.cores,
                                 memory_bytes,
                                 cli.compression,
-                                cli.fastqc,
+                                cli.fastqc_requested(),
                                 cli.fastqc_args.as_deref(),
                                 cli.no_report_file,
                             )
@@ -668,7 +668,7 @@ fn main() -> Result<()> {
                             cli.cores,
                             memory_bytes,
                             cli.compression,
-                            cli.fastqc,
+                            cli.fastqc_requested(),
                             cli.fastqc_args.as_deref(),
                             cli.no_report_file,
                         )?;
@@ -712,7 +712,7 @@ fn main() -> Result<()> {
                             memory_bytes,
                             &cli.preserve_tags,
                             &command_line,
-                            cli.fastqc,
+                            cli.fastqc_requested(),
                             cli.fastqc_args.as_deref(),
                             cli.no_report_file,
                             cli.phred_offset(),
@@ -775,7 +775,7 @@ fn main() -> Result<()> {
                                 memory_bytes,
                                 &cli.preserve_tags,
                                 &command_line,
-                                cli.fastqc,
+                                cli.fastqc_requested(),
                                 cli.fastqc_args.as_deref(),
                                 cli.no_report_file,
                                 cli.phred_offset(),
@@ -816,7 +816,7 @@ fn main() -> Result<()> {
                             memory_bytes,
                             &cli.preserve_tags,
                             &command_line,
-                            cli.fastqc,
+                            cli.fastqc_requested(),
                             cli.fastqc_args.as_deref(),
                             cli.no_report_file,
                             cli.phred_offset(),
@@ -1455,7 +1455,7 @@ fn run_single_file(
     }
 
     // Run FastQC if requested (bundled fastqc-rust library — no shell-out)
-    if cli.fastqc || cli.fastqc_args.is_some() {
+    if cli.fastqc_requested() {
         fastqc::run(
             &output_path,
             cli.fastqc_args.as_deref(),
@@ -1774,7 +1774,7 @@ fn run_paired(
     }
 
     // Run FastQC if requested (bundled fastqc-rust library — no shell-out)
-    if cli.fastqc || cli.fastqc_args.is_some() {
+    if cli.fastqc_requested() {
         fastqc::run(
             &output_r1,
             cli.fastqc_args.as_deref(),
@@ -2238,7 +2238,7 @@ fn run_ubam_output_single(
 
     // Run FastQC if requested. fastqc-rust dispatches on file EXTENSION
     // (not content), so this relies on output_path ending in `.bam`.
-    if cli.fastqc || cli.fastqc_args.is_some() {
+    if cli.fastqc_requested() {
         fastqc::run(
             &output_path,
             cli.fastqc_args.as_deref(),
@@ -2395,7 +2395,7 @@ fn run_ubam_output_paired_two_files(
     // Run FastQC if requested. fastqc-rust dispatches on file EXTENSION
     // (not content), so this relies on output_path ending in `.bam`.
     // PE uBAM output is a single interleaved BAM, so one call covers both mates.
-    if cli.fastqc || cli.fastqc_args.is_some() {
+    if cli.fastqc_requested() {
         fastqc::run(
             &output_path,
             cli.fastqc_args.as_deref(),
@@ -2518,7 +2518,7 @@ fn run_ubam_output_paired_single_file(
     // Run FastQC if requested. fastqc-rust dispatches on file EXTENSION
     // (not content), so this relies on output_path ending in `.bam`.
     // PE uBAM output is a single interleaved BAM, so one call covers both mates.
-    if cli.fastqc || cli.fastqc_args.is_some() {
+    if cli.fastqc_requested() {
         fastqc::run(
             &output_path,
             cli.fastqc_args.as_deref(),

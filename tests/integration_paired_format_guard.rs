@@ -7,7 +7,7 @@
 //! distinguishes the shapes, and runs in the cheap-validation window in `main()`
 //! rather than inside the per-pair worker.
 //!
-//! Three properties are pinned here that unit tests cannot reach:
+//! Four properties are pinned here that unit tests cannot reach:
 //!
 //! 1. The rejection has **no side effects** — no output directory, no adapter
 //!    auto-detection, and on multi-pair input no partial output from earlier
@@ -18,6 +18,9 @@
 //!    a command the binary itself rejects.
 //! 3. A plain+gzip FASTQ pair is still **accepted** — the guard keys on BAM
 //!    count, not format equality.
+//! 4. `--fastqc` is refused on this same `--paired`-with-one-input family, whose
+//!    FASTQ-output path writes no QC report (#421) — and accepted one flag away,
+//!    under `--output-format ubam`, which does.
 //!
 //! Fixtures: `phred64_test.fastq` (plain FASTQ), `BS-seq_10K_R{1,2}.fastq.gz`
 //! (gzipped FASTQ), `ubam_test.bam` / `ubam_paired_test.bam` (two distinct
@@ -436,5 +439,84 @@ fn hardtrim_still_accepts_a_mixed_pair() {
     assert!(
         ok,
         "the paired format guard must not fire for --hardtrim5; stderr: {stderr}"
+    );
+}
+
+/// #421 — `--paired` with one input file is the interleaved-uBAM path, which writes
+/// FASTQ output through `run_paired_ubam_single_file` and reaches no `fastqc::run`.
+#[test]
+fn fastqc_refused_on_paired_interleaved_fastq_output() {
+    let dir = tempdir("fastqc_arm5");
+    let out = nonexistent_out(&dir);
+    let (ok, stderr) = run(&[
+        "--paired",
+        "--fastqc",
+        fixture("ubam_paired_test.bam").to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert!(!ok, "--fastqc must be refused on this arm");
+    assert!(
+        stderr.contains("--fastqc is not supported") && stderr.contains("single input file"),
+        "expected the FastQC refusal naming the shape; got: {stderr}"
+    );
+    // The remedy has to work for a user who simply forgot Read 2.
+    assert!(
+        stderr.contains("two files"),
+        "message must offer the two-file remedy; got: {stderr}"
+    );
+    assert!(
+        !out.exists(),
+        "a refused run must not create its output dir"
+    );
+}
+
+/// One flag apart from the case above, and capable: uBAM output routes above the
+/// interleaved-FASTQ arm and runs FastQC on the single `_val.bam`.
+#[test]
+fn fastqc_accepted_on_paired_interleaved_ubam_output() {
+    let dir = tempdir("fastqc_arm5_ubam");
+    let (ok, stderr) = run(&[
+        "--paired",
+        "--output-format",
+        "ubam",
+        "--fastqc",
+        fixture("ubam_paired_test.bam").to_str().unwrap(),
+        "-o",
+        dir.to_str().unwrap(),
+    ]);
+    assert!(ok, "uBAM output is FastQC-capable; got: {stderr}");
+    let zips: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.ends_with("_fastqc.zip"))
+        .collect();
+    assert_eq!(zips.len(), 1, "expected exactly one report, got {zips:?}");
+}
+
+/// `--clump_only --paired` with one input keeps its own diagnosis, which names the
+/// actual remedy; the FastQC guard excludes it so that message still wins.
+#[test]
+fn clump_only_paired_single_file_keeps_its_own_message() {
+    let dir = tempdir("fastqc_clump_prec");
+    let out = nonexistent_out(&dir);
+    let (ok, stderr) = run(&[
+        "--clump_only",
+        "--paired",
+        "--fastqc",
+        fixture("ubam_paired_test.bam").to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert!(!ok, "the combination is still refused");
+    assert!(
+        stderr.contains("requires two FASTQ input files"),
+        "expected --clump_only's own message, not the FastQC one; got: {stderr}"
+    );
+    // Contrast with the sibling above: `Cli::validate` refuses before `ensure_output_dir`
+    // (`main.rs:231` vs `:420`), this refusal after it. Which layer answers is the point.
+    assert!(
+        out.exists(),
+        "main.rs's refusal runs after ensure_output_dir; if this flips, the guard changed layer"
     );
 }

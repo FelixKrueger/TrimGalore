@@ -5,6 +5,11 @@
 
 #### Changes
 
+- **Breaking: `--fastqc` is now refused on the four specialty modes and on `--paired` with a
+  single interleaved uBAM writing FASTQ, instead of being silently ignored**
+  ([#421](https://github.com/FelixKrueger/TrimGalore/issues/421)); the same change makes
+  `--fastqc_args` alone activate FastQC under `--clump_only`, where it previously did nothing.
+
 - **A BAM read name containing whitespace, or whitespace other than a space inside a preserved
   aux-tag value, is now refused on every output format**
   ([#415](https://github.com/FelixKrueger/TrimGalore/issues/415)) — see the uBAM section of the
