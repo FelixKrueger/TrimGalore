@@ -5,6 +5,26 @@
 
 #### Changes
 
+- **An output file is now published only if every byte it owes was written, including the
+  gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the
+  final name appear only after the writer was closed; it did not make "closed" mean
+  "complete". `FastqWriter` held a `Box<dyn Write + Send>`, through which neither
+  `GzEncoder::try_finish` nor `gzp`'s `ParCompress::finish` is reachable, so each sink's
+  trailer was written by its own `Drop` and the error discarded — an `ENOSPC` or `EIO` in the
+  last few bytes of a serial-gzip run left a trailerless `.gz` at its final name and exited 0.
+  The boxed writer is now an enum over the three concrete sinks, and `finish()` runs the
+  concrete teardown and returns its error *before* the output is published. Two matching
+  cases in `--cores N`: a single-end worker error now reaches the main thread through the
+  result channel (it was printed and swallowed) instead of ending the run like a clean EOF,
+  and both parallel paths join their workers before publishing, so a worker panic can no
+  longer commit a short output on its way out.
+
+  **One visible consequence, on the serial-gzip path only:** the old teardown reached
+  `GzEncoder::flush`, which emits a deflate sync marker before the final block; the explicit
+  `try_finish` does not. The `.gz` bytes therefore differ slightly from v2.3.0 — measured on a
+  1M-read output, 101,067,014 bytes before and 101,067,003 after, with an identical
+  decompressed md5. `--cores N` output is byte-identical either way.
+
 - **A read name that uBAM output cannot encode is now named in the refusal, along with the SAM
   QNAME rule it breaks** ([#429](https://github.com/FelixKrueger/TrimGalore/issues/429)) — FASTQ
   output still accepts those names.

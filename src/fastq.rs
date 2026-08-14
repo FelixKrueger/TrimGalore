@@ -7,8 +7,9 @@ use anyhow::{Context, Result, bail};
 use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
+use gzp::ZWriter;
 use gzp::deflate::Gzip;
-use gzp::par::compress::ParCompressBuilder;
+use gzp::par::compress::{ParCompress, ParCompressBuilder};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
@@ -566,6 +567,84 @@ impl FastqReader {
     }
 }
 
+/// The three concrete sinks a [`FastqWriter`] can write records into.
+///
+/// **An enum rather than `Box<dyn Write + Send>`, and the reason is teardown.**
+/// Every sink here owes trailing bytes that `write`/`flush` never emit — the
+/// gzip CRC/ISIZE trailer, the parallel compressor's final blocks — and the
+/// call that emits them is inherent to the concrete type: neither
+/// [`GzEncoder::try_finish`] nor [`gzp::ZWriter::finish`] is reachable through
+/// a trait object. Behind a `Box<dyn Write>` the trailer was therefore written
+/// by the sink's own `Drop`, which discards the error (`let _ =
+/// self.try_finish()`) or panics — so an `ENOSPC` in the last few bytes of a
+/// run produced a **truncated output file at its final name with exit 0**
+/// (#434).
+///
+/// Naming the sinks makes the teardown callable, so [`FastqWriter::finish`]
+/// can propagate its error *before* [`crate::io::PendingOutput::commit`]
+/// publishes anything. Cost is a three-arm match per record in place of a
+/// vtable dispatch.
+enum Sink {
+    Plain(BufWriter<File>),
+    Gz(BufWriter<GzEncoder<File>>),
+    ParGz(ParCompress<'static, Gzip, File>),
+}
+
+impl Sink {
+    /// Close the sink, writing whatever trailer it owes, and return the error
+    /// if that fails. Consumes `self`, so the sink's own `Drop` has nothing
+    /// left to do — which is also how the success path sidesteps
+    /// `ParCompress::drop`'s `.unwrap()`.
+    fn finish(self) -> Result<()> {
+        match self {
+            // `into_inner` flushes the buffer and hands back the error if
+            // that write fails, where `Drop` would have swallowed it.
+            Sink::Plain(w) => {
+                w.into_inner().map_err(|e| e.into_error())?;
+            }
+            Sink::Gz(w) => {
+                let mut encoder = w.into_inner().map_err(|e| e.into_error())?;
+                // The deflate end-of-stream plus the 8-byte CRC/ISIZE trailer.
+                // `flush()` does NOT write these; only `try_finish` does.
+                encoder.try_finish()?;
+            }
+            Sink::ParGz(mut w) => {
+                w.finish()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Write for Sink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Sink::Plain(w) => w.write(buf),
+            Sink::Gz(w) => w.write(buf),
+            Sink::ParGz(w) => w.write(buf),
+        }
+    }
+
+    /// Forwarded explicitly: `FastqRecord::write_to` issues exactly one
+    /// `write_all` per record, and the default implementation would wrap it in
+    /// a loop over `write` on the hot path.
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        match self {
+            Sink::Plain(w) => w.write_all(buf),
+            Sink::Gz(w) => w.write_all(buf),
+            Sink::ParGz(w) => w.write_all(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Sink::Plain(w) => w.flush(),
+            Sink::Gz(w) => w.flush(),
+            Sink::ParGz(w) => w.flush(),
+        }
+    }
+}
+
 /// A streaming FASTQ writer that handles both plain and gzipped output.
 ///
 /// Records go to a temporary; [`FastqWriter::finish`] publishes them under the
@@ -574,10 +653,8 @@ impl FastqReader {
 pub struct FastqWriter {
     /// Declared before `pending` so the compressor is closed — and its trailer
     /// written — before the temporary is removed on the abandon path.
-    writer: Box<dyn Write + Send>,
-    /// `None` once [`FastqWriter::finish`] has taken it, which is what stops
-    /// `Drop` from removing a temporary that is about to be published.
-    pending: Option<crate::io::PendingOutput>,
+    writer: Sink,
+    pending: crate::io::PendingOutput,
 }
 
 impl FastqWriter {
@@ -605,10 +682,10 @@ impl FastqWriter {
 
         let (pending, file) = crate::io::PendingOutput::create(path)?;
 
-        let writer: Box<dyn Write + Send> = if gzip {
+        let writer = if gzip {
             if cores > 1 {
                 // Parallel gzip: split output into independently-compressed blocks
-                Box::new(
+                Sink::ParGz(
                     ParCompressBuilder::<Gzip>::new()
                         .num_threads(cores)
                         .with_context(|| {
@@ -622,19 +699,16 @@ impl FastqWriter {
                 )
             } else {
                 // Single-threaded gzip with zlib-rs SIMD backend
-                Box::new(BufWriter::with_capacity(
+                Sink::Gz(BufWriter::with_capacity(
                     BUF_SIZE,
                     GzEncoder::new(file, Compression::new(gzip_level)),
                 ))
             }
         } else {
-            Box::new(BufWriter::with_capacity(BUF_SIZE, file))
+            Sink::Plain(BufWriter::with_capacity(BUF_SIZE, file))
         };
 
-        Ok(FastqWriter {
-            writer,
-            pending: Some(pending),
-        })
+        Ok(FastqWriter { writer, pending })
     }
 
     /// Write a FASTQ record.
@@ -645,31 +719,84 @@ impl FastqWriter {
     /// Close the writer and publish the output under its final name. Consumes
     /// `self` so a caller cannot forget.
     ///
-    /// `pending` comes out before `drop(self)`: the trailer is written by the
-    /// inner writer's own `Drop`, so the final name must not exist before it
-    /// runs. The guarantee is that the name appears only after the writer is
-    /// closed, not that the bytes are complete — teardown errors are
-    /// unreachable through `Box<dyn Write>`.
-    pub fn finish(mut self) -> Result<()> {
-        self.writer.flush()?;
-        let pending = self.pending.take();
-        drop(self);
-        match pending {
-            Some(p) => p.commit(),
-            None => Ok(()),
-        }
-    }
-}
-
-impl Drop for FastqWriter {
-    fn drop(&mut self) {
-        let _ = self.writer.flush();
+    /// The sink is torn down *first* and its error propagated, so the final
+    /// name appears only after every byte the output owes — including the
+    /// gzip trailer — has been written successfully. A failed teardown returns
+    /// here with `pending` still armed, so its `Drop` removes the temporary
+    /// and nothing is published (#434). Before this, teardown ran in the
+    /// sink's own `Drop` and its error was discarded.
+    pub fn finish(self) -> Result<()> {
+        let FastqWriter { writer, pending } = self;
+        writer.finish()?;
+        pending.commit()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A writer whose every write fails, which is what a full disk looks like
+    /// from inside the sink. A `File` opened read-only is the shortest
+    /// portable one — no size-limited filesystem required.
+    fn unwritable_file(dir: &std::path::Path) -> File {
+        let path = dir.join("read-only-sink");
+        std::fs::write(&path, b"").unwrap();
+        File::open(&path).unwrap()
+    }
+
+    #[test]
+    fn gz_sink_finish_reports_a_failing_teardown() {
+        // The bytes that fail here are the ones ONLY `try_finish` writes — the
+        // deflate end-of-stream plus the 8-byte CRC/ISIZE trailer. Behind
+        // `Box<dyn Write>` this error was written by `GzEncoder::drop` and
+        // discarded (`let _ = self.try_finish()`), so a run that lost its
+        // trailer still published the file and exited 0 (#434).
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Sink::Gz(BufWriter::with_capacity(
+            BUF_SIZE,
+            GzEncoder::new(unwritable_file(dir.path()), Compression::new(1)),
+        ));
+        assert!(
+            sink.finish().is_err(),
+            "a gzip teardown that cannot write its trailer must not report success"
+        );
+    }
+
+    #[test]
+    fn plain_sink_finish_reports_a_failing_flush() {
+        // The plain path was already covered by `BufWriter::flush` in the old
+        // `finish`; this pins that `Sink::finish` did not lose it.
+        let dir = tempfile::tempdir().unwrap();
+        let mut sink = Sink::Plain(BufWriter::with_capacity(
+            BUF_SIZE,
+            unwritable_file(dir.path()),
+        ));
+        sink.write_all(b"@r\nACGT\n+\nIIII\n").unwrap(); // buffered, not yet written
+        assert!(
+            sink.finish().is_err(),
+            "a buffered write that cannot reach the file must not report success"
+        );
+    }
+
+    #[test]
+    fn gz_sink_finish_writes_the_trailer_explicitly() {
+        // Positive control for the above: the same call on a writable file
+        // leaves a complete gzip member, so the teardown is doing the work
+        // that `Drop` used to do rather than merely returning `Ok`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("complete.gz");
+        let sink = Sink::Gz(BufWriter::with_capacity(
+            BUF_SIZE,
+            GzEncoder::new(File::create(&path).unwrap(), Compression::new(1)),
+        ));
+        sink.finish().unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..3], &[0x1f, 0x8b, 0x08], "gzip magic + deflate");
+        // 8-byte CRC32 + ISIZE trailer, both zero for an empty member.
+        assert_eq!(&bytes[bytes.len() - 8..], &[0u8; 8]);
+    }
 
     #[test]
     fn test_append_to_id_no_tag_tail_appends_to_end() {

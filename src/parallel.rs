@@ -131,9 +131,10 @@ pub fn run_paired_end_parallel(
         // ── Worker threads ──────────────────────────────────────────────
         // Each worker owns its receiver (mpsc::Receiver is !Sync, so we
         // move them rather than borrow).
+        let mut worker_handles = Vec::with_capacity(cores);
         for rx in work_rxs.drain(..) {
             let rtx = result_tx.clone();
-            s.spawn(move || {
+            worker_handles.push(s.spawn(move || {
                 while let Ok(Some((seq, mut r1s, mut r2s, pts))) = rx.recv() {
                     let result = process_paired_batch(
                         seq,
@@ -160,7 +161,7 @@ pub fn run_paired_end_parallel(
                         }
                     }
                 }
-            });
+            }));
         }
         // Clone result_tx for the reader so it can also surface errors via
         // the result channel before exiting (Step 6a).
@@ -304,6 +305,20 @@ pub fn run_paired_end_parallel(
 
         if let Some(e) = reader_join_err.or(first_error) {
             return Err(e);
+        }
+
+        // Join the workers BEFORE publishing. `thread::scope` joins them on the
+        // way out of this closure — i.e. after the commits below — so a
+        // panicking worker used to leave a truncated output at its final name
+        // and only then re-raise, exiting 101 (#434). The main loop cannot see
+        // it: a panic drops that worker's sender, and once every sender is gone
+        // the loop exits on a closed channel with `first_error = None`, exactly
+        // like a clean EOF. By here the reader has returned and dropped the
+        // work senders, so every worker is finished or about to be.
+        for handle in worker_handles {
+            if handle.join().is_err() {
+                bail!("Worker thread panicked");
+            }
         }
 
         // Publish in the creation order — R1, R2, passthrough, unpaired R1/R2 —
@@ -930,27 +945,38 @@ pub fn run_single_end_parallel(
         work_rxs.push(rx);
     }
 
-    let (result_tx, result_rx) = mpsc::sync_channel::<SingleBatchResult>(cores * 2);
+    // `Result<_>` in the channel, not the bare batch: a worker error has to
+    // reach the main thread, because that is the thread that decides whether
+    // to publish. This mirrors the paired path, which has carried
+    // `Result<PairedBatchResult>` since it was written; the single-end twin
+    // printed "Worker error" and broke, and the main loop then ended on a
+    // closed channel with nothing to distinguish it from a clean EOF — so a
+    // short output was committed with exit 0 (#434).
+    let (result_tx, result_rx) = mpsc::sync_channel::<Result<SingleBatchResult>>(cores * 2);
 
     std::thread::scope(|s| -> Result<TrimStats> {
         // ── Worker threads ──────────────────────────────────────────────
+        let mut worker_handles = Vec::with_capacity(cores);
         for rx in work_rxs.drain(..) {
             let rtx = result_tx.clone();
-            s.spawn(move || {
+            worker_handles.push(s.spawn(move || {
                 while let Ok(Some((seq, mut reads))) = rx.recv() {
                     match process_single_batch(seq, &mut reads, config, gzip) {
                         Ok(result) => {
-                            if rtx.send(result).is_err() {
+                            if rtx.send(Ok(result)).is_err() {
                                 break;
                             }
                         }
                         Err(e) => {
-                            eprintln!("Worker error: {}", e);
+                            // Send-then-break: if the receiver is already gone
+                            // the main thread is bailing for its own reason
+                            // and has an error of its own.
+                            let _ = rtx.send(Err(e));
                             break;
                         }
                     }
                 }
-            });
+            }));
         }
         drop(result_tx);
 
@@ -972,19 +998,57 @@ pub fn run_single_end_parallel(
         let mut pending: BTreeMap<u64, SingleBatchResult> = BTreeMap::new();
         let mut total = TrimStats::with_adapter_count(config.adapters.len());
 
-        while let Ok(result) = result_rx.recv() {
-            pending.insert(result.seq, result);
-            while let Some(r) = pending.remove(&expected) {
-                out.write_all(&r.compressed)?;
-                total.merge(&r.stats);
-                expected += 1;
+        // Track the first worker error so we can return it after joining the
+        // reader thread, same shape as the paired path.
+        let mut first_error: Option<anyhow::Error> = None;
+
+        'outer: while let Ok(result) = result_rx.recv() {
+            match result {
+                Ok(batch) => {
+                    pending.insert(batch.seq, batch);
+                    while let Some(r) = pending.remove(&expected) {
+                        out.write_all(&r.compressed)?;
+                        total.merge(&r.stats);
+                        expected += 1;
+                    }
+                }
+                Err(e) => {
+                    // Stop before writing more bytes; `pending_output` is
+                    // dropped unpublished on the way out.
+                    first_error = Some(e);
+                    break 'outer;
+                }
             }
         }
 
-        match reader_handle.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => bail!("Reader thread panicked"),
+        // Unblock any worker still parked in `rtx.send` so it exits, drops its
+        // work-channel receiver, and lets the reader's `send` return — without
+        // this, an early `break` above deadlocks the join below. Same
+        // reasoning as the paired path; a no-op on the clean path, where the
+        // channel has already closed.
+        drop(result_rx);
+
+        let reader_join_err = match reader_handle.join() {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e),
+            Err(_) => Some(anyhow::anyhow!("Reader thread panicked")),
+        };
+
+        // Reader error first: it carries the full anyhow chain.
+        if let Some(e) = reader_join_err.or(first_error) {
+            return Err(e);
+        }
+
+        // Join the workers BEFORE publishing. `thread::scope` joins them on
+        // the way out of this closure — i.e. after the commit — so a panicking
+        // worker used to leave a truncated output at its final name and only
+        // then re-raise, exiting 101 (#434). By here the reader has returned
+        // and dropped the work senders, so every worker is either finished or
+        // about to be.
+        for handle in worker_handles {
+            if handle.join().is_err() {
+                bail!("Worker thread panicked");
+            }
         }
 
         drop(out);
