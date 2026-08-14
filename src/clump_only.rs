@@ -294,10 +294,8 @@ pub fn clump_only_single(
         .map(|_| SingleBin::with_budget(layout.bin_byte_budget))
         .collect();
 
-    let mut out = BufWriter::new(
-        File::create(&output_path)
-            .with_context(|| format!("Failed to create output: {}", output_path.display()))?,
-    );
+    let (pending_output, out_file) = crate::io::PendingOutput::create(&output_path)?;
+    let mut out = BufWriter::new(out_file);
 
     let mut stats = ClumpOnlyStats {
         n_bins: layout.n_bins,
@@ -346,6 +344,9 @@ pub fn clump_only_single(
 
     out.flush()?;
     drop(out);
+    // Publish here, not at the end of the function: `fastqc::run` below reads
+    // the output by its final path.
+    pending_output.commit()?;
 
     stats.input_bytes = std::fs::metadata(input)
         .with_context(|| format!("Failed to stat input {}", input.display()))?
@@ -436,14 +437,10 @@ pub fn clump_only_paired(
         .map(|_| PairedBin::with_budget(layout.bin_byte_budget))
         .collect();
 
-    let mut out_r1 = BufWriter::new(
-        File::create(&out_r1_path)
-            .with_context(|| format!("Failed to create R1 output: {}", out_r1_path.display()))?,
-    );
-    let mut out_r2 = BufWriter::new(
-        File::create(&out_r2_path)
-            .with_context(|| format!("Failed to create R2 output: {}", out_r2_path.display()))?,
-    );
+    let (pending_r1, file_r1) = crate::io::PendingOutput::create(&out_r1_path)?;
+    let (pending_r2, file_r2) = crate::io::PendingOutput::create(&out_r2_path)?;
+    let mut out_r1 = BufWriter::new(file_r1);
+    let mut out_r2 = BufWriter::new(file_r2);
 
     let mut stats = ClumpOnlyStats {
         n_bins: layout.n_bins,
@@ -518,6 +515,10 @@ pub fn clump_only_paired(
     out_r2.flush()?;
     drop(out_r1);
     drop(out_r2);
+    // Publish here, not at the end of the function: `fastqc::run` below reads
+    // both outputs by their final paths.
+    pending_r1.commit()?;
+    pending_r2.commit()?;
 
     let in_bytes_r1 = std::fs::metadata(input_r1)?.len();
     let in_bytes_r2 = std::fs::metadata(input_r2)?.len();

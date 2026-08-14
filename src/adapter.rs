@@ -772,7 +772,7 @@ mod tests {
             };
             writer.write_record(&rec)?;
         }
-        writer.flush()?;
+        writer.finish()?;
         Ok(())
     }
 

@@ -567,8 +567,17 @@ impl FastqReader {
 }
 
 /// A streaming FASTQ writer that handles both plain and gzipped output.
+///
+/// Records go to a temporary; [`FastqWriter::finish`] publishes them under the
+/// final name. A writer that is dropped instead of finished leaves no output
+/// file at all.
 pub struct FastqWriter {
+    /// Declared before `pending` so the compressor is closed — and its trailer
+    /// written — before the temporary is removed on the abandon path.
     writer: Box<dyn Write + Send>,
+    /// `None` once [`FastqWriter::finish`] has taken it, which is what stops
+    /// `Drop` from removing a temporary that is about to be published.
+    pending: Option<crate::io::PendingOutput>,
 }
 
 impl FastqWriter {
@@ -594,8 +603,7 @@ impl FastqWriter {
             })?;
         }
 
-        let file = File::create(path)
-            .with_context(|| format!("Failed to create output file: {}", path.display()))?;
+        let (pending, file) = crate::io::PendingOutput::create(path)?;
 
         let writer: Box<dyn Write + Send> = if gzip {
             if cores > 1 {
@@ -623,7 +631,10 @@ impl FastqWriter {
             Box::new(BufWriter::with_capacity(BUF_SIZE, file))
         };
 
-        Ok(FastqWriter { writer })
+        Ok(FastqWriter {
+            writer,
+            pending: Some(pending),
+        })
     }
 
     /// Write a FASTQ record.
@@ -631,10 +642,22 @@ impl FastqWriter {
         record.write_to(&mut self.writer)
     }
 
-    /// Flush and finalize the writer.
-    pub fn flush(&mut self) -> Result<()> {
+    /// Close the writer and publish the output under its final name. Consumes
+    /// `self` so a caller cannot forget.
+    ///
+    /// `pending` comes out before `drop(self)`: the trailer is written by the
+    /// inner writer's own `Drop`, so the final name must not exist before it
+    /// runs. The guarantee is that the name appears only after the writer is
+    /// closed, not that the bytes are complete — teardown errors are
+    /// unreachable through `Box<dyn Write>`.
+    pub fn finish(mut self) -> Result<()> {
         self.writer.flush()?;
-        Ok(())
+        let pending = self.pending.take();
+        drop(self);
+        match pending {
+            Some(p) => p.commit(),
+            None => Ok(()),
+        }
     }
 }
 
@@ -795,7 +818,7 @@ mod tests {
             for rec in &records {
                 writer.write_record(rec)?;
             }
-            writer.flush()?;
+            writer.finish()?;
         }
 
         // Read back

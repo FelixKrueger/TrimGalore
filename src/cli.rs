@@ -291,9 +291,9 @@ pub struct Cli {
     /// files use unusual header conventions and the sync check fires unexpectedly,
     /// please file an issue with a sample header line. If --fastqc is enabled the
     /// passthrough FastQC report will look poor (cell-barcode reads are intentionally
-    /// uniformly-structured) — that's expected, not a defect. On a mid-stream reader
-    /// error (truncated or desynced passthrough), partial output files may remain on
-    /// disk — re-run after fixing the input.
+    /// uniformly-structured) — that's expected, not a defect. A mid-stream reader
+    /// error (truncated or desynced passthrough) refuses the run and writes no
+    /// output files.
     #[clap(long = "passthrough")]
     pub passthrough: Option<PathBuf>,
 

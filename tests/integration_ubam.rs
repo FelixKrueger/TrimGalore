@@ -300,8 +300,10 @@ fn ws_qname_refused_at_sanity_check_entry_point() {
     );
 }
 
+/// #428 — the refusal happens at record 2, past the writer's creation, and
+/// still publishes nothing.
 #[test]
-fn ws_qname_refused_in_trimming_loop_ubam_out_leaves_partial() {
+fn ws_qname_refused_in_trimming_loop_ubam_out_leaves_no_output() {
     let dir = fresh_tmpdir("tg_415_loop_ubam");
     let output = Command::new(binary())
         .args(["--output-format", "ubam", "--preserve-tags", "CB"])
@@ -319,21 +321,23 @@ fn ws_qname_refused_in_trimming_loop_ubam_out_leaves_partial() {
         "must be caught in the trimming loop at record 2, not at the sanity check, got: {}",
         stderr
     );
-    // The writer opens before the read loop, so record 1 is already on disk.
-    // Asserted, not desired — the cure spans all per-record bails and is tracked
-    // separately.
-    let partial = dir.join("ubam_ws_qname_late_trimmed.bam");
-    let bytes = std::fs::read(&partial).expect("a mid-stream refusal leaves a partial uBAM behind");
-    // What makes the residue a data-integrity problem is that it is indistinguishable
-    // from a complete BAM: bgzf's Drop finalises it, EOF marker included.
-    const BGZF_EOF: &[u8] = &[
-        0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02,
-        0x00, 0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ];
+    // The writer opens before the read loop, so record 1 has been written —
+    // to the temporary, which is never published.
+    let out = dir.join("ubam_ws_qname_late_trimmed.bam");
     assert!(
-        bytes.ends_with(BGZF_EOF),
-        "the partial carries a valid BGZF EOF marker, so nothing downstream flags it ({} bytes)",
-        bytes.len()
+        !out.exists(),
+        "a refused run must publish no output file, found {} bytes",
+        std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0)
+    );
+    let leftovers: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.ends_with(".partial"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "the temporary must be removed too, found: {:?}",
+        leftovers
     );
 }
 
@@ -358,6 +362,11 @@ fn ws_qname_refused_in_trimming_loop_fastq_out() {
         stderr.contains("read name contains whitespace"),
         "expected the whitespace message on the FASTQ-output path, got: {}",
         stderr
+    );
+    // #428 — this arm was previously unpinned in both directions.
+    assert!(
+        !dir.join("ubam_ws_qname_late_trimmed.fq").exists(),
+        "a refused run must publish no output file"
     );
 }
 

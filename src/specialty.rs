@@ -66,8 +66,7 @@ pub fn hardtrim5(
         writer.write_record(&record)?;
     }
 
-    writer.flush()?;
-    drop(writer);
+    writer.finish()?;
 
     eprintln!("Finished writing {} sequences\n", count);
     Ok(())
@@ -110,8 +109,7 @@ pub fn hardtrim3(
         writer.write_record(&record)?;
     }
 
-    writer.flush()?;
-    drop(writer);
+    writer.finish()?;
 
     eprintln!("Finished writing {} sequences\n", count);
     Ok(())
@@ -331,10 +329,8 @@ pub fn clock(
         }
     }
 
-    writer_r1.flush()?;
-    writer_r2.flush()?;
-    drop(writer_r1);
-    drop(writer_r2);
+    writer_r1.finish()?;
+    writer_r2.finish()?;
 
     let perc = if count > 0 {
         format!("{:.2}", filtered_count as f64 / count as f64 * 100.0)
@@ -428,10 +424,8 @@ pub fn implicon(
         }
     }
 
-    writer_r1.flush()?;
-    writer_r2.flush()?;
-    drop(writer_r1);
-    drop(writer_r2);
+    writer_r1.finish()?;
+    writer_r2.finish()?;
 
     eprintln!("\nSequences processed in total: {}\n", count);
     Ok(())
@@ -542,7 +536,7 @@ mod tests {
         for r in records {
             w.write_record(r)?;
         }
-        w.flush()?;
+        w.finish()?;
         Ok(())
     }
 

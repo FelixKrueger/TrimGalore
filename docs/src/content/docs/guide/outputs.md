@@ -119,6 +119,12 @@ sampleA/reads_1.fq  sampleA/reads_2.fq      # unaffected
 sampleB/reads_1.fq  sampleB/reads_2.fq
 ```
 
+## Refused runs
+
+A run that fails part-way through writes no output file. Records go to a hidden `.partial` sibling of the final name and are renamed into place only once the writer closes cleanly, so a refusal — a malformed read name a million records in, a truncated input — leaves nothing behind, and a previous run's output at the same path is untouched.
+
+A leftover `.<name>.partial` means the process was killed mid-run, or that the final rename failed — in that case the error names it as holding the trimmed data. Otherwise it is safe to delete; the next run at the same output path overwrites it.
+
 ## Custom output basename
 
 `--basename BASE` replaces the input filename stem in the **trimmed output** names:
@@ -136,7 +142,7 @@ Two limits worth knowing. Trimming reports keep their input-derived names (`INPU
 
 `--rename` does not affect filenames. It is a boolean that appends `:clip5:SEQ` and/or `:clip3:SEQ` to the **read IDs**, recording the bases removed by `--clip_R1/R2`, `--three_prime_clip_R1/R2` or `--hardtrim5/3` — each half only when that side was clipped. Without one of those flags it appends nothing. Commonly used to keep UMIs recoverable downstream.
 
-Two combinations are refused. `--clump_only` rejects `--rename` at any output format, because it preserves record contents byte-identically. And `--output-format ubam` rejects it when **at least one input is FASTQ** and a clipping flag is set: the annotation is appended to the end of the read ID, so a header carrying text after the first space puts the annotation inside that text, and BAM read names cannot contain whitespace, so none of that tail reaches the output. Whether that happens depends on the individual header, so the whole run is refused rather than decided per record — a mid-stream refusal would leave a partial BAM. uBAM input is accepted: BAM read names carry no description, so there the annotation lands on the name itself.
+Two combinations are refused. `--clump_only` rejects `--rename` at any output format, because it preserves record contents byte-identically. And `--output-format ubam` rejects it when **at least one input is FASTQ** and a clipping flag is set: the annotation is appended to the end of the read ID, so a header carrying text after the first space puts the annotation inside that text, and BAM read names cannot contain whitespace, so none of that tail reaches the output. Whether that happens depends on the individual header, so the whole run is refused rather than decided per record — a per-record decision would keep the annotation for some reads and silently drop it for others. uBAM input is accepted: BAM read names carry no description, so there the annotation lands on the name itself.
 
 ## FastQC
 

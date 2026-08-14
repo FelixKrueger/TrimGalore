@@ -5,6 +5,11 @@
 
 #### Changes
 
+- **A run that is refused part-way through now writes no output file, and leaves a previous
+  run's output at that path untouched**
+  ([#428](https://github.com/FelixKrueger/TrimGalore/issues/428)) — see `docs/guide/outputs.md`
+  for what a leftover `.partial` file means.
+
 - **Breaking: `--fastqc` is now refused on the four specialty modes and on `--paired` with a
   single interleaved uBAM writing FASTQ, instead of being silently ignored**
   ([#421](https://github.com/FelixKrueger/TrimGalore/issues/421)); the same change makes
