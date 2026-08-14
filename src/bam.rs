@@ -523,7 +523,12 @@ impl BamReader {
 /// user-specified order, so the tail IS the source of truth — the writer
 /// just round-trips whatever it finds.
 pub struct BamWriter {
+    /// Declared before `pending` so the BGZF stream is closed before the
+    /// temporary is removed on the abandon path.
     inner: bam::io::Writer<bgzf::Writer<BufWriter<File>>>,
+    /// `None` once [`BamWriter::finish`] has taken it. While it is `Some`, a
+    /// drop removes the temporary and no output file is created.
+    pending: Option<crate::io::PendingOutput>,
     header: Header,
     /// ASCII offset of the incoming `FastqRecord.qual` — 33, or 64 under
     /// `--phred64`. Subtracted per byte on write, because BAM `QUAL` stores
@@ -562,14 +567,14 @@ impl BamWriter {
     ) -> Result<Self> {
         let path = path.as_ref();
         let header = build_output_header(source_header, command_line)?;
-        let file = File::create(path)
-            .with_context(|| format!("Failed to create uBAM output: {}", path.display()))?;
+        let (pending, file) = crate::io::PendingOutput::create(path)?;
         let mut inner = bam::io::Writer::new(BufWriter::new(file));
         inner
             .write_header(&header)
             .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
         Ok(Self {
             inner,
+            pending: Some(pending),
             header,
             input_phred_offset,
         })
@@ -639,13 +644,21 @@ impl BamWriter {
         Ok(())
     }
 
-    /// Flush and finalise the writer — writes BGZF EOF marker. Consumes
-    /// `self` so the caller can't forget.
+    /// Flush and finalise the writer — writes the BGZF EOF marker, then
+    /// publishes the output under its final name. Consumes `self` so the
+    /// caller can't forget.
+    ///
+    /// `try_finish` before the rename, and `pending` out before the drop.
     pub fn finish(mut self) -> Result<()> {
         self.inner
             .try_finish()
             .context("failed to finalise uBAM output (BGZF EOF marker)")?;
-        Ok(())
+        let pending = self.pending.take();
+        drop(self);
+        match pending {
+            Some(p) => p.commit(),
+            None => Ok(()),
+        }
     }
 }
 

@@ -249,13 +249,13 @@ pub fn demultiplex(
         }
     }
 
-    // Flush all writers
-    for writer in writers.values_mut() {
-        writer.flush()?;
+    // Publish in barcode order, then NoCode, with nothing fallible in between.
+    let mut by_barcode: Vec<(String, FastqWriter)> = writers.drain().collect();
+    by_barcode.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, writer) in by_barcode {
+        writer.finish()?;
     }
-    nocode_writer.flush()?;
-    drop(writers);
-    drop(nocode_writer);
+    nocode_writer.finish()?;
 
     eprintln!("Processed sequences from file >{trimmed_name}< in total: {total}");
 

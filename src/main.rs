@@ -399,7 +399,8 @@ fn main() -> Result<()> {
              so a header carrying text after the first space puts the annotation inside \
              that text, and BAM read names cannot contain whitespace, so none of that \
              tail reaches the output. The whole run is refused rather than decided per \
-             record, because a mid-stream refusal would leave a partial BAM behind. Use \
+             record, because a per-record decision would keep the annotation for some \
+             reads and silently drop it for others. Use \
              FASTQ output, or drop --rename. uBAM input is unaffected: BAM read names \
              carry no description, so there the annotation lands on the name itself."
         );
@@ -1330,8 +1331,7 @@ fn run_single_file(
         let mut reader = open_sync_reader(input, &cli.preserve_tags)?;
         let mut writer = FastqWriter::create(&output_path, gzip, 1, config.gzip_level)?;
         let stats = trimmer::run_single_end(reader.as_mut(), &mut writer, config)?;
-        writer.flush()?;
-        drop(writer);
+        writer.finish()?;
         stats
     };
 
@@ -1624,22 +1624,19 @@ fn run_paired(
             },
         )?;
 
-        writer_r1.flush()?;
-        writer_r2.flush()?;
-        if let Some(ref mut w) = writer_passthrough {
-            w.flush()?;
+        // Fixed order, and nothing fallible between the first and the last, so
+        // the window in which only some of the set exists is the renames alone.
+        writer_r1.finish()?;
+        writer_r2.finish()?;
+        if let Some(w) = writer_passthrough {
+            w.finish()?;
         }
-        if let Some(ref mut w) = unpaired_w1 {
-            w.flush()?;
+        if let Some(w) = unpaired_w1 {
+            w.finish()?;
         }
-        if let Some(ref mut w) = unpaired_w2 {
-            w.flush()?;
+        if let Some(w) = unpaired_w2 {
+            w.finish()?;
         }
-        drop(writer_r1);
-        drop(writer_r2);
-        drop(writer_passthrough);
-        drop(unpaired_w1);
-        drop(unpaired_w2);
 
         result
     };
@@ -1894,13 +1891,14 @@ fn run_paired_ubam_single_file(
                 r2: cli.length_2,
             },
         )?;
-        writer_r1.flush()?;
-        writer_r2.flush()?;
-        if let Some(ref mut w) = unpaired_w1 {
-            w.flush()?;
+        // Fixed order, nothing fallible in between — see run_paired.
+        writer_r1.finish()?;
+        writer_r2.finish()?;
+        if let Some(w) = unpaired_w1 {
+            w.finish()?;
         }
-        if let Some(ref mut w) = unpaired_w2 {
-            w.flush()?;
+        if let Some(w) = unpaired_w2 {
+            w.finish()?;
         }
         result
     };

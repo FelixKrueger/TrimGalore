@@ -68,7 +68,7 @@ When `--fastqc` is set, FastQC runs on all three outputs, including the passthro
 
 - **Untouched bytes.** The passthrough record's sequence and quality are written verbatim. The third line (`+...` description) and line endings are canonicalised to bare `+` and `\n` — the standard canonicalisation R1/R2 already go through. The id / seq / qual fields are byte-identical to the input.
 - **Single-pass, in-memory lockstep.** The third stream is read in parallel with R1/R2 in the same reader thread (parallel path) or the same loop iteration (serial path); the writes happen in the same flush iteration as R1/R2 within each batch. No temp files.
-- **Mid-stream errors leave partial output on disk.** If a sync error fires at record 5,000 of 10,000, files already-written to disk are not rolled back — re-run the input after fixing the source. Trim Galore prints a clear error and exits with non-zero status.
+- **Mid-stream errors leave no output on disk.** If a sync error fires at record 5,000 of 10,000, none of the three outputs is published — re-run the input after fixing the source. Trim Galore prints a clear error and exits with non-zero status.
 - **Output gzip is uniform** across all three outputs and follows R1's input compression (plain R1 in → plain `_passthrough.fq` out; gzipped R1 in → gzipped `_passthrough.fq.gz` out), regardless of the passthrough input's own extension.
 
 ## Worked example

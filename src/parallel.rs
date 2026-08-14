@@ -87,8 +87,8 @@ struct PairedBatchResult {
 /// Records dropped by length/N/quality filters are also dropped from the
 /// passthrough stream. The result channel uses `Result<PairedBatchResult>`
 /// so a reader-side sync error short-circuits the main flush loop *before*
-/// further output bytes commit to disk (B-Crit-1 fix; partial outputs may
-/// still exist on disk on mid-stream error — v1 contract).
+/// further output bytes commit to disk (B-Crit-1 fix). No output file is
+/// published unless every writer closes cleanly.
 #[allow(clippy::too_many_arguments)]
 pub fn run_paired_end_parallel(
     reader_r1: Box<dyn RecordSource>,
@@ -209,11 +209,19 @@ pub fn run_paired_end_parallel(
         });
 
         // ── Main thread: ordered collection + file writing ──────────────
-        let mut out_r1 = File::create(output_r1)?;
-        let mut out_r2 = File::create(output_r2)?;
-        let mut out_pt = output_passthrough.map(File::create).transpose()?;
-        let mut out_up_r1 = unpaired_r1_path.map(File::create).transpose()?;
-        let mut out_up_r2 = unpaired_r2_path.map(File::create).transpose()?;
+        // Bare handles, so there is no user-space buffer or trailer to order
+        // against the rename; the guards are committed together on success.
+        let mut pending_outputs: Vec<crate::io::PendingOutput> = Vec::new();
+        let mut open_pending = |path: &Path| -> Result<File> {
+            let (guard, file) = crate::io::PendingOutput::create(path)?;
+            pending_outputs.push(guard);
+            Ok(file)
+        };
+        let mut out_r1 = open_pending(output_r1)?;
+        let mut out_r2 = open_pending(output_r2)?;
+        let mut out_pt = output_passthrough.map(&mut open_pending).transpose()?;
+        let mut out_up_r1 = unpaired_r1_path.map(&mut open_pending).transpose()?;
+        let mut out_up_r2 = unpaired_r2_path.map(&mut open_pending).transpose()?;
 
         let mut expected: u64 = 0;
         let mut pending: BTreeMap<u64, PairedBatchResult> = BTreeMap::new();
@@ -260,8 +268,7 @@ pub fn run_paired_end_parallel(
                 }
                 Err(e) => {
                     // Reader or worker error — stop further writes and bail.
-                    // Partial output files may remain on disk (v1 contract;
-                    // Cli --help documents this). Plan v2 §Assumptions §13.
+                    // The pending outputs are dropped unpublished.
                     first_error = Some(e);
                     break 'outer;
                 }
@@ -297,6 +304,13 @@ pub fn run_paired_end_parallel(
 
         if let Some(e) = reader_join_err.or(first_error) {
             return Err(e);
+        }
+
+        // Publish in the creation order — R1, R2, passthrough, unpaired R1/R2 —
+        // with nothing fallible in between.
+        drop((out_r1, out_r2, out_pt, out_up_r1, out_up_r2));
+        for guard in pending_outputs {
+            guard.commit()?;
         }
 
         Ok((total_r1, total_r2, total_pair))
@@ -953,7 +967,7 @@ pub fn run_single_end_parallel(
         });
 
         // ── Main thread: ordered collection + file writing ──────────────
-        let mut out = File::create(output)?;
+        let (pending_output, mut out) = crate::io::PendingOutput::create(output)?;
         let mut expected: u64 = 0;
         let mut pending: BTreeMap<u64, SingleBatchResult> = BTreeMap::new();
         let mut total = TrimStats::with_adapter_count(config.adapters.len());
@@ -972,6 +986,9 @@ pub fn run_single_end_parallel(
             Ok(Err(e)) => return Err(e),
             Err(_) => bail!("Reader thread panicked"),
         }
+
+        drop(out);
+        pending_output.commit()?;
 
         Ok(total)
     })
@@ -1307,7 +1324,7 @@ mod tests {
             let mut writer =
                 FastqWriter::create(&serial_output, false, 1, crate::fastq::DEFAULT_GZIP_LEVEL)?;
             let stats = crate::trimmer::run_single_end(&mut reader, &mut writer, &config)?;
-            writer.flush()?;
+            writer.finish()?;
             stats
         };
 
@@ -2037,12 +2054,9 @@ mod tests {
             &config,
             UnpairedLengths { r1: 35, r2: 35 },
         )?;
-        wr_r1.flush()?;
-        wr_r2.flush()?;
-        wr_pt.flush()?;
-        drop(wr_r1);
-        drop(wr_r2);
-        drop(wr_pt);
+        wr_r1.finish()?;
+        wr_r2.finish()?;
+        wr_pt.finish()?;
 
         // Stats sanity: ~1/3 dropped (every 3rd row has short R1).
         assert_eq!(pair_stats.passthrough_records_checked, 50);
@@ -2121,9 +2135,9 @@ mod tests {
                 &config,
                 UnpairedLengths { r1: 35, r2: 35 },
             )?;
-            wr_r1.flush()?;
-            wr_r2.flush()?;
-            wr_pt.flush()?;
+            wr_r1.finish()?;
+            wr_r2.finish()?;
+            wr_pt.finish()?;
             stats
         };
 

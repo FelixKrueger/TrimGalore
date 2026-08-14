@@ -666,9 +666,143 @@ pub fn strip_fastq_extensions(path: &Path) -> String {
         .to_string()
 }
 
+// ─── Deferred publication of record output (#428) ───────────────────────────
+
+/// Temporary path a record output is written to before it is published.
+///
+/// The marker wraps the *whole* file name, dot-prefixed: `x_trimmed.fq.gz` →
+/// `.x_trimmed.fq.gz.partial`. No suffix may be appended to a name that has
+/// been through this — an output namer must derive from the input path, never
+/// from a temporary.
+///
+/// The mapping is byte-exact and therefore injective, which is what
+/// `tests/integration_preflight_tripwire.rs` rests on when it excludes these
+/// from the collision pre-flight.
+pub fn partial_output_name(final_path: &Path) -> PathBuf {
+    let mut tmp = std::ffi::OsString::from(".");
+    tmp.push(final_path.file_name().unwrap_or_default());
+    tmp.push(".partial");
+    match final_path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.join(tmp),
+        _ => PathBuf::from(tmp),
+    }
+}
+
+/// A record output whose final name appears only once its writer is closed.
+///
+/// Writes land on [`partial_output_name`]; [`PendingOutput::commit`] renames
+/// onto the final path. Dropped without committing, the temporary is removed
+/// and the final path is never created — so a refused run leaves no output,
+/// and a previous run's output at that path survives untouched.
+///
+/// **Commit where the writer is closed, never later.** FastQC, `--demux`,
+/// `write_clump_only_report` and `clump_only`'s `output_bytes` all read the
+/// output by its *final* path within the same run, and the last of those is a
+/// `?`-propagating `metadata` call on the success path — so a late commit
+/// fails a good run with `ENOENT`.
+pub struct PendingOutput {
+    tmp: PathBuf,
+    final_path: PathBuf,
+    /// Whether `Drop` still owns `tmp`. Set *before* the rename is attempted,
+    /// so a failed rename leaves the temporary on disk rather than deleting
+    /// the data it was protecting.
+    released: bool,
+}
+
+impl PendingOutput {
+    /// Create the temporary and hand back its handle alongside the guard.
+    pub fn create(final_path: &Path) -> Result<(Self, std::fs::File)> {
+        let tmp = partial_output_name(final_path);
+        let file = std::fs::File::create(&tmp).with_context(|| {
+            format!(
+                "Failed to create output {} (writing to {})",
+                final_path.display(),
+                tmp.display()
+            )
+        })?;
+        Ok((
+            Self {
+                tmp,
+                final_path: final_path.to_path_buf(),
+                released: false,
+            },
+            file,
+        ))
+    }
+
+    /// Publish the temporary under its final name. Consumes `self`.
+    pub fn commit(mut self) -> Result<()> {
+        self.released = true;
+        std::fs::rename(&self.tmp, &self.final_path).with_context(|| {
+            format!(
+                "Failed to publish {} (the trimmed data is intact at {})",
+                self.final_path.display(),
+                self.tmp.display()
+            )
+        })
+    }
+
+    /// The temporary path, for error messages.
+    pub fn tmp_path(&self) -> &Path {
+        &self.tmp
+    }
+}
+
+impl Drop for PendingOutput {
+    fn drop(&mut self) {
+        if !self.released {
+            let _ = std::fs::remove_file(&self.tmp);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_output_name_wraps_the_whole_file_name() {
+        assert_eq!(
+            partial_output_name(Path::new("/d/x_trimmed.fq.gz")),
+            PathBuf::from("/d/.x_trimmed.fq.gz.partial")
+        );
+        assert_eq!(
+            partial_output_name(Path::new("x_trimmed.fq")),
+            PathBuf::from(".x_trimmed.fq.partial")
+        );
+    }
+
+    /// `commit` sets `released` before attempting the rename, so a rename that
+    /// fails leaves the trimmed data at the temporary instead of `Drop`
+    /// removing it. Provoked with a non-empty directory at the final path.
+    #[test]
+    fn a_failed_commit_leaves_the_temporary_on_disk() {
+        let dir = std::env::temp_dir().join("tg_428_commit_fail");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let final_path = dir.join("out.fq");
+        let (pending, mut file) = PendingOutput::create(&final_path).unwrap();
+        let tmp = pending.tmp_path().to_path_buf();
+        std::io::Write::write_all(&mut file, b"@r\nA\n+\nI\n").unwrap();
+        drop(file);
+
+        std::fs::create_dir(&final_path).unwrap();
+        std::fs::write(final_path.join("blocker"), b"x").unwrap();
+
+        let err = pending
+            .commit()
+            .expect_err("renaming onto a directory must fail");
+        assert!(
+            tmp.exists(),
+            "a failed commit must leave the trimmed data at the temporary"
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("out.fq") && msg.contains(".partial"),
+            "the error must name both paths, got: {msg}"
+        );
+    }
 
     #[test]
     fn test_strip_fastq_extensions() {

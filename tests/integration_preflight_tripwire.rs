@@ -38,6 +38,16 @@
 //!
 //! [#421]: https://github.com/FelixKrueger/TrimGalore/issues/421
 //!
+//! Every record output is written to a dot-prefixed `.partial` sibling and renamed on
+//! success ([#428]), so a temporary never appears in `created` — the snapshot is taken
+//! after the process exits. They are deliberately not candidates: `final → temporary` is
+//! injective, and injective under `collision_key`'s folding too, so a temporary can only
+//! collide where its final already does. **A red `.partial` here means a writer failed to
+//! commit, not that a candidate list is missing one** — adding it to `src/main.rs` would
+//! hide the defect.
+//!
+//! [#428]: https://github.com/FelixKrueger/TrimGalore/issues/428
+//!
 //! ## Limits
 //!
 //! Comparison uses the production `io::collision_key`, which folds case. A candidate

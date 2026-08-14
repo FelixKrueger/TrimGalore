@@ -20,7 +20,13 @@ const FLAG_UNMAPPED: u16 = 4;
 /// 4-bit sequence alphabet, indexed by the packed nibble value.
 const SEQ_CODES: &[u8] = b"=ACMGRSVTWYHKDBN";
 
-const CASES: &[&str] = &["lf_qname", "lf_tagvalue", "lf_atag", "atag_ok"];
+const CASES: &[&str] = &[
+    "lf_qname",
+    "lf_tagvalue",
+    "lf_atag",
+    "atag_ok",
+    "ws_qname_bulk",
+];
 
 /// Two bases per byte, high nibble first.
 fn pack_seq(seq: &str) -> Vec<u8> {
@@ -106,6 +112,16 @@ fn case_records(case: &str) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
             (b"readB".to_vec(), a_tag("XA", b'-')),
             (b"readC".to_vec(), a_tag("XA", b'+')),
         ],
+        // #428 — enough clean records ahead of the offender that the residue is
+        // large and plausible rather than one record.
+        "ws_qname_bulk" => {
+            let mut recs: Vec<(Vec<u8>, Vec<u8>)> = (0..5000)
+                .map(|i| (format!("read{i:06}").into_bytes(), clean_cb()))
+                .collect();
+            recs.push((b"readEVIL with space".to_vec(), clean_cb()));
+            recs.push((b"readTAIL".to_vec(), clean_cb()));
+            recs
+        }
         _ => return None,
     })
 }
