@@ -61,8 +61,8 @@
 //! while every fixture path stays relative and the child runs with the root as its CWD.
 //!
 //! A new dispatch arm with **no** pre-flight is not detected. `the_site_inventory_is_complete`
-//! catches a 12th call site; an arm that never calls the pre-flight looks like the two
-//! `Arm::Unplanned` cases, which are on record only because someone listed them.
+//! catches a 14th call site; an arm that never calls the pre-flight has nothing to count.
+//! `Arm::Unplanned` is how such an arm goes on record, and only because someone lists it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -211,13 +211,12 @@ fn parse_planned(stderr: &str) -> Vec<(String, PathBuf)> {
 enum Arm {
     /// Reaches a pre-flight; the full assertion set applies.
     Planned,
-    /// No pre-flight exists on this dispatch path (#414 §2.3). T1 and T5 cannot
-    /// apply; `planned` must be empty, so the day one is added this goes red.
+    /// No pre-flight exists on this dispatch path. T1 and T5 cannot apply; `planned`
+    /// must be empty, so the day one is added this goes red.
     ///
-    /// Safe today only because both such arms derive their stem with
-    /// `Path::file_stem()` and never read `cli.basename`: `file_stem` strips a
-    /// `.`-prefixed extension while every appended suffix starts with `_`, so an output
-    /// can never equal its input. Honouring `--basename` there would break that.
+    /// No case uses it — #424 gave the last two arms a pre-flight — and it is kept as
+    /// the record shape for the next arm that ships without one.
+    /// `comparison_rejects_an_unplanned_arm_that_dumps` is its only driver.
     Unplanned,
 }
 
@@ -262,11 +261,6 @@ impl<'a> Tripwire<'a> {
             guarded,
             arm: Arm::Planned,
         }
-    }
-
-    fn unplanned(mut self) -> Self {
-        self.arm = Arm::Unplanned;
-        self
     }
 
     fn run(self, stage: impl FnOnce(&Path)) -> Outcome {
@@ -315,7 +309,7 @@ impl<'a> Tripwire<'a> {
 }
 
 /// T3 — no pre-existing file's bytes changed, which is #409's harm asserted directly and
-/// the substantive assertion on the `Arm::Unplanned` cases.
+/// the only assertion that applies to an `Arm::Unplanned` case.
 ///
 /// Pure and separate from `compare` so `comparison_detects_a_modified_input` can prove it
 /// fires. Without that, the only proof was a planted mutation in `main.rs` that gets
@@ -1009,41 +1003,50 @@ fn ubam_out_paired_two_files() {
     .run(stage_pair_split);
 }
 
-// ── the two arms with no pre-flight (#414 §2.3) ──────────────────────────────
+// ── the two single-file interleaved arms (#424) ──────────────────────────────
 
 #[test]
-fn orphan_paired_fastq_from_interleaved_bam() {
+fn interleaved_paired_fastq_from_one_bam() {
     Tripwire::new(
-        "orphan_paired_fastq_from_interleaved_bam",
+        "interleaved_paired_fastq_from_one_bam",
         &["--paired", "ip.bam"],
         &["ip.bam"],
     )
-    .unplanned()
     .run(|root| copy_fixture("ubam_paired_test.bam", &root.join("ip.bam")));
+}
+
+/// A `.gz`-*named* BAM. `gzip` is decided from the extension, so the primaries are
+/// `ip.bam_val_{1,2}.fq.gz`: a candidate list that hardcoded `.fq` would pass every
+/// other case here and guard paths this run never writes.
+#[test]
+fn interleaved_paired_fastq_from_gz_named_bam() {
+    Tripwire::new(
+        "interleaved_paired_fastq_from_gz_named_bam",
+        &["--paired", "ip.bam.gz"],
+        &["ip.bam.gz"],
+    )
+    .run(|root| copy_fixture("ubam_paired_test.bam", &root.join("ip.bam.gz")));
 }
 
 /// Legal here — `--retain_unpaired` is refused only for uBAM *output* — and it adds
-/// two more writers to an arm that has no pre-flight, so the full write set is on
-/// record for the follow-up issue.
+/// two more writers, so the full write set stays on record.
 #[test]
-fn orphan_paired_fastq_retain_unpaired() {
+fn interleaved_paired_fastq_retain_unpaired() {
     Tripwire::new(
-        "orphan_paired_fastq_retain_unpaired",
+        "interleaved_paired_fastq_retain_unpaired",
         &["--paired", "--retain_unpaired", "ip.bam"],
         &["ip.bam"],
     )
-    .unplanned()
     .run(|root| copy_fixture("ubam_paired_test.bam", &root.join("ip.bam")));
 }
 
 #[test]
-fn orphan_paired_ubam_from_interleaved_bam() {
+fn interleaved_paired_ubam_from_one_bam() {
     Tripwire::new(
-        "orphan_paired_ubam_from_interleaved_bam",
+        "interleaved_paired_ubam_from_one_bam",
         &["--paired", "--output-format", "ubam", "ip.bam"],
         &["ip.bam"],
     )
-    .unplanned()
     .run(|root| copy_fixture("ubam_paired_test.bam", &root.join("ip.bam")));
 }
 
@@ -1090,6 +1093,37 @@ fn comparison_accepts_overplanning() {
         .expect("planned may legitimately exceed created");
 }
 
+/// The `Arm::Unplanned` branch, which no case reaches since #424. It is the trap for
+/// the next arm recorded as having no pre-flight: the day one is given one, its case
+/// must be promoted rather than left claiming the arm writes unguarded.
+#[test]
+fn comparison_rejects_an_unplanned_arm_that_dumps() {
+    let root = case_root("cmp_promote");
+    let created: BTreeSet<PathBuf> = [PathBuf::from("ip_val_1.fq")].into_iter().collect();
+    let planned = synthetic_planned("src/main.rs:857", &["ip_val_1.fq"]);
+
+    let err = compare(
+        &root,
+        &created,
+        &planned,
+        &["--paired", "ip.bam"],
+        Arm::Unplanned,
+    )
+    .expect_err("an Unplanned arm that dumped candidates must fail");
+    assert!(err.contains("promote the case"), "{err}");
+    assert!(err.contains("src/main.rs:857"), "{err}");
+
+    // And with no dump, the same arm passes — that is what the variant records.
+    compare(
+        &root,
+        &created,
+        &[],
+        &["--paired", "ip.bam"],
+        Arm::Unplanned,
+    )
+    .expect("an arm with no pre-flight and no dump is the recorded state");
+}
+
 #[test]
 fn comparison_rejects_an_empty_run() {
     let root = case_root("cmp_empty");
@@ -1113,8 +1147,8 @@ fn comparison_rejects_a_missing_dump() {
     assert!(err.contains("hook did not fire"), "{err}");
 }
 
-/// T3's standing proof. It is the substantive assertion on the three `Arm::Unplanned`
-/// cases, where T1 and T5 are skipped, so it must not be the one assertion whose ability
+/// T3's standing proof. It is the only assertion that applies on an `Arm::Unplanned`
+/// case, where T1 and T5 are skipped, so it must not be the one assertion whose ability
 /// to fail rests on a mutation that gets reverted.
 #[test]
 fn comparison_detects_a_modified_input() {
@@ -1138,8 +1172,8 @@ fn comparison_detects_a_modified_input() {
     );
 }
 
-/// `every_site_is_reached_by_some_case` proves 11 hand-listed shapes reach 11 *distinct*
-/// sites. It cannot prove 11 is *all* of them — a 12th dispatch arm would leave that test
+/// `every_site_is_reached_by_some_case` proves 13 hand-listed shapes reach 13 *distinct*
+/// sites. It cannot prove 13 is *all* of them — a 14th dispatch arm would leave that test
 /// green while the new arm has no case and no tripwire. That is this bug family one level
 /// up: coverage silently stops extending to a writer.
 ///
@@ -1156,8 +1190,8 @@ fn the_site_inventory_is_complete() {
     .unwrap();
     let calls = src.matches("preflight_output_collisions(").count();
     assert_eq!(
-        calls, 11,
-        "main.rs has {calls} pre-flight call sites, not 11. If one was added, give it a \
+        calls, 13,
+        "main.rs has {calls} pre-flight call sites, not 13. If one was added, give it a \
          case and add its shape to every_site_is_reached_by_some_case, then update this \
          count — do not just update the count."
     );
@@ -1246,14 +1280,18 @@ fn hook_is_inert_when_env_unset_and_that_goes_red() {
         .expect_err("no dump must fail the comparison, not pass it");
 }
 
-/// Turns "all 11 sites are covered" from prose into an assertion. Collects the site
-/// each representative arm dumps and requires 11 distinct values — no line numbers are
+/// Turns "all 13 sites are covered" from prose into an assertion. Collects the site
+/// each representative arm dumps and requires 13 distinct values — no line numbers are
 /// pinned, so unrelated edits to `main.rs` cannot break it.
+///
+/// This is the half of the pair that goes red on a count bumped without a shape added:
+/// `the_site_inventory_is_complete` counts calls in `main.rs`, and only this one proves
+/// a case reaches each.
 #[test]
 fn every_site_is_reached_by_some_case() {
     let root = case_root("site_coverage");
 
-    let shapes: [(&str, &[&str]); 11] = [
+    let shapes: [(&str, &[&str]); 13] = [
         ("se", &["a.fastq"]),
         ("pe", &["--paired", "s_R1.fastq", "s_R2.fastq"]),
         ("ht5", &["--hardtrim5", "20", "a.fastq"]),
@@ -1299,6 +1337,11 @@ fn every_site_is_reached_by_some_case() {
                 "s_R2.fastq",
             ],
         ),
+        ("il_fastq", &["--paired", "ip.bam"]),
+        (
+            "il_ubam",
+            &["--paired", "--output-format", "ubam", "ip.bam"],
+        ),
     ];
 
     let mut sites: BTreeMap<String, &str> = BTreeMap::new();
@@ -1328,8 +1371,8 @@ fn every_site_is_reached_by_some_case() {
 
     assert_eq!(
         sites.len(),
-        11,
-        "expected 11 distinct pre-flight sites, got {sites:?}"
+        13,
+        "expected 13 distinct pre-flight sites, got {sites:?}"
     );
 }
 

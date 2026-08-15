@@ -638,11 +638,14 @@ pub fn paired_report_names(
 
 // ─── Single-file interleaved paired output (#423) ───────────────────────────
 //
-// One derivation per arm, consumed by both the writers and — once #424 lands —
-// the collision pre-flight. Keyed on `file_stem()`, not `file_name()`: these
+// One derivation per arm, consumed by both the writers and the collision
+// pre-flight. Keyed on `file_stem()`, not `file_name()`: these
 // arms have always named their outputs `ip_val_1.fq` from `ip.bam`, where
 // `report_name` would give `ip.bam_trimming_report.txt`. Composing these from
 // `report_name` renames every interleaved report.
+//
+// Every field added here must appear in that type's `planned()`; the exhaustive
+// destructure there makes a field that does not a build error.
 
 /// The two mates' trimming-report paths for a single interleaved pair.
 ///
@@ -664,6 +667,23 @@ impl InterleavedReports {
             r2_txt: dir.join(format!("{stem}_R2_trimming_report.txt")),
             r2_json: dir.join(format!("{stem}_R2_trimming_report.json")),
         }
+    }
+
+    /// txt before json within a mate, the order the two-file paired sites use and
+    /// `tests/integration_output_collision.rs` pins.
+    fn planned(&self, src: &OutputSource) -> Vec<PlannedOutput> {
+        let Self {
+            r1_txt,
+            r1_json,
+            r2_txt,
+            r2_json,
+        } = self;
+        vec![
+            (r1_txt.clone(), src.clone()),
+            (r1_json.clone(), src.clone()),
+            (r2_txt.clone(), src.clone()),
+            (r2_json.clone(), src.clone()),
+        ]
     }
 }
 
@@ -700,6 +720,26 @@ impl InterleavedFastqOutputs {
             reports: reports.then(|| InterleavedReports::new(&stem, &dir)),
         }
     }
+
+    /// The pre-flight candidate list. `src` is the lone input, so every path
+    /// carries the same one.
+    pub fn planned(&self, src: &OutputSource) -> Vec<PlannedOutput> {
+        let Self {
+            val_1,
+            val_2,
+            unpaired,
+            reports,
+        } = self;
+        let mut v = vec![(val_1.clone(), src.clone()), (val_2.clone(), src.clone())];
+        if let Some((up_1, up_2)) = unpaired {
+            v.push((up_1.clone(), src.clone()));
+            v.push((up_2.clone(), src.clone()));
+        }
+        if let Some(reports) = reports {
+            v.extend(reports.planned(src));
+        }
+        v
+    }
 }
 
 /// Every path a uBAM-output single-file interleaved paired run writes.
@@ -717,6 +757,17 @@ impl InterleavedBamOutputs {
             val: dir.join(format!("{stem}_val.bam")),
             reports: reports.then(|| InterleavedReports::new(&stem, &dir)),
         }
+    }
+
+    /// The pre-flight candidate list. `src` is the lone input, so every path
+    /// carries the same one.
+    pub fn planned(&self, src: &OutputSource) -> Vec<PlannedOutput> {
+        let Self { val, reports } = self;
+        let mut v = vec![(val.clone(), src.clone())];
+        if let Some(reports) = reports {
+            v.extend(reports.planned(src));
+        }
+        v
     }
 }
 
@@ -880,8 +931,8 @@ mod tests {
     // ─── #423: the paired report namers, pinned to literal paths ───────────
     //
     // Nothing else in the repo pins the interleaved `_R{1,2}_trimming_report`
-    // names, and after #424 the writer and the pre-flight both derive them from
-    // here — so a rename would be self-consistent and invisible everywhere else.
+    // names, and the writer and the pre-flight both derive them from here — so a
+    // rename would be self-consistent and invisible everywhere else.
 
     #[test]
     fn paired_report_names_share_r1s_directory_and_keep_each_mates_filename() {
@@ -978,6 +1029,96 @@ mod tests {
                 .reports
                 .is_none()
         );
+    }
+
+    /// Renders one arm's candidate list, checking every entry names the lone input.
+    fn planned_paths(planned: &[PlannedOutput], input: &str) -> Vec<String> {
+        planned
+            .iter()
+            .map(|(path, src)| {
+                assert_eq!(src.to_string(), input, "every candidate names one input");
+                path.display().to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn interleaved_fastq_planned_lists_every_field_in_every_option_state() {
+        let src = OutputSource::Input(PathBuf::from("ip.bam"));
+        let paths = |retain, reports| {
+            let o = InterleavedFastqOutputs::new(Path::new("ip.bam"), None, false, retain, reports);
+            planned_paths(&o.planned(&src), "ip.bam")
+        };
+
+        assert_eq!(paths(false, false), ["ip_val_1.fq", "ip_val_2.fq"]);
+        assert_eq!(
+            paths(true, false),
+            [
+                "ip_val_1.fq",
+                "ip_val_2.fq",
+                "ip_unpaired_1.fq",
+                "ip_unpaired_2.fq"
+            ]
+        );
+        assert_eq!(
+            paths(false, true),
+            [
+                "ip_val_1.fq",
+                "ip_val_2.fq",
+                "ip_R1_trimming_report.txt",
+                "ip_R1_trimming_report.json",
+                "ip_R2_trimming_report.txt",
+                "ip_R2_trimming_report.json"
+            ]
+        );
+        assert_eq!(
+            paths(true, true),
+            [
+                "ip_val_1.fq",
+                "ip_val_2.fq",
+                "ip_unpaired_1.fq",
+                "ip_unpaired_2.fq",
+                "ip_R1_trimming_report.txt",
+                "ip_R1_trimming_report.json",
+                "ip_R2_trimming_report.txt",
+                "ip_R2_trimming_report.json"
+            ]
+        );
+    }
+
+    #[test]
+    fn interleaved_bam_planned_lists_every_field_in_every_option_state() {
+        let src = OutputSource::Input(PathBuf::from("ip.bam"));
+        let paths = |reports| {
+            let o = InterleavedBamOutputs::new(Path::new("ip.bam"), None, reports);
+            planned_paths(&o.planned(&src), "ip.bam")
+        };
+
+        assert_eq!(paths(false), ["ip_val.bam"]);
+        assert_eq!(
+            paths(true),
+            [
+                "ip_val.bam",
+                "ip_R1_trimming_report.txt",
+                "ip_R1_trimming_report.json",
+                "ip_R2_trimming_report.txt",
+                "ip_R2_trimming_report.json"
+            ]
+        );
+    }
+
+    /// A refusal on these arms names one input. `OutputSource::Pair` would have
+    /// only `Pair(x, x)` to offer, which renders `ip.bam + ip.bam`. The duplicate
+    /// is synthetic: `planned()` cannot produce one (#424).
+    #[test]
+    fn interleaved_refusal_names_one_input() {
+        let src = OutputSource::Input(PathBuf::from("ip.bam"));
+        let one = InterleavedBamOutputs::new(Path::new("ip.bam"), None, false).planned(&src);
+        let err = preflight_output_collisions(&[one[0].clone(), one[0].clone()], &[], None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("named from ip.bam"), "got: {err}");
+        assert!(!err.contains("ip.bam + ip.bam"), "got: {err}");
     }
 
     #[test]
