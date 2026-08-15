@@ -5,6 +5,33 @@
 
 #### Changes
 
+- **An output file is now published only if every byte it owes was written, including the
+  gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the
+  final name appear only after the writer was closed; it did not make "closed" mean
+  "complete". `FastqWriter` held a `Box<dyn Write + Send>`, through which neither
+  `GzEncoder::try_finish` nor `gzp`'s `ParCompress::finish` is reachable, so each sink's
+  trailer was written by its own `Drop` and the error discarded — an `ENOSPC` or `EIO` in the
+  last few bytes of a serial-gzip run left a trailerless `.gz` at its final name and exited 0.
+  The boxed writer is now an enum over the three concrete sinks, and `finish()` runs the
+  concrete teardown and returns its error *before* the output is published. Two matching
+  cases in `--cores N`: a single-end worker error now reaches the main thread through the
+  result channel (it was printed and swallowed) instead of ending the run like a clean EOF,
+  and both parallel paths join their workers before publishing, so a worker panic can no
+  longer commit a short output on its way out.
+
+  **Output bytes are unchanged, deliberately, on both gzip paths.** The old gzip teardown
+  flushed the sink twice before writing its trailer — once in `FastqWriter::finish`, once
+  again in that type's `Drop` — and each flush emits a deflate sync marker, so the marker
+  count is part of the format v2.x has shipped whether or not it was meant to be.
+  `Sink::finish` reproduces both (`PRE_434_GZ_SYNC_FLUSHES`), because tools downstream pin the
+  *compressed* md5s of our outputs and would see a re-framing that our own tests, which
+  compare through `gzip -dc`, cannot. That applies to the parallel compressor as well as the
+  serial one: `--cores N` *trimming* never reaches the parallel sink — it writes each batch
+  through a raw file handle — but `--hardtrim5`, `--hardtrim3`, the other specialty modes and
+  `--demux` do. Verified byte-for-byte against v2.3.0 across single-end, `--paired`, `--rrbs`,
+  `--polyA`, `--nextera`, `--compression 6`, `--cores 2`, `--cores 4`, `--hardtrim5` and
+  `--hardtrim3` at one, two and four cores, and `--demux` at one and two.
+
 - **A read name that uBAM output cannot encode is now named in the refusal, along with the SAM
   QNAME rule it breaks** ([#429](https://github.com/FelixKrueger/TrimGalore/issues/429)) — FASTQ
   output still accepts those names.
