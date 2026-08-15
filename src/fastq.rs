@@ -608,6 +608,17 @@ enum Sink {
 /// path: 2 flushes → 341,686 bytes (what v2.x ships today), 1 → 341,681, 0 →
 /// 341,674. All three decompress to the same md5.
 ///
+/// **It applies to `Sink::ParGz` as well, and that arm is easy to overlook.**
+/// `ParCompress::flush` is `flush_last(false)`, which reaches the same
+/// `FlushCompress::Sync` the serial encoder uses, so the pre-#434
+/// `finish`-then-`Drop` pair put two markers on this wire too. The reason it
+/// hides is that `--cores N` *trimming* never constructs a `Sink` at all —
+/// `parallel.rs` compresses each batch into a `Vec` and writes it through a raw
+/// `File` — so `ParGz` is reachable only from `specialty.rs` and `demux.rs`.
+/// `--hardtrim5 30 --cores 2` is the shortest invocation that distinguishes the
+/// two paths, and it is the row a `--cores`-vs-serial matrix will not contain
+/// unless someone knows to put it there.
+///
 /// **Set this to 1 to drop the redundant marker, or 0 to drop the framing
 /// altogether** — both are legitimate, both save a handful of bytes per file,
 /// and both need a heads-up to anyone pinning compressed bytes. That is a
@@ -636,7 +647,51 @@ impl Sink {
                 encoder.try_finish()?;
             }
             Sink::ParGz(mut w) => {
-                w.finish()?;
+                // Every fallible step is inside the closure so that ONE error
+                // path covers all of them. `?` straight out of this arm would
+                // drop `w` on the way, and dropping a `ParCompress` that has
+                // not been finished is the panic described below — which the
+                // flushes can reach just as easily as `finish` can.
+                let outcome = (|| -> Result<()> {
+                    // Same markers as the serial arm, same reason — see
+                    // `PRE_434_GZ_SYNC_FLUSHES`. `ParCompress::flush` is
+                    // `flush_last(false)`.
+                    for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
+                        w.flush()?;
+                    }
+                    w.finish()?;
+                    Ok(())
+                })();
+                match outcome {
+                    Ok(()) => {}
+                    Err(e) => {
+                        // `ParCompress::finish` propagates a failed
+                        // `flush_last` with `?` BEFORE it takes its channels
+                        // and join handle, so all three are still `Some` here.
+                        // `ParCompress::drop` reads that as "never finished",
+                        // calls `finish()` again and `unwrap()`s the same
+                        // error (`gzp-2.0.2/src/par/compress.rs:398`) — turning
+                        // a reportable I/O failure into a panic on the way out
+                        // of this function. #434 is specifically about a failed
+                        // teardown being *reported* rather than swallowed, so
+                        // leaving that in place would half-undo it for
+                        // `--cores N`.
+                        //
+                        // Disarming means not running that `Drop`. What leaks
+                        // is a `Sender` pair and a `JoinHandle`; the compressor
+                        // threads then park on a channel that is never closed.
+                        // That is bounded by the process, which is on its way
+                        // to exiting with this error — every
+                        // `FastqWriter::finish` caller propagates it with `?`.
+                        // A panic in place of an error message is the worse
+                        // trade.
+                        //
+                        // The real fix belongs upstream in `gzp`: take the
+                        // fields before the `?`. Remove this when that lands.
+                        std::mem::forget(w);
+                        return Err(e);
+                    }
+                }
             }
         }
         Ok(())
@@ -747,11 +802,22 @@ impl FastqWriter {
     /// `self` so a caller cannot forget.
     ///
     /// The sink is torn down *first* and its error propagated, so the final
-    /// name appears only after every byte the output owes — including the
-    /// gzip trailer — has been written successfully. A failed teardown returns
-    /// here with `pending` still armed, so its `Drop` removes the temporary
-    /// and nothing is published (#434). Before this, teardown ran in the
-    /// sink's own `Drop` and its error was discarded.
+    /// name appears only after every byte the output owes — including the gzip
+    /// trailer — has been handed to a `write(2)` that returned success. A
+    /// failed teardown returns here with `pending` still armed, so its `Drop`
+    /// removes the temporary and nothing is published (#434). Before this,
+    /// teardown ran in the sink's own `Drop` and its error was discarded.
+    ///
+    /// **What that is not.** `close(2)` is unchecked in all three arms — the
+    /// `File` is simply dropped — and nothing here calls `fsync`. On a
+    /// filesystem that defers errors to close or to writeback (NFS is the one
+    /// that bites in practice) a run can still publish an output whose last
+    /// bytes never reached the server. Closing that gap means an explicit
+    /// checked close, and `File::close` is not stable on the toolchain this
+    /// builds with, so it would mean taking a `libc`/`rustix` dependency this
+    /// crate does not currently have. #434 is the local-disk `ENOSPC` case,
+    /// which the checked `write(2)` does cover; the deferred case is a
+    /// separate, larger change and is deliberately not claimed here.
     pub fn finish(self) -> Result<()> {
         let FastqWriter { writer, pending } = self;
         writer.finish()?;
@@ -774,11 +840,17 @@ mod tests {
 
     #[test]
     fn gz_sink_finish_reports_a_failing_teardown() {
-        // The bytes that fail here are the ones ONLY `try_finish` writes — the
-        // deflate end-of-stream plus the 8-byte CRC/ISIZE trailer. Behind
-        // `Box<dyn Write>` this error was written by `GzEncoder::drop` and
-        // discarded (`let _ = self.try_finish()`), so a run that lost its
-        // trailer still published the file and exited 0 (#434).
+        // NOTHING IS WRITTEN TO THIS SINK, so the first bytes it emits are the
+        // 10-byte gzip HEADER, not the trailer — flate2 writes the header
+        // lazily, and here the teardown's own first `flush` is what triggers
+        // it. An earlier version of this comment claimed the trailer; it was
+        // wrong, and the distinction matters because the header failing is the
+        // easy case. `gz_sink_finish_reports_a_failure_after_a_successful_write`
+        // below covers the one #434 was actually about.
+        //
+        // What this pins is still real: behind `Box<dyn Write>` any teardown
+        // error was written by `GzEncoder::drop` and discarded (`let _ =
+        // self.try_finish()`), so the file was published and the run exited 0.
         let dir = tempfile::tempdir().unwrap();
         let sink = Sink::Gz(BufWriter::with_capacity(
             BUF_SIZE,
@@ -786,7 +858,156 @@ mod tests {
         ));
         assert!(
             sink.finish().is_err(),
-            "a gzip teardown that cannot write its trailer must not report success"
+            "a gzip teardown whose first write fails must not report success"
+        );
+    }
+
+    #[test]
+    fn gz_sink_finish_reports_a_failure_after_a_successful_write() {
+        // #434's shape, which the read-only-file tests cannot produce: the
+        // header and the payload reach the destination, and only the bytes the
+        // TEARDOWN emits fail. That is the `ENOSPC` in the last few bytes of a
+        // long run — the case where a swallowed error left a truncated file
+        // under its final name with exit 0.
+        //
+        // A pipe gives it without a size-limited filesystem: writes succeed
+        // while the read end is open and fail with `EPIPE` once it is closed.
+        // Rust's runtime sets `SIGPIPE` to `SIG_IGN`, so that surfaces as an
+        // `io::Error` rather than killing the test process.
+        let (reader, writer) = std::io::pipe().unwrap();
+        let file = File::from(std::os::fd::OwnedFd::from(writer));
+
+        let payload: Vec<u8> = (0..50)
+            .map(|i| format!("@r{i}\nACGTACGTAC\n+\nIIIIIIIIII\n"))
+            .collect::<String>()
+            .into_bytes();
+
+        let mut sink = Sink::Gz(BufWriter::with_capacity(
+            BUF_SIZE,
+            GzEncoder::new(file, Compression::new(1)),
+        ));
+        sink.write_all(&payload).unwrap();
+        // Header + compressed payload out through the pipe, well inside its
+        // 64KB capacity, so this genuinely succeeds.
+        sink.flush().unwrap();
+
+        drop(reader);
+
+        assert!(
+            sink.finish().is_err(),
+            "a teardown that fails AFTER the payload was written must not \
+             report success — that is the truncated-output case in #434"
+        );
+    }
+
+    #[test]
+    fn pargz_sink_finish_reports_a_failing_teardown_without_panicking() {
+        // THE `--cores N` ARM, WHICH HAD NO TEST OF ITS OWN AND IS THE ONE THE
+        // REVIEW OF #436 CAUGHT TWICE.
+        //
+        // `ParCompress::finish` propagates a failed `flush_last` with `?`
+        // before taking its channels and join handle, so `ParCompress::drop`
+        // sees them still `Some`, calls `finish()` a second time and
+        // `unwrap()`s the same error at `gzp-2.0.2/src/par/compress.rs:398`.
+        // Without the `mem::forget` in `Sink::finish` this test does not fail
+        // — it PANICS, which is exactly the outcome #434 set out to remove.
+        // Running to completion is the real assertion here; `is_err()` is the
+        // weaker half.
+        //
+        // THE WINDOW IS NARROW AND THE OBVIOUS TEST MISSES IT. `ParCompress::
+        // write`, on a send failure, takes the join handle itself so it can
+        // report the writer thread's real error — which leaves `handle` as
+        // `None` and disarms `Drop`. So reaching the panic needs a run where no
+        // `write` ever failed: the payload still sits in `ParCompress`'s own
+        // buffer, nothing has been sent, and the writer thread died on its own
+        // (failing the gzip header write, as it does here). The teardown's
+        // first flush is then the first send, and it fails. Bulk data does NOT
+        // reproduce it — measured both ways; with 8MB the failing `write_all`
+        // disarms `Drop` and the panic never comes.
+        let dir = tempfile::tempdir().unwrap();
+        let mut sink = Sink::ParGz(
+            ParCompressBuilder::<Gzip>::new()
+                .num_threads(2)
+                .unwrap()
+                .compression_level(Compression::new(1))
+                .from_writer(unwritable_file(dir.path())),
+        );
+        // Small enough to stay in the compressor's buffer, so this sends
+        // nothing and succeeds.
+        sink.write_all(b"@r\nACGT\n+\nIIII\n").unwrap();
+        // Let the writer thread reach its failed header write — the first
+        // thing that thread does, so this is a large margin. The assertion is
+        // written so that LOSING that race makes the test weaker, never flaky:
+        // if the send still succeeds, `finish` joins the thread and returns the
+        // same failure by the other route, and this still passes.
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        assert!(
+            sink.finish().is_err(),
+            "a parallel-gzip teardown that cannot write must return an error, \
+             not panic out of `ParCompress::drop`"
+        );
+    }
+
+    #[test]
+    fn pargz_sink_finish_is_byte_identical_to_the_pre_434_teardown() {
+        // The serial test below has a twin here because the two arms re-frame
+        // independently — `Sink::Gz` was fixed first and `Sink::ParGz` still
+        // emitted zero markers. `--cores N` trimming never builds a `Sink`, so
+        // no `--cores` row in a trimming matrix can catch that; only
+        // `specialty.rs`/`demux.rs` reach this arm.
+        //
+        // Single-threaded on both sides on purpose: `ParCompress` splits input
+        // into independently-compressed blocks, so with >1 thread neither the
+        // block boundaries nor the output bytes are pinned. Thread count is not
+        // what this test is about — the number of `Z_SYNC_FLUSH`es is.
+        let payload: Vec<u8> = (0..200)
+            .map(|i| format!("@r{i}\nACGTACGTAC\n+\nIIIIIIIIII\n"))
+            .collect::<String>()
+            .into_bytes();
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let path = dir.path().join("sink.gz");
+        let mut sink = Sink::ParGz(
+            ParCompressBuilder::<Gzip>::new()
+                .num_threads(1)
+                .unwrap()
+                .compression_level(Compression::new(6))
+                .from_writer(File::create(&path).unwrap()),
+        );
+        sink.write_all(&payload).unwrap();
+        sink.finish().unwrap();
+        let ours = std::fs::read(&path).unwrap();
+
+        let ref_path = dir.path().join("reference.gz");
+        let mut reference_w: ParCompress<'_, Gzip, File> = ParCompressBuilder::<Gzip>::new()
+            .num_threads(1)
+            .unwrap()
+            .compression_level(Compression::new(6))
+            .from_writer(File::create(&ref_path).unwrap());
+        reference_w.write_all(&payload).unwrap();
+        reference_w.flush().unwrap(); // what `FastqWriter::finish` used to do
+        reference_w.flush().unwrap(); // what `FastqWriter::drop` then did
+        reference_w.finish().unwrap(); // what `ParCompress::drop` used to do
+        let reference = std::fs::read(&ref_path).unwrap();
+
+        assert_eq!(
+            ours, reference,
+            "the parallel sink's teardown must emit the same bytes as the \
+             pre-#434 flush-flush-finish sequence, for the same downstream \
+             reason as the serial arm"
+        );
+
+        let markers = ours
+            .windows(5)
+            .filter(|w| *w == [0x00, 0x00, 0x00, 0xff, 0xff])
+            .count();
+        assert!(
+            markers >= PRE_434_GZ_SYNC_FLUSHES,
+            "expected at least one Z_SYNC_FLUSH marker per pre-#434 flush, got {markers}; \
+             unlike the serial arm this is a floor rather than an equality, because \
+             `ParCompress` also emits a marker at each of its own block boundaries — \
+             this payload is one block and measures exactly 2"
         );
     }
 

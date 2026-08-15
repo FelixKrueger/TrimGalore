@@ -19,15 +19,18 @@
   and both parallel paths join their workers before publishing, so a worker panic can no
   longer commit a short output on its way out.
 
-  **Output bytes are unchanged, deliberately.** The old serial-gzip teardown flushed the sink
-  twice before writing its trailer — once in `FastqWriter::finish`, once again in that type's
-  `Drop` — and each flush emits a deflate sync marker, so the marker count is part of the
-  format v2.x has shipped whether or not it was meant to be. `Sink::finish` reproduces both
-  (`PRE_434_GZ_SYNC_FLUSHES`), because tools downstream pin the *compressed* md5s of our
-  outputs and would see a re-framing that our own tests, which compare through `gzip -dc`,
-  cannot. Verified byte-for-byte against v2.3.0 across single-end, `--paired`, `--rrbs`,
-  `--polyA`, `--nextera`, `--compression 6`, `--cores 2` and `--cores 4`. `--cores N` output
-  was never affected.
+  **Output bytes are unchanged, deliberately, on both gzip paths.** The old gzip teardown
+  flushed the sink twice before writing its trailer — once in `FastqWriter::finish`, once
+  again in that type's `Drop` — and each flush emits a deflate sync marker, so the marker
+  count is part of the format v2.x has shipped whether or not it was meant to be.
+  `Sink::finish` reproduces both (`PRE_434_GZ_SYNC_FLUSHES`), because tools downstream pin the
+  *compressed* md5s of our outputs and would see a re-framing that our own tests, which
+  compare through `gzip -dc`, cannot. That applies to the parallel compressor as well as the
+  serial one: `--cores N` *trimming* never reaches the parallel sink — it writes each batch
+  through a raw file handle — but `--hardtrim5`, `--hardtrim3`, the other specialty modes and
+  `--demux` do. Verified byte-for-byte against v2.3.0 across single-end, `--paired`, `--rrbs`,
+  `--polyA`, `--nextera`, `--compression 6`, `--cores 2`, `--cores 4`, `--hardtrim5` and
+  `--hardtrim3` at one, two and four cores, and `--demux` at one and two.
 
 - **A read name that uBAM output cannot encode is now named in the refusal, along with the SAM
   QNAME rule it breaks** ([#429](https://github.com/FelixKrueger/TrimGalore/issues/429)) — FASTQ
