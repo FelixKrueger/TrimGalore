@@ -614,6 +614,123 @@ pub fn json_report_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
     }
 }
 
+/// Text + JSON trimming-report paths for one mate of a **two-file** pair.
+///
+/// Both land in the pair's output directory — R1's parent unless `--output_dir`
+/// overrides — while the filename stays keyed on the mate's own input. Taking
+/// `input_r1` rather than an already-computed directory is the point: a caller
+/// cannot get the directory rule wrong without passing the wrong mate.
+///
+/// Per-mate, not all four paths at once, because the two writer sites build a
+/// `PairedReportFile` per mate and the two candidate sites push txt-then-json
+/// per mate — an order `tests/integration_output_collision.rs` pins.
+pub fn paired_report_names(
+    input: &Path,
+    input_r1: &Path,
+    output_dir: Option<&Path>,
+) -> (PathBuf, PathBuf) {
+    let dir = pair_output_dir(input_r1, output_dir);
+    (
+        report_name(input, Some(&dir)),
+        json_report_name(input, Some(&dir)),
+    )
+}
+
+// ─── Single-file interleaved paired output (#423) ───────────────────────────
+//
+// One derivation per arm, consumed by both the writers and — once #424 lands —
+// the collision pre-flight. Keyed on `file_stem()`, not `file_name()`: these
+// arms have always named their outputs `ip_val_1.fq` from `ip.bam`, where
+// `report_name` would give `ip.bam_trimming_report.txt`. Composing these from
+// `report_name` renames every interleaved report.
+
+/// The two mates' trimming-report paths for a single interleaved pair.
+///
+/// `_R1`/`_R2` infix rather than per-input names, because both mates come from
+/// one input and would otherwise share a path.
+#[derive(Clone, Debug)]
+pub struct InterleavedReports {
+    pub r1_txt: PathBuf,
+    pub r1_json: PathBuf,
+    pub r2_txt: PathBuf,
+    pub r2_json: PathBuf,
+}
+
+impl InterleavedReports {
+    fn new(stem: &str, dir: &Path) -> Self {
+        Self {
+            r1_txt: dir.join(format!("{stem}_R1_trimming_report.txt")),
+            r1_json: dir.join(format!("{stem}_R1_trimming_report.json")),
+            r2_txt: dir.join(format!("{stem}_R2_trimming_report.txt")),
+            r2_json: dir.join(format!("{stem}_R2_trimming_report.json")),
+        }
+    }
+}
+
+/// Every path a FASTQ-output single-file interleaved paired run writes.
+#[derive(Clone, Debug)]
+pub struct InterleavedFastqOutputs {
+    pub val_1: PathBuf,
+    pub val_2: PathBuf,
+    /// `Some` under `--retain_unpaired`.
+    pub unpaired: Option<(PathBuf, PathBuf)>,
+    /// `None` under `--no_report_file`.
+    pub reports: Option<InterleavedReports>,
+}
+
+impl InterleavedFastqOutputs {
+    pub fn new(
+        input: &Path,
+        output_dir: Option<&Path>,
+        gzip: bool,
+        retain_unpaired: bool,
+        reports: bool,
+    ) -> Self {
+        let (stem, dir) = interleaved_stem_and_dir(input, output_dir);
+        let ext = if gzip { ".fq.gz" } else { ".fq" };
+        Self {
+            val_1: dir.join(format!("{stem}_val_1{ext}")),
+            val_2: dir.join(format!("{stem}_val_2{ext}")),
+            unpaired: retain_unpaired.then(|| {
+                (
+                    dir.join(format!("{stem}_unpaired_1{ext}")),
+                    dir.join(format!("{stem}_unpaired_2{ext}")),
+                )
+            }),
+            reports: reports.then(|| InterleavedReports::new(&stem, &dir)),
+        }
+    }
+}
+
+/// Every path a uBAM-output single-file interleaved paired run writes.
+#[derive(Clone, Debug)]
+pub struct InterleavedBamOutputs {
+    pub val: PathBuf,
+    /// `None` under `--no_report_file`.
+    pub reports: Option<InterleavedReports>,
+}
+
+impl InterleavedBamOutputs {
+    pub fn new(input: &Path, output_dir: Option<&Path>, reports: bool) -> Self {
+        let (stem, dir) = interleaved_stem_and_dir(input, output_dir);
+        Self {
+            val: dir.join(format!("{stem}_val.bam")),
+            reports: reports.then(|| InterleavedReports::new(&stem, &dir)),
+        }
+    }
+}
+
+/// Stem and directory shared by both interleaved arms. `pair_output_dir` with
+/// the lone input standing in for R1.
+fn interleaved_stem_and_dir(input: &Path, output_dir: Option<&Path>) -> (String, PathBuf) {
+    let stem = input
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    (stem, pair_output_dir(input, output_dir))
+}
+
 /// ASCII-case-insensitive suffix strip, preserving the case of what remains (#384).
 ///
 /// Byte-wise on purpose: slicing `&str` at `len - suffix.len()` panics when the
@@ -759,6 +876,109 @@ impl Drop for PendingOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── #423: the paired report namers, pinned to literal paths ───────────
+    //
+    // Nothing else in the repo pins the interleaved `_R{1,2}_trimming_report`
+    // names, and after #424 the writer and the pre-flight both derive them from
+    // here — so a rename would be self-consistent and invisible everywhere else.
+
+    #[test]
+    fn paired_report_names_share_r1s_directory_and_keep_each_mates_filename() {
+        let (txt, json) = paired_report_names(
+            Path::new("R2/s_R2.fastq.gz"),
+            Path::new("R1/s_R1.fastq.gz"),
+            None,
+        );
+        assert_eq!(txt, PathBuf::from("R1/s_R2.fastq.gz_trimming_report.txt"));
+        assert_eq!(json, PathBuf::from("R1/s_R2.fastq.gz_trimming_report.json"));
+    }
+
+    #[test]
+    fn paired_report_names_honours_output_dir() {
+        let (txt, json) = paired_report_names(
+            Path::new("R2/s_R2.fastq.gz"),
+            Path::new("R1/s_R1.fastq.gz"),
+            Some(Path::new("out")),
+        );
+        assert_eq!(txt, PathBuf::from("out/s_R2.fastq.gz_trimming_report.txt"));
+        assert_eq!(
+            json,
+            PathBuf::from("out/s_R2.fastq.gz_trimming_report.json")
+        );
+    }
+
+    /// `file_stem`, NOT `file_name`: `report_name` would give
+    /// `ip.bam_trimming_report.txt` and rename every interleaved report.
+    #[test]
+    fn interleaved_outputs_key_on_the_file_stem() {
+        let o = InterleavedFastqOutputs::new(Path::new("d/ip.bam"), None, false, false, true);
+        assert_eq!(o.val_1, PathBuf::from("d/ip_val_1.fq"));
+        assert_eq!(o.val_2, PathBuf::from("d/ip_val_2.fq"));
+        let r = o.reports.unwrap();
+        assert_eq!(r.r1_txt, PathBuf::from("d/ip_R1_trimming_report.txt"));
+        assert_eq!(r.r1_json, PathBuf::from("d/ip_R1_trimming_report.json"));
+        assert_eq!(r.r2_txt, PathBuf::from("d/ip_R2_trimming_report.txt"));
+        assert_eq!(r.r2_json, PathBuf::from("d/ip_R2_trimming_report.json"));
+    }
+
+    /// A `.gz`-*named* BAM: `gzip` is decided from the extension, so the
+    /// primaries gain `.fq.gz` while the stem keeps the inner `.bam`.
+    #[test]
+    fn interleaved_outputs_two_dot_name_with_gzip() {
+        let o = InterleavedFastqOutputs::new(Path::new("ip.bam.gz"), None, true, true, true);
+        assert_eq!(o.val_1, PathBuf::from("ip.bam_val_1.fq.gz"));
+        assert_eq!(
+            o.unpaired.unwrap().1,
+            PathBuf::from("ip.bam_unpaired_2.fq.gz")
+        );
+        assert_eq!(
+            o.reports.unwrap().r1_txt,
+            PathBuf::from("ip.bam_R1_trimming_report.txt")
+        );
+    }
+
+    /// A bare input name yields bare output names: `Path::new("ip.bam").parent()`
+    /// is `Some("")`, so the `unwrap_or(".")` in `pair_output_dir` never fires.
+    #[test]
+    fn interleaved_outputs_bare_filename_stay_bare() {
+        let o = InterleavedFastqOutputs::new(Path::new("ip.bam"), None, false, false, false);
+        assert_eq!(o.val_1, PathBuf::from("ip_val_1.fq"));
+        assert!(o.unpaired.is_none(), "--retain_unpaired was not requested");
+        assert!(o.reports.is_none(), "--no_report_file was in effect");
+    }
+
+    #[test]
+    fn interleaved_outputs_honours_output_dir() {
+        let o = InterleavedFastqOutputs::new(
+            Path::new("d/ip.bam"),
+            Some(Path::new("out")),
+            false,
+            true,
+            true,
+        );
+        assert_eq!(o.val_1, PathBuf::from("out/ip_val_1.fq"));
+        assert_eq!(o.unpaired.unwrap().0, PathBuf::from("out/ip_unpaired_1.fq"));
+        assert_eq!(
+            o.reports.unwrap().r2_json,
+            PathBuf::from("out/ip_R2_trimming_report.json")
+        );
+    }
+
+    #[test]
+    fn interleaved_bam_outputs_name_one_interleaved_primary() {
+        let o = InterleavedBamOutputs::new(Path::new("d/ip.bam"), None, true);
+        assert_eq!(o.val, PathBuf::from("d/ip_val.bam"));
+        assert_eq!(
+            o.reports.unwrap().r1_txt,
+            PathBuf::from("d/ip_R1_trimming_report.txt")
+        );
+        assert!(
+            InterleavedBamOutputs::new(Path::new("d/ip.bam"), None, false)
+                .reports
+                .is_none()
+        );
+    }
 
     #[test]
     fn partial_output_name_wraps_the_whole_file_name() {
