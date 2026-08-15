@@ -852,13 +852,30 @@ fn main() -> Result<()> {
     // Routes through the single-file paired-uBAM helper which sets up its
     // own output paths and calls `BamReader::open_paired_interleaved`.
     if cli.paired && cli.input.len() == 1 {
+        let outputs = naming::InterleavedFastqOutputs::new(
+            &cli.input[0],
+            output_dir,
+            gzip,
+            cli.retain_unpaired,
+            !cli.no_report_file,
+        );
+        // `Input`, not `Pair`: one input means `Pair` could only be `Pair(x, x)`,
+        // which renders `one.bam + one.bam`.
+        let src = naming::OutputSource::Input(cli.input[0].clone());
+        // Ahead of setup_trimming, which scans up to 1 M reads for adapters — a
+        // refusal must not arrive after that wait.
+        naming::preflight_output_collisions(
+            &outputs.planned(&src),
+            &guarded_inputs(&cli),
+            Some(PAIRED_REPORT_HINT),
+        )?;
         let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &cli.input[0])?;
         run_paired_ubam_single_file(
             &cli,
             &cli.input[0],
+            &outputs,
             &config,
             gzip,
-            output_dir,
             &adapters_r1,
             &adapters_r2,
         )?;
@@ -1802,25 +1819,18 @@ fn run_paired(
 /// containing interleaved R1/R2 records; `BamReader::open_paired_interleaved`
 /// de-interleaves on the fly via the bounded `MAX_SLACK` buffer.
 ///
-/// Output names: derived from the input BAM's stem (`input.bam` →
-/// `input_val_1.fq[.gz]` + `input_val_2.fq[.gz]`).
+/// Output names come in from the caller, which built them for the pre-flight:
+/// the input BAM's stem plus a suffix (`input.bam` → `input_val_1.fq[.gz]`).
 #[allow(clippy::too_many_arguments)]
 fn run_paired_ubam_single_file(
     cli: &Cli,
     input: &Path,
+    outputs: &naming::InterleavedFastqOutputs,
     config: &trimmer::TrimConfig,
     gzip: bool,
-    output_dir: Option<&Path>,
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
-    let outputs = naming::InterleavedFastqOutputs::new(
-        input,
-        output_dir,
-        gzip,
-        cli.retain_unpaired,
-        !cli.no_report_file,
-    );
     let output_r1 = outputs.val_1.clone();
     let output_r2 = outputs.val_2.clone();
 
@@ -2003,10 +2013,23 @@ fn run_paired_ubam_single_file(
 fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> Result<()> {
     // Paired-uBAM single-file de-interleaved input.
     if cli.paired && cli.input.len() == 1 {
+        let outputs =
+            naming::InterleavedBamOutputs::new(&cli.input[0], output_dir, !cli.no_report_file);
+        // `Input`, not `Pair`: one input means `Pair` could only be `Pair(x, x)`,
+        // which renders `one.bam + one.bam`.
+        let src = naming::OutputSource::Input(cli.input[0].clone());
+        // Ahead of setup_trimming, which scans up to 1 M reads for adapters — a
+        // refusal must not arrive after that wait.
+        naming::preflight_output_collisions(
+            &outputs.planned(&src),
+            &guarded_inputs(cli),
+            Some(PAIRED_REPORT_HINT),
+        )?;
         let (_label, adapters_r1, adapters_r2, config) = setup_trimming(cli, &cli.input[0])?;
         return run_ubam_output_paired_single_file(
             cli,
             &cli.input[0],
+            &outputs,
             &config,
             output_dir,
             command_line,
@@ -2410,16 +2433,17 @@ fn run_ubam_output_paired_two_files(
 /// uBAM-output single-file (one interleaved BAM in, one interleaved BAM out)
 /// paired-end driver. Mirrors `run_paired_ubam_single_file`'s shape for the
 /// FASTQ-output path.
+#[allow(clippy::too_many_arguments)]
 fn run_ubam_output_paired_single_file(
     cli: &Cli,
     input: &Path,
+    outputs: &naming::InterleavedBamOutputs,
     config: &trimmer::TrimConfig,
     output_dir: Option<&Path>,
     command_line: &str,
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
-    let outputs = naming::InterleavedBamOutputs::new(input, output_dir, !cli.no_report_file);
     let output_path = outputs.val.clone();
 
     eprintln!("Trimming (paired-end, de-interleaved uBAM):");
@@ -2527,10 +2551,9 @@ fn run_ubam_output_paired_single_file(
 
 /// Per-report-side descriptor for the shared `write_paired_reports` helper.
 ///
-/// The two callers (`run_paired` for two-file FASTQ pairs, and
-/// `run_paired_ubam_single_file` for one-file interleaved uBAM) compute their
-/// report paths differently — one from the input file paths, the other from
-/// a synthesised stem — but the report-writing block downstream is identical.
+/// The four callers compute their report paths differently — the two-file pairs
+/// from the input file paths, the two single-file interleaved arms from a
+/// synthesised stem — but the report-writing block downstream is identical.
 /// This struct is the seam.
 struct PairedReportFile {
     txt_path: std::path::PathBuf,
@@ -2543,8 +2566,7 @@ struct PairedReportFile {
 
 /// Write the standard text + JSON paired-end reports for both R1 and R2.
 ///
-/// Centralises the ~50-line duplicated block previously inlined in both
-/// `run_paired` and `run_paired_ubam_single_file`. Pure I/O helper — no
+/// One implementation for all four paired report sites. Pure I/O helper — no
 /// policy or naming logic; callers supply paths via [`PairedReportFile`].
 ///
 /// `passthrough` is `Some((pt_in, pt_out))` only when `--passthrough` is
