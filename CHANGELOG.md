@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **A read name that uBAM output cannot encode is now named in the refusal, along with the SAM
+  QNAME rule it breaks** ([#429](https://github.com/FelixKrueger/TrimGalore/issues/429)) — FASTQ
+  output still accepts those names.
+
 - **A run that is refused part-way through now writes no output file, and leaves a previous
   run's output at that path untouched**
   ([#428](https://github.com/FelixKrueger/TrimGalore/issues/428)) — see `docs/guide/outputs.md`

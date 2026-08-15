@@ -638,9 +638,33 @@ impl BamWriter {
             .set_quality_scores(QualityScores::from(raw_qual))
             .set_data(data)
             .build();
+        // `record.id`, not `name` — that moved into `set_name` above. Shown under the
+        // 60-char cap the tag notices use, with the byte count when it bites, because
+        // a FASTQ id has no length limit and one rejection here is over-long. The
+        // QNAME rule is appended only for `InvalidInput`, so a full disk or a closed
+        // pipe is not relabelled as a read-name problem.
         self.inner
             .write_alignment_record(&self.header, &rec)
-            .context("failed to write BAM record")?;
+            .map_err(|e| {
+                let shown = if record.id.chars().count() > 60 {
+                    format!(
+                        "{}… ({} bytes)",
+                        record.id.chars().take(60).collect::<String>(),
+                        record.id.len()
+                    )
+                } else {
+                    record.id.clone()
+                };
+                let mut msg = format!("while writing BAM record \"{}\"", shown.escape_debug());
+                if e.kind() == std::io::ErrorKind::InvalidInput {
+                    msg.push_str(
+                        " — BAM rejected it. A SAM read name must be 1-254 bytes of \
+                         printable ASCII other than `@` and space. Rename the reads \
+                         before trimming, or write FASTQ output, which accepts them.",
+                    );
+                }
+                anyhow::Error::new(e).context(msg)
+            })?;
         Ok(())
     }
 
