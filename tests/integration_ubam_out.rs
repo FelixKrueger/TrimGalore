@@ -1256,3 +1256,93 @@ fn paired_single_fastq_keeps_its_structural_message() {
         "the #408 guard must not pre-empt the structural check:\n{err}"
     );
 }
+
+// ─── #429 — a write-side read-name refusal names the read ────────────────────
+//
+// Both failures arrive as `io::ErrorKind::InvalidInput`: `@` in a name gives
+// noodles' "invalid input parameter", a 255-byte name gives a wrapped
+// `TryFromIntError`. anyhow prints the whole chain, so those strings stay as the
+// cause — what these assert is the added context, which #429 asked for.
+
+/// A 254-byte name is the SAM limit and must still be accepted, so the refusal
+/// below is the length rule and not an off-by-one.
+#[test]
+fn ubam_out_accepts_a_254_byte_read_name() {
+    let dir = fresh_tmpdir("tg_429_len_254");
+    let name = "n".repeat(254);
+    write_one_record(
+        &dir.join("x.fastq"),
+        &format!("@{name}"),
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(&dir, &["--output-format", "ubam", "x.fastq"]);
+    assert!(
+        ok,
+        "254 bytes is the SAM limit and must be accepted:\n{err}"
+    );
+}
+
+/// `shown` is what the message must carry. The 255-byte name is over the 60-char
+/// display cap, so it arrives truncated with its byte count — 256, the id including
+/// the `@`.
+#[test]
+fn ubam_out_refusal_names_the_offending_read_name() {
+    let cases: [(&str, String, String); 2] = [
+        (
+            "at_sign",
+            "bad@name".to_string(),
+            "\"@bad@name\"".to_string(),
+        ),
+        (
+            "len_255",
+            "n".repeat(255),
+            format!("\"@{}… (256 bytes)\"", "n".repeat(59)),
+        ),
+    ];
+
+    for (label, name, shown) in cases {
+        let dir = fresh_tmpdir(&format!("tg_429_{label}"));
+        write_one_record(
+            &dir.join("x.fastq"),
+            &format!("@{name}"),
+            "ACGTACGTACGTACGTACGTACGTACGT",
+        );
+        let (ok, err) = run_in(&dir, &["--output-format", "ubam", "x.fastq"]);
+
+        assert!(!ok, "{label}: the record must be refused:\n{err}");
+        assert!(
+            err.contains(&shown),
+            "{label}: the message must name the read as {shown}:\n{err}"
+        );
+        assert!(
+            err.contains("1-254 bytes of printable ASCII"),
+            "{label}: InvalidInput must carry the QNAME rule:\n{err}"
+        );
+    }
+}
+
+/// #415 admits `@`, non-ASCII, VT and over-254-byte names on the FASTQ path,
+/// because none defeats the FASTQ id's splitters. #429 is a message fix, so the
+/// accepted set must not narrow.
+#[test]
+fn fastq_out_still_accepts_the_names_ubam_out_refuses() {
+    for (label, name) in [
+        ("at_sign", "bad@name".to_string()),
+        ("len_255", "n".repeat(255)),
+        ("non_ascii", "ré\u{e4}d".to_string()),
+        ("vt", "rea\u{0b}d".to_string()),
+    ] {
+        let dir = fresh_tmpdir(&format!("tg_429_fastq_{label}"));
+        write_one_record(
+            &dir.join("x.fastq"),
+            &format!("@{name}"),
+            "ACGTACGTACGTACGTACGTACGTACGT",
+        );
+        let (ok, err) = run_in(&dir, &["x.fastq"]);
+        assert!(ok, "{label}: FASTQ output must still accept this:\n{err}");
+        assert!(
+            dir.join("x_trimmed.fq").exists(),
+            "{label}: the trimmed output must exist"
+        );
+    }
+}
