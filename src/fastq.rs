@@ -590,6 +590,30 @@ enum Sink {
     ParGz(ParCompress<'static, Gzip, File>),
 }
 
+/// How many `Z_SYNC_FLUSH`es the gzip teardown emits before its trailer, and
+/// **the only reason it is 2 is byte-for-byte compatibility with the output
+/// this tool has always written.**
+///
+/// The pre-#434 teardown flushed the sink *twice*: once explicitly in
+/// `FastqWriter::finish`, then again in `impl Drop for FastqWriter`, which ran
+/// on the same writer immediately afterwards. Each flush is a `Z_SYNC_FLUSH`
+/// and each one is visible on the wire — it closes the open deflate block, pads
+/// to a byte boundary and emits an empty stored block (`00 00 00 FF FF`) — so
+/// the count is part of the output format whether or not anyone meant it to be.
+///
+/// Nothing in this repository can see the difference; CI compares through
+/// `gzip -dc`. Downstream does: nf-core/modules pins the **compressed** md5s in
+/// its nf-test snapshot, so a re-framing here is invisible in our tests and
+/// breaking in theirs. Measured on `test_files/BS-seq_10K_R1.fastq.gz`, serial
+/// path: 2 flushes → 341,686 bytes (what v2.x ships today), 1 → 341,681, 0 →
+/// 341,674. All three decompress to the same md5.
+///
+/// **Set this to 1 to drop the redundant marker, or 0 to drop the framing
+/// altogether** — both are legitimate, both save a handful of bytes per file,
+/// and both need a heads-up to anyone pinning compressed bytes. That is a
+/// separate change from #434, which is about not publishing a truncated file.
+const PRE_434_GZ_SYNC_FLUSHES: usize = 2;
+
 impl Sink {
     /// Close the sink, writing whatever trailer it owes, and return the error
     /// if that fails. Consumes `self`, so the sink's own `Drop` has nothing
@@ -604,6 +628,9 @@ impl Sink {
             }
             Sink::Gz(w) => {
                 let mut encoder = w.into_inner().map_err(|e| e.into_error())?;
+                for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
+                    encoder.flush()?;
+                }
                 // The deflate end-of-stream plus the 8-byte CRC/ISIZE trailer.
                 // `flush()` does NOT write these; only `try_finish` does.
                 encoder.try_finish()?;
@@ -796,6 +823,64 @@ mod tests {
         assert_eq!(&bytes[..3], &[0x1f, 0x8b, 0x08], "gzip magic + deflate");
         // 8-byte CRC32 + ISIZE trailer, both zero for an empty member.
         assert_eq!(&bytes[bytes.len() - 8..], &[0u8; 8]);
+    }
+
+    #[test]
+    fn gz_sink_finish_is_byte_identical_to_the_pre_434_teardown() {
+        // The old teardown was `FastqWriter::finish`'s `self.writer.flush()?`,
+        // then `impl Drop for FastqWriter`'s `let _ = self.writer.flush()`,
+        // then `GzEncoder::drop`'s trailer write. Both flushes are
+        // `Z_SYNC_FLUSH`es and BOTH ARE VISIBLE IN THE OUTPUT BYTES, so losing
+        // either one re-frames every gzip this tool writes. Nothing in this
+        // repo would notice — CI compares through `gzip -dc` — but
+        // nf-core/modules pins the compressed md5s in its nf-test snapshot, so
+        // the regression would only ever surface downstream.
+        //
+        // The reference is built here from flate2 directly in the old order
+        // rather than from a stored md5, so it stays honest if flate2's
+        // deflate output ever changes: what is pinned is the CALL SEQUENCE,
+        // which is the thing #434 was at risk of changing.
+        let payload: Vec<u8> = (0..200)
+            .map(|i| format!("@r{i}\nACGTACGTAC\n+\nIIIIIIIIII\n"))
+            .collect::<String>()
+            .into_bytes();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sink.gz");
+        let mut sink = Sink::Gz(BufWriter::with_capacity(
+            BUF_SIZE,
+            GzEncoder::new(File::create(&path).unwrap(), Compression::new(6)),
+        ));
+        sink.write_all(&payload).unwrap();
+        sink.finish().unwrap();
+        let ours = std::fs::read(&path).unwrap();
+
+        let ref_path = dir.path().join("reference.gz");
+        let mut encoder = GzEncoder::new(File::create(&ref_path).unwrap(), Compression::new(6));
+        encoder.write_all(&payload).unwrap();
+        encoder.flush().unwrap(); // what `FastqWriter::finish` used to do
+        encoder.flush().unwrap(); // what `FastqWriter::drop` then did
+        encoder.try_finish().unwrap(); // what `GzEncoder::drop` used to do
+        let reference = std::fs::read(&ref_path).unwrap();
+
+        assert_eq!(
+            ours, reference,
+            "the sink's teardown must emit the same bytes as the pre-#434 \
+             flush-flush-finish sequence; downstream snapshots pin these bytes"
+        );
+        // Counted, not merely detected: one marker is exactly the failure that
+        // a single flush produces, and it is the plausible way to get this
+        // wrong. An empty stored block is how `Z_SYNC_FLUSH` shows up on the
+        // wire, and payload this small will not contain that byte string by
+        // chance — a fresh reference is compared above in any case.
+        let markers = ours
+            .windows(5)
+            .filter(|w| *w == [0x00, 0x00, 0x00, 0xff, 0xff])
+            .count();
+        assert_eq!(
+            markers, PRE_434_GZ_SYNC_FLUSHES,
+            "expected one Z_SYNC_FLUSH marker per pre-#434 flush"
+        );
     }
 
     #[test]

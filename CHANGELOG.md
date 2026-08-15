@@ -19,11 +19,15 @@
   and both parallel paths join their workers before publishing, so a worker panic can no
   longer commit a short output on its way out.
 
-  **One visible consequence, on the serial-gzip path only:** the old teardown reached
-  `GzEncoder::flush`, which emits a deflate sync marker before the final block; the explicit
-  `try_finish` does not. The `.gz` bytes therefore differ slightly from v2.3.0 — measured on a
-  1M-read output, 101,067,014 bytes before and 101,067,003 after, with an identical
-  decompressed md5. `--cores N` output is byte-identical either way.
+  **Output bytes are unchanged, deliberately.** The old serial-gzip teardown flushed the sink
+  twice before writing its trailer — once in `FastqWriter::finish`, once again in that type's
+  `Drop` — and each flush emits a deflate sync marker, so the marker count is part of the
+  format v2.x has shipped whether or not it was meant to be. `Sink::finish` reproduces both
+  (`PRE_434_GZ_SYNC_FLUSHES`), because tools downstream pin the *compressed* md5s of our
+  outputs and would see a re-framing that our own tests, which compare through `gzip -dc`,
+  cannot. Verified byte-for-byte against v2.3.0 across single-end, `--paired`, `--rrbs`,
+  `--polyA`, `--nextera`, `--compression 6`, `--cores 2` and `--cores 4`. `--cores N` output
+  was never affected.
 
 - **A read name that uBAM output cannot encode is now named in the refusal, along with the SAM
   QNAME rule it breaks** ([#429](https://github.com/FelixKrueger/TrimGalore/issues/429)) — FASTQ
