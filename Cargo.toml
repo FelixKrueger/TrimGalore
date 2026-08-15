@@ -46,6 +46,8 @@ fastqc-rust = "=1.0.1"
 # compile. Treat upstream bumps as deliberate-test events.
 # See plans/06252026_ubam-input-support/PLAN.md §5 step 1.
 noodles = { version = "=0.88.0", default-features = false, features = ["bam"] }
+# Global allocator; measurements and platform caveats are in the commit message. Exact-pinned like fastqc-rust and noodles, so treat upstream bumps as deliberate-test events.
+mimalloc = "=0.1.52"
 
 [dev-dependencies]
 serde_json = "1"

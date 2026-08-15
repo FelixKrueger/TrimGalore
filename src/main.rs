@@ -23,6 +23,12 @@ use trim_galore::report;
 use trim_galore::specialty;
 use trim_galore::trimmer;
 
+/// mimalloc replaces the platform allocator for the whole binary. Allocation
+/// behaviour is the only thing that changes: no output byte differs, so the
+/// Perl 0.6.11 validation matrix is unaffected.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Format-aware sanity check — dispatches `FastqReader::sanity_check` for
 /// FASTQ input or peek-reads the first BAM record (asserting `is_unmapped()`)
 /// for uBAM. The per-record aligned-BAM check in `BamReader::next_record`
