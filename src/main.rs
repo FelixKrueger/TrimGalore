@@ -880,7 +880,6 @@ fn main() -> Result<()> {
             // stem from R1 but its directory from R1 too, and _val_2 mixes both — naming
             // one mate would encode a claim about which supplies the directory.
             let pair_src = naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone());
-            let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
             let mut candidates = vec![(o1, pair_src.clone()), (o2, pair_src.clone())];
             if cli.retain_unpaired {
                 let (u1, u2) = naming::unpaired_output_names(
@@ -919,8 +918,9 @@ fn main() -> Result<()> {
             if !cli.no_report_file {
                 for input in [&chunk[0], &chunk[1]] {
                     let src = naming::OutputSource::Input(input.clone());
-                    candidates.push((naming::report_name(input, Some(&pair_dir)), src.clone()));
-                    candidates.push((naming::json_report_name(input, Some(&pair_dir)), src));
+                    let (txt, json) = naming::paired_report_names(input, &chunk[0], output_dir);
+                    candidates.push((txt, src.clone()));
+                    candidates.push((json, src));
                 }
             }
             planned.extend(candidates);
@@ -1737,15 +1737,16 @@ fn run_paired(
 
         // Both mates' reports land where the primaries do (#398). Each keeps its own
         // input-derived filename; only the directory is shared.
-        let pair_dir = naming::pair_output_dir(input_r1, output_dir);
+        let (r1_txt, r1_json) = naming::paired_report_names(input_r1, input_r1, output_dir);
+        let (r2_txt, r2_json) = naming::paired_report_names(input_r2, input_r1, output_dir);
         let r1 = PairedReportFile {
-            txt_path: naming::report_name(input_r1, Some(&pair_dir)),
-            json_path: naming::json_report_name(input_r1, Some(&pair_dir)),
+            txt_path: r1_txt,
+            json_path: r1_json,
             input_filename: all_input_filenames[0].clone(),
         };
         let r2 = PairedReportFile {
-            txt_path: naming::report_name(input_r2, Some(&pair_dir)),
-            json_path: naming::json_report_name(input_r2, Some(&pair_dir)),
+            txt_path: r2_txt,
+            json_path: r2_json,
             input_filename: all_input_filenames[1].clone(),
         };
 
@@ -1813,32 +1814,28 @@ fn run_paired_ubam_single_file(
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
-    // Derive output paths from the single BAM input's stem.
-    let stem = input
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let ext = if gzip { ".fq.gz" } else { ".fq" };
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let output_r1 = dir.join(format!("{}_val_1{}", stem, ext));
-    let output_r2 = dir.join(format!("{}_val_2{}", stem, ext));
+    let outputs = naming::InterleavedFastqOutputs::new(
+        input,
+        output_dir,
+        gzip,
+        cli.retain_unpaired,
+        !cli.no_report_file,
+    );
+    let output_r1 = outputs.val_1.clone();
+    let output_r2 = outputs.val_2.clone();
 
     eprintln!("Trimming (paired-end, de-interleaved uBAM):");
     eprintln!("  Input:     {}", input.display());
     eprintln!("  Output R1: {}", output_r1.display());
     eprintln!("  Output R2: {}", output_r2.display());
 
-    let (unpaired_r1_path, unpaired_r2_path) = if cli.retain_unpaired {
-        let up1 = dir.join(format!("{}_unpaired_1{}", stem, ext));
-        let up2 = dir.join(format!("{}_unpaired_2{}", stem, ext));
-        eprintln!("  Unpaired R1: {}", up1.display());
-        eprintln!("  Unpaired R2: {}", up2.display());
-        (Some(up1), Some(up2))
-    } else {
-        (None, None)
+    let (unpaired_r1_path, unpaired_r2_path) = match outputs.unpaired.clone() {
+        Some((up1, up2)) => {
+            eprintln!("  Unpaired R1: {}", up1.display());
+            eprintln!("  Unpaired R2: {}", up2.display());
+            (Some(up1), Some(up2))
+        }
+        None => (None, None),
     };
 
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
@@ -1956,14 +1953,18 @@ fn run_paired_ubam_single_file(
             .to_string();
         let all_input_filenames = vec![input_filename.clone()];
 
+        let reports = outputs
+            .reports
+            .as_ref()
+            .expect("reports were requested, so the namer built them");
         let r1 = PairedReportFile {
-            txt_path: dir.join(format!("{}_R1_trimming_report.txt", stem)),
-            json_path: dir.join(format!("{}_R1_trimming_report.json", stem)),
+            txt_path: reports.r1_txt.clone(),
+            json_path: reports.r1_json.clone(),
             input_filename: input_filename.clone(),
         };
         let r2 = PairedReportFile {
-            txt_path: dir.join(format!("{}_R2_trimming_report.txt", stem)),
-            json_path: dir.join(format!("{}_R2_trimming_report.json", stem)),
+            txt_path: reports.r2_txt.clone(),
+            json_path: reports.r2_json.clone(),
             input_filename: input_filename.clone(),
         };
 
@@ -2034,11 +2035,11 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
             ));
             // #388 — same report-collision hole as the FASTQ paired path.
             if !cli.no_report_file {
-                let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
                 for input in [&chunk[0], &chunk[1]] {
                     let src = naming::OutputSource::Input(input.clone());
-                    planned.push((naming::report_name(input, Some(&pair_dir)), src.clone()));
-                    planned.push((naming::json_report_name(input, Some(&pair_dir)), src));
+                    let (txt, json) = naming::paired_report_names(input, &chunk[0], output_dir);
+                    planned.push((txt, src.clone()));
+                    planned.push((json, src));
                 }
             }
         }
@@ -2362,15 +2363,16 @@ fn run_ubam_output_paired_two_files(
             .to_string();
         let all_input_filenames = vec![r1_filename.clone(), r2_filename.clone()];
 
-        let pair_dir = naming::pair_output_dir(input_r1, output_dir);
+        let (r1_txt, r1_json) = naming::paired_report_names(input_r1, input_r1, output_dir);
+        let (r2_txt, r2_json) = naming::paired_report_names(input_r2, input_r1, output_dir);
         let r1_desc = PairedReportFile {
-            txt_path: naming::report_name(input_r1, Some(&pair_dir)),
-            json_path: naming::json_report_name(input_r1, Some(&pair_dir)),
+            txt_path: r1_txt,
+            json_path: r1_json,
             input_filename: r1_filename,
         };
         let r2_desc = PairedReportFile {
-            txt_path: naming::report_name(input_r2, Some(&pair_dir)),
-            json_path: naming::json_report_name(input_r2, Some(&pair_dir)),
+            txt_path: r2_txt,
+            json_path: r2_json,
             input_filename: r2_filename,
         };
 
@@ -2417,17 +2419,8 @@ fn run_ubam_output_paired_single_file(
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
-    // Output stem derived from the BAM input's filename, same as the
-    // FASTQ-output single-file paired path.
-    let stem = input
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let dir = output_dir
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| input.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let output_path = dir.join(format!("{}_val.bam", stem));
+    let outputs = naming::InterleavedBamOutputs::new(input, output_dir, !cli.no_report_file);
+    let output_path = outputs.val.clone();
 
     eprintln!("Trimming (paired-end, de-interleaved uBAM):");
     eprintln!("  Input:  {}", input.display());
@@ -2486,14 +2479,18 @@ fn run_ubam_output_paired_single_file(
             .to_string();
         let all_input_filenames = vec![input_filename.clone()];
 
+        let reports = outputs
+            .reports
+            .as_ref()
+            .expect("reports were requested, so the namer built them");
         let r1_desc = PairedReportFile {
-            txt_path: dir.join(format!("{}_R1_trimming_report.txt", stem)),
-            json_path: dir.join(format!("{}_R1_trimming_report.json", stem)),
+            txt_path: reports.r1_txt.clone(),
+            json_path: reports.r1_json.clone(),
             input_filename: input_filename.clone(),
         };
         let r2_desc = PairedReportFile {
-            txt_path: dir.join(format!("{}_R2_trimming_report.txt", stem)),
-            json_path: dir.join(format!("{}_R2_trimming_report.json", stem)),
+            txt_path: reports.r2_txt.clone(),
+            json_path: reports.r2_json.clone(),
             input_filename: input_filename.clone(),
         };
 
