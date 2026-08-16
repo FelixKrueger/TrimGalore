@@ -135,6 +135,14 @@ pub struct Cli {
     #[clap(long = "three_prime_clip_R2", alias = "three_prime_clip_r2")]
     pub three_prime_clip_r2: Option<usize>,
 
+    /// Library-prep preset: expands into the four end-clipping values that kit needs
+    /// (emseq, accel [swift/xgen], zymo, scbs [single_cell], pbat). Nothing else is set:
+    /// adapters stay auto-detected and --length is untouched. An explicit clip flag wins
+    /// over the preset value it displaces, and both numbers are named in the log and in
+    /// the trimming reports. Presets may change between releases; see CHANGELOG.md.
+    #[clap(long = "library", value_name = "PRESET")]
+    pub library: Option<crate::library::LibraryPreset>,
+
     /// NextSeq/NovaSeq 2-colour quality trimming. Trailing high-quality G bases
     /// are treated as no-signal artifacts and quality-trimmed. The value is the
     /// quality cutoff (replaces -q). Mutually exclusive with --quality.
@@ -838,6 +846,9 @@ impl Cli {
                     "--clump_only does not clip; --three_prime_clip_r2 is not compatible"
                 );
             }
+            if self.library.is_some() {
+                anyhow::bail!("--clump_only does not clip; --library is not compatible");
+            }
             // RRBS
             if self.rrbs {
                 anyhow::bail!("--clump_only does not trim; --rrbs is not compatible");
@@ -1140,6 +1151,24 @@ impl Cli {
     /// Otherwise uses the standard `--quality` value.
     pub fn effective_quality_cutoff(&self) -> u8 {
         self.nextseq.unwrap_or(self.quality)
+    }
+
+    /// Fold a `--library` preset (if any) into the four clip flags (#440).
+    ///
+    /// Every consumer of the clip values goes through here, so a preset cannot
+    /// reach one code path and miss another. The returned value also carries the
+    /// preset name and each displaced number, which is what the log line and both
+    /// trimming reports print.
+    pub fn effective_clips(&self) -> crate::library::ResolvedClips {
+        crate::library::resolve(
+            self.library,
+            crate::library::UserClips {
+                clip_r1: self.clip_r1,
+                clip_r2: self.clip_r2,
+                three_prime_clip_r1: self.three_prime_clip_r1,
+                three_prime_clip_r2: self.three_prime_clip_r2,
+            },
+        )
     }
 }
 
@@ -1618,6 +1647,86 @@ mod tests {
         assert_eq!(cli.clip_r2, Some(2));
         assert_eq!(cli.three_prime_clip_r1, Some(3));
         assert_eq!(cli.three_prime_clip_r2, Some(4));
+    }
+
+    // ── --library presets (#440) ─────────────────────────────────────────
+
+    /// The whole point of the flag: four clip values from one kit name.
+    #[test]
+    fn test_library_preset_supplies_all_four_clip_values() {
+        let cli = Cli::parse_from(["trim_galore", "--paired", "--library", "accel", R1, R2]);
+        let clips = cli.effective_clips();
+        assert_eq!(clips.clip_r1, Some(10));
+        assert_eq!(clips.clip_r2, Some(15));
+        assert_eq!(clips.three_prime_clip_r1, Some(10));
+        assert_eq!(clips.three_prime_clip_r2, Some(10));
+    }
+
+    /// Accel-NGS was resold as Swift and then as IDT xGen; all three names
+    /// have to land on the same preset.
+    #[test]
+    fn test_library_accel_aliases() {
+        for name in ["accel", "swift", "xgen"] {
+            let cli = Cli::parse_from(["trim_galore", "--library", name, R1]);
+            assert_eq!(
+                cli.library,
+                Some(crate::library::LibraryPreset::Accel),
+                "alias {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_library_scbs_aliases() {
+        for name in ["scbs", "single_cell", "single-cell"] {
+            let cli = Cli::parse_from(["trim_galore", "--library", name, R1]);
+            assert_eq!(
+                cli.library,
+                Some(crate::library::LibraryPreset::ScBs),
+                "alias {name}"
+            );
+        }
+    }
+
+    /// Explicit wins. An error here would push the user back to writing all
+    /// four values by hand, which is what the preset exists to remove.
+    #[test]
+    fn test_explicit_clip_flag_overrides_the_preset() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--paired",
+            "--library",
+            "emseq",
+            "--clip_R1",
+            "12",
+            R1,
+            R2,
+        ]);
+        cli.validate().expect("override is legal, not an error");
+        let clips = cli.effective_clips();
+        assert_eq!(clips.clip_r1, Some(12));
+        assert_eq!(clips.clip_r2, Some(10));
+        assert_eq!(clips.overrides.len(), 1);
+        assert_eq!(clips.overrides[0].preset_value, 10);
+        assert_eq!(clips.overrides[0].user_value, 12);
+    }
+
+    /// An unknown kit name must fail at parse time rather than trim silently
+    /// with no clipping at all.
+    #[test]
+    fn test_unknown_library_preset_is_rejected() {
+        assert!(Cli::try_parse_from(["trim_galore", "--library", "nugen", R1]).is_err());
+    }
+
+    /// `--clump_only` rejects every clip flag; a preset is four of them.
+    #[test]
+    fn test_clump_only_rejects_library() {
+        let cli = Cli::parse_from(["trim_galore", "--clump_only", "--library", "emseq", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--library"),
+            "expected --library incompatibility, got: {err}"
+        );
     }
 
     // ── --clumpify / --compression validation ────────────────────────────

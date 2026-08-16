@@ -61,6 +61,7 @@ export default defineConfig({
             { label: 'Adapter trimming', slug: 'guide/adapters' },
             { label: 'Length filtering', slug: 'guide/length' },
             { label: 'Paired-end data', slug: 'guide/paired-end' },
+            { label: 'Library presets', slug: 'guide/library-presets' },
             { label: 'Output files', slug: 'guide/outputs' },
             { label: 'Trimming reports', slug: 'guide/reports' },
             { label: 'Flag reference notes', slug: 'guide/flags' },

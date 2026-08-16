@@ -183,6 +183,9 @@ pub struct TrimConfig {
     pub input_filename: String,
     /// All input filenames — SE: one element, PE: both R1 and R2. Used in JSON report.
     pub input_filenames: Vec<String>,
+    /// `--library` preset and the clipping it expanded into (#440). `None` when
+    /// no preset was selected; the reports then say nothing about presets.
+    pub library: Option<crate::library::ResolvedClips>,
 }
 
 /// Write the trimming report header (parameter summary).
@@ -266,6 +269,24 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
     }
     if config.trim_n {
         writeln!(w, "Removing Ns from the end of reads")?;
+    }
+    // #440 — a preset may change between releases, so the report records the
+    // expanded numbers rather than just the kit name it was asked for.
+    if let Some(library) = &config.library
+        && let Some(preset) = library.preset
+    {
+        writeln!(w, "Library preset: {}", preset.canonical_name())?;
+        writeln!(w, "Clipping in force: {}", library.flag_summary())?;
+        for o in &library.overrides {
+            writeln!(
+                w,
+                "{} {} was given on the command line and overrides the {} preset value {}",
+                o.flag,
+                o.user_value,
+                preset.canonical_name(),
+                o.preset_value
+            )?;
+        }
     }
     if config.rrbs {
         writeln!(
@@ -835,6 +856,50 @@ pub fn write_json_report<W: Write>(
     json_bool(w, i2, "non_directional", config.non_directional, true)?;
     json_bool(w, i2, "poly_a", config.poly_a, true)?;
     json_bool(w, i2, "poly_g", config.poly_g, true)?;
+    // #440 — `null` unless a `--library` preset was selected. The four values
+    // repeated here are the ones in force, overrides included, so a consumer
+    // never has to reconstruct them from the preset name.
+    match config.library.as_ref().and_then(|l| {
+        let preset = l.preset?;
+        Some((preset, l))
+    }) {
+        Some((preset, library)) => {
+            writeln!(w, "{}\"library\": {{", i2)?;
+            json_str(w, i3, "preset", preset.canonical_name(), true)?;
+            json_opt_int(w, i3, "clip_r1", library.clip_r1, true)?;
+            json_opt_int(w, i3, "clip_r2", library.clip_r2, true)?;
+            json_opt_int(
+                w,
+                i3,
+                "three_prime_clip_r1",
+                library.three_prime_clip_r1,
+                true,
+            )?;
+            json_opt_int(
+                w,
+                i3,
+                "three_prime_clip_r2",
+                library.three_prime_clip_r2,
+                true,
+            )?;
+            write!(w, "{}\"overrides\": [", i3)?;
+            for (i, o) in library.overrides.iter().enumerate() {
+                write!(
+                    w,
+                    "{{\"flag\": \"{}\", \"preset_value\": {}, \"user_value\": {}}}",
+                    json_escape_string(o.flag),
+                    o.preset_value,
+                    o.user_value
+                )?;
+                if i + 1 < library.overrides.len() {
+                    write!(w, ", ")?;
+                }
+            }
+            writeln!(w, "]")?;
+            writeln!(w, "{}}},", i2)?;
+        }
+        None => writeln!(w, "{}\"library\": null,", i2)?,
+    }
     json_opt_int(w, i2, "clip_r1", extra.clip_r1, true)?;
     json_opt_int(w, i2, "clip_r2", extra.clip_r2, true)?;
     json_opt_int(
@@ -1299,7 +1364,115 @@ mod tests {
             command_line: "trim_galore sample.fq.gz".to_string(),
             input_filename: "sample.fq.gz".to_string(),
             input_filenames: vec!["sample.fq.gz".to_string()],
+            library: None,
         }
+    }
+
+    // ── --library preset reporting (#440) ────────────────────────────────
+
+    /// A preset is only safe to change between releases if every report says
+    /// which numbers the run actually used. Text report, name plus all four.
+    #[test]
+    fn test_text_report_records_preset_name_and_expanded_values() {
+        let mut config = test_config();
+        config.paired = true;
+        config.library = Some(crate::library::resolve(
+            Some(crate::library::LibraryPreset::Accel),
+            crate::library::UserClips::default(),
+        ));
+
+        let mut buf = Vec::new();
+        write_report_header(&mut buf, &config).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(text.contains("Library preset: accel"), "got:\n{text}");
+        assert!(
+            text.contains(
+                "--clip_R1 10 --clip_R2 15 --three_prime_clip_R1 10 --three_prime_clip_R2 10"
+            ),
+            "got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_text_report_names_both_values_for_an_override() {
+        let mut config = test_config();
+        config.library = Some(crate::library::resolve(
+            Some(crate::library::LibraryPreset::EmSeq),
+            crate::library::UserClips {
+                clip_r1: Some(12),
+                ..crate::library::UserClips::default()
+            },
+        ));
+
+        let mut buf = Vec::new();
+        write_report_header(&mut buf, &config).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(text.contains("--clip_R1 12"), "user value missing:\n{text}");
+        assert!(
+            text.contains("preset value 10"),
+            "displaced preset value missing:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_text_report_says_nothing_about_presets_when_none_selected() {
+        let config = test_config();
+        let mut buf = Vec::new();
+        write_report_header(&mut buf, &config).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(!text.contains("Library preset"), "got:\n{text}");
+    }
+
+    #[test]
+    fn test_json_report_records_library_block() {
+        let mut config = test_config();
+        config.library = Some(crate::library::resolve(
+            Some(crate::library::LibraryPreset::EmSeq),
+            crate::library::UserClips {
+                clip_r1: Some(12),
+                ..crate::library::UserClips::default()
+            },
+        ));
+        let extra = JsonReportParams {
+            clip_r1: Some(12),
+            clip_r2: Some(10),
+            three_prime_clip_r1: Some(10),
+            three_prime_clip_r2: Some(10),
+            ..test_extra_params()
+        };
+
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &test_stats(), None, 1, &extra).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+
+        let lib = &json["parameters"]["library"];
+        assert_eq!(lib["preset"], "emseq");
+        assert_eq!(lib["clip_r1"], 12);
+        assert_eq!(lib["clip_r2"], 10);
+        assert_eq!(lib["three_prime_clip_r1"], 10);
+        assert_eq!(lib["three_prime_clip_r2"], 10);
+        assert_eq!(lib["overrides"][0]["flag"], "--clip_R1");
+        assert_eq!(lib["overrides"][0]["preset_value"], 10);
+        assert_eq!(lib["overrides"][0]["user_value"], 12);
+    }
+
+    #[test]
+    fn test_json_report_library_is_null_without_a_preset() {
+        let config = test_config();
+        let mut buf = Vec::new();
+        write_json_report(
+            &mut buf,
+            &config,
+            &test_stats(),
+            None,
+            1,
+            &test_extra_params(),
+        )
+        .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert!(json["parameters"]["library"].is_null());
     }
 
     /// Helper to build minimal JsonReportParams for testing.
