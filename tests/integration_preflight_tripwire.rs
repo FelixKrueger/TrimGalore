@@ -593,6 +593,13 @@ fn se_trim_clumpify() {
         "clumpify did not engage, so this case proves nothing about its writers:\n{}",
         out.stderr
     );
+
+    // Both banner figures are MiB: bins before the semicolon, peak before "(gzip".
+    assert!(
+        out.stderr.contains("MiB; predicted peak ≈") && out.stderr.contains("MiB (gzip level"),
+        "clumpify banner must label both figures MiB:\n{}",
+        out.stderr
+    );
 }
 
 #[test]

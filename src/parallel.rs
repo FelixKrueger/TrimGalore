@@ -113,10 +113,12 @@ pub fn run_paired_end_parallel(
     );
 
     // Per-worker channels (round-robin distribution — no MPMC dependency needed)
+    // A clumpy batch is a whole bin, so a shallower queue caps resident bins.
+    let queue_depth = if clump_layout.is_some() { 1 } else { 2 };
     let mut work_txs: Vec<mpsc::SyncSender<PairedWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<PairedWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
-        let (tx, rx) = mpsc::sync_channel::<PairedWork>(2);
+        let (tx, rx) = mpsc::sync_channel::<PairedWork>(queue_depth);
         work_txs.push(tx);
         work_rxs.push(rx);
     }
@@ -346,9 +348,9 @@ fn process_paired_batch(
     let mut stats_r2 = TrimStats::with_adapter_count(config.r2_adapter_count());
     let mut pair_stats = PairValidationStats::default();
 
-    let cap = reads_r1.len() * 300;
-    let mut buf_r1 = Vec::with_capacity(cap);
-    let mut buf_r2 = Vec::with_capacity(cap);
+    // Each buffer holds one mate of this batch, so reserve that mate's own bytes.
+    let mut buf_r1 = Vec::with_capacity(reads_r1.iter().map(estimated_record_bytes).sum::<usize>());
+    let mut buf_r2 = Vec::with_capacity(reads_r2.iter().map(estimated_record_bytes).sum::<usize>());
     let mut buf_up_r1 = Vec::new();
     let mut buf_up_r2 = Vec::new();
     // Passthrough buffer + sink. `passthrough_active` decides whether the
@@ -937,10 +939,12 @@ pub fn run_single_end_parallel(
     gzip: bool,
     clump_layout: Option<ClumpLayout>,
 ) -> Result<TrimStats> {
+    // A clumpy batch is a whole bin, so a shallower queue caps resident bins.
+    let queue_depth = if clump_layout.is_some() { 1 } else { 2 };
     let mut work_txs: Vec<mpsc::SyncSender<SingleWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<SingleWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
-        let (tx, rx) = mpsc::sync_channel::<SingleWork>(2);
+        let (tx, rx) = mpsc::sync_channel::<SingleWork>(queue_depth);
         work_txs.push(tx);
         work_rxs.push(rx);
     }
@@ -1066,8 +1070,7 @@ fn process_single_batch(
     gzip: bool,
 ) -> Result<SingleBatchResult> {
     let mut stats = TrimStats::with_adapter_count(config.adapters.len());
-    let cap = reads.len() * 300;
-    let mut buf = Vec::with_capacity(cap);
+    let mut buf = Vec::with_capacity(reads.iter().map(estimated_record_bytes).sum::<usize>());
 
     if gzip {
         {
@@ -1609,10 +1612,7 @@ mod tests {
     /// the sorted runs (which is the point of clumpy). 1 MiB per bin
     /// matches the production minimum floor in `clump::MIN_BIN_BYTES`.
     fn small_clump_layout() -> ClumpLayout {
-        ClumpLayout {
-            n_bins: 16,
-            bin_byte_budget: 1024 * 1024,
-        }
+        ClumpLayout::new(16, 1024 * 1024, 2)
     }
 
     fn read_all_records(path: &std::path::Path) -> Result<Vec<(String, String, String)>> {
