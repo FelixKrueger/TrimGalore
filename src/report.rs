@@ -276,7 +276,11 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
         && let Some(preset) = library.preset
     {
         writeln!(w, "Library preset: {}", preset.canonical_name())?;
-        writeln!(w, "Clipping in force: {}", library.flag_summary())?;
+        writeln!(
+            w,
+            "Clipping in force: {}",
+            library.flag_summary(config.paired)
+        )?;
         for o in &library.overrides {
             writeln!(
                 w,
@@ -1394,6 +1398,29 @@ mod tests {
         );
     }
 
+    /// Read 2 clipping cannot apply to a single-end run, so the line that claims
+    /// what is in force must not list it.
+    #[test]
+    fn test_text_report_omits_r2_clipping_on_single_end() {
+        let mut config = test_config();
+        config.paired = false;
+        config.library = Some(crate::library::resolve(
+            Some(crate::library::LibraryPreset::Pbat),
+            crate::library::UserClips::default(),
+        ));
+
+        let mut buf = Vec::new();
+        write_report_header(&mut buf, &config).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(
+            text.contains("Clipping in force: --clip_R1 8 --three_prime_clip_R1 8"),
+            "got:\n{text}"
+        );
+        assert!(!text.contains("--clip_R2"), "got:\n{text}");
+        assert!(!text.contains("--three_prime_clip_R2"), "got:\n{text}");
+    }
+
     #[test]
     fn test_text_report_names_both_values_for_an_override() {
         let mut config = test_config();
@@ -1458,6 +1485,71 @@ mod tests {
         assert_eq!(lib["overrides"][0]["user_value"], 12);
     }
 
+    /// Four distinct values so that any permutation of the four keys is visible;
+    /// no real preset has four distinct values, so they come from overrides.
+    #[test]
+    fn test_json_report_records_all_four_overrides() {
+        let mut config = test_config();
+        config.paired = true;
+        config.library = Some(crate::library::resolve(
+            Some(crate::library::LibraryPreset::Accel),
+            crate::library::UserClips {
+                clip_r1: Some(1),
+                clip_r2: Some(2),
+                three_prime_clip_r1: Some(3),
+                three_prime_clip_r2: Some(4),
+            },
+        ));
+        let extra = JsonReportParams {
+            clip_r1: Some(1),
+            clip_r2: Some(2),
+            three_prime_clip_r1: Some(3),
+            three_prime_clip_r2: Some(4),
+            ..test_extra_params()
+        };
+
+        let mut buf = Vec::new();
+        write_json_report(&mut buf, &config, &test_stats(), None, 1, &extra).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+
+        let lib = &json["parameters"]["library"];
+        assert_eq!(lib["clip_r1"], 1);
+        assert_eq!(lib["clip_r2"], 2);
+        assert_eq!(lib["three_prime_clip_r1"], 3);
+        assert_eq!(lib["three_prime_clip_r2"], 4);
+
+        // The block and the top level describe one resolved configuration. Asserted
+        // here rather than beside a preset whose four values are equal, where a
+        // permuted key label is indistinguishable.
+        for (key, value) in [
+            ("clip_r1", 1),
+            ("clip_r2", 2),
+            ("three_prime_clip_r1", 3),
+            ("three_prime_clip_r2", 4),
+        ] {
+            assert_eq!(json["parameters"][key], value, "top-level {key}");
+            assert_eq!(
+                json["parameters"][key], lib[key],
+                "{key} disagrees with the library block"
+            );
+        }
+
+        // Each record names the flag it came from and the preset value it displaced.
+        let expected = [
+            ("--clip_R1", 10, 1),
+            ("--clip_R2", 15, 2),
+            ("--three_prime_clip_R1", 10, 3),
+            ("--three_prime_clip_R2", 10, 4),
+        ];
+        let overrides = lib["overrides"].as_array().expect("overrides is an array");
+        assert_eq!(overrides.len(), 4);
+        for (i, (flag, preset_value, user_value)) in expected.iter().enumerate() {
+            assert_eq!(overrides[i]["flag"], *flag);
+            assert_eq!(overrides[i]["preset_value"], *preset_value);
+            assert_eq!(overrides[i]["user_value"], *user_value);
+        }
+    }
+
     #[test]
     fn test_json_report_library_is_null_without_a_preset() {
         let config = test_config();
@@ -1473,6 +1565,14 @@ mod tests {
         .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         assert!(json["parameters"]["library"].is_null());
+        // `Value::Null` is also what a missing key yields, so pin the key's presence.
+        assert!(
+            json["parameters"]
+                .as_object()
+                .expect("parameters is an object")
+                .contains_key("library"),
+            "the library key must be present and null, not absent"
+        );
     }
 
     /// Helper to build minimal JsonReportParams for testing.

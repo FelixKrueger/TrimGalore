@@ -1038,6 +1038,39 @@ fn rename_into_ubam_refused_for_fastq_input() {
     );
 }
 
+/// #440 — a `--library` preset supplies the clip values, so it counts towards the
+/// #408 refusal exactly as the four flags it stands for do.
+#[test]
+fn rename_into_ubam_refused_for_fastq_input_via_library_preset() {
+    let dir = fresh_tmpdir("tg_440_library_rename_refused");
+    write_one_record(
+        &dir.join("sp.fastq"),
+        "@withspace 1:N:0:ACGTAC",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+    );
+    let (ok, err) = run_in(
+        &dir,
+        &[
+            "--rename",
+            "--library",
+            "emseq",
+            "--output-format",
+            "ubam",
+            "sp.fastq",
+        ],
+    );
+    assert!(!ok, "--rename + uBAM output + --library must exit non-zero");
+    assert!(
+        err.contains("--rename is refused") && err.contains("--output-format ubam"),
+        "expected the #408 refusal in stderr:\n{err}"
+    );
+    assert_eq!(
+        dir_listing(&dir),
+        vec!["sp.fastq".to_string()],
+        "a refused run must write nothing"
+    );
+}
+
 /// #408 — `--rename` alone appends nothing (`append_to_id` is reached only under a
 /// clip flag), so refusing it would break wrappers that pass the flag
 /// unconditionally.

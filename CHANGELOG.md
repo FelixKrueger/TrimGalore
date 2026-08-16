@@ -15,11 +15,14 @@
 
   A preset is only a clip bundle, which is why `--rrbs`, `--clock` and `--implicon` stay
   separate flags, and why Tecan/NuGEN Ovation RRBS is absent (diversity trimming is a
-  different algorithm, and it must run *without* `--rrbs`). An explicit clip flag wins over
-  the preset value it displaces, and both numbers are named in the log; a preset that supplies
-  `--clip_R2` suppresses the `--rrbs` directional auto-clip, exactly as an explicit
-  `--clip_R2` already did. Both trimming reports record the preset name and all four values in
-  force (`parameters.library` in JSON, `null` when no preset was used), so preset values can
+  different algorithm, and it must run *without* `--rrbs`). For the same reason `--library` is
+  refused with `--hardtrim5`, `--hardtrim3`, `--clock` and `--implicon`, which do not honour the
+  clip flags. An explicit clip flag wins over the preset value it displaces, and both numbers
+  are named in the log; a preset that supplies `--clip_R2` suppresses the `--rrbs` directional
+  auto-clip, exactly as an explicit `--clip_R2` already did. Both trimming reports record the
+  preset name and the clipping it resolved to — all four values in JSON
+  (`parameters.library`, `null` when no preset was used), and in the text report the values in
+  force for the run, so a single-end report lists Read 1 only. Preset values can therefore
   change in a future release (each change gets an entry here) without making an old report
   ambiguous. A run that passes no `--library` trims exactly as before and its text report is
   unchanged; the only difference anywhere is the new `"library": null` key in the JSON report.

@@ -139,7 +139,9 @@ pub struct Cli {
     /// (emseq, accel [swift/xgen], zymo, scbs [single_cell], pbat). Nothing else is set:
     /// adapters stay auto-detected and --length is untouched. An explicit clip flag wins
     /// over the preset value it displaces, and both numbers are named in the log and in
-    /// the trimming reports. Presets may change between releases; see CHANGELOG.md.
+    /// the trimming reports. Refused with --clump_only and with the specialty modes
+    /// (--hardtrim5/3, --clock, --implicon), which do not honour the clip flags.
+    /// Presets may change between releases; see CHANGELOG.md.
     #[clap(long = "library", value_name = "PRESET")]
     pub library: Option<crate::library::LibraryPreset>,
 
@@ -1068,8 +1070,8 @@ impl Cli {
             }
         }
 
-        // #421 — these arms reach no `fastqc::run` call site. Last of the fallible checks,
-        // so malformed values and invalid input lists report their own defect first.
+        // #421 — these arms reach no `fastqc::run` call site. Below the value and
+        // input-list checks, so malformed values and bad input lists report first.
         if self.fastqc_requested() {
             if self.hardtrim5.is_some() {
                 anyhow::bail!(
@@ -1105,6 +1107,30 @@ impl Cli {
                      shape is the interleaved-uBAM paired path, which writes FASTQ output with \
                      no QC report. Pass Read 1 and Read 2 as two files, or — for a genuine \
                      interleaved uBAM — add --output-format ubam, which does produce a report"
+                );
+            }
+        }
+
+        // The specialty arms return before setup_trimming, so no preset reaches a clip site.
+        if self.library.is_some() {
+            if self.hardtrim5.is_some() {
+                anyhow::bail!(
+                    "--hardtrim5 does not honour the clip flags; --library is not compatible"
+                );
+            }
+            if self.hardtrim3.is_some() {
+                anyhow::bail!(
+                    "--hardtrim3 does not honour the clip flags; --library is not compatible"
+                );
+            }
+            if self.clock {
+                anyhow::bail!(
+                    "--clock does not honour the clip flags; --library is not compatible"
+                );
+            }
+            if self.implicon.is_some() {
+                anyhow::bail!(
+                    "--implicon does not honour the clip flags; --library is not compatible"
                 );
             }
         }
@@ -2386,6 +2412,82 @@ mod tests {
         );
         let err = cli.validate().unwrap_err().to_string();
         assert!(err.contains("--fastqc"), "expected rejection, got: {err}");
+    }
+
+    // ── #440: --library refused where no clip site is reachable ──
+
+    #[test]
+    fn library_plus_hardtrim5_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim5", "20", "--library", "emseq", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--library") && err.contains("--hardtrim5"),
+            "expected library+hardtrim5 rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn library_plus_hardtrim3_rejected() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim3", "20", "--library", "emseq", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--library") && err.contains("--hardtrim3"),
+            "expected library+hardtrim3 rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn library_plus_clock_rejected() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clock",
+            "--paired",
+            "--library",
+            "pbat",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--library") && err.contains("--clock"),
+            "expected library+clock rejection, got: {err}"
+        );
+    }
+
+    /// `--implicon` takes its value with `=` only, so a bare flag is the shape that
+    /// reaches `validate()` with the input list intact.
+    #[test]
+    fn library_plus_implicon_rejected() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--implicon",
+            "--paired",
+            "--library",
+            "pbat",
+            R1,
+            R2,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--library") && err.contains("--implicon"),
+            "expected library+implicon rejection, got: {err}"
+        );
+    }
+
+    /// The refusal is the last fallible check, so a malformed mode value is
+    /// diagnosed on its own terms first.
+    #[test]
+    fn hardtrim5_range_error_precedes_the_library_refusal() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim5", "0", "--library", "emseq", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("between 1 and 999"),
+            "expected the range error first, got: {err}"
+        );
+        assert!(
+            !err.contains("--library"),
+            "the range error must not mention --library, got: {err}"
+        );
     }
 
     // ── #421 acceptance twins: these arms do reach `fastqc::run` ──
