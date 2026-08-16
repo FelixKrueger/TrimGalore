@@ -137,16 +137,27 @@ pub fn bin_for(key: MinimizerKey, n_bins: usize) -> usize {
 pub struct ClumpLayout {
     pub n_bins: usize,
     pub bin_byte_budget: usize,
+    /// Worker count this layout was sized for; the prediction is only valid for
+    /// that count.
+    cores: usize,
 }
 
 impl ClumpLayout {
-    /// Predicted peak RSS in bytes for a run with this layout and `cores`
-    /// workers. Inverse of the formula in `resolve_layout`; calling this from
-    /// `main.rs` keeps the startup banner honest with what the layout was sized
-    /// against.
-    pub fn predicted_peak_bytes(&self, cores: usize) -> u64 {
+    /// Layout with an explicit core count, for callers that bypass
+    /// `resolve_layout`.
+    pub fn new(n_bins: usize, bin_byte_budget: usize, cores: usize) -> Self {
+        Self {
+            n_bins,
+            bin_byte_budget,
+            cores,
+        }
+    }
+
+    /// Predicted peak RSS in bytes. Inverse of the formula in `resolve_layout`,
+    /// so the startup banner cannot disagree with the sizing.
+    pub fn predicted_peak_bytes(&self) -> u64 {
         let dyn_bytes =
-            self.bin_byte_budget as u64 * (5 * self.n_bins as u64 + 7 * cores as u64) / 4;
+            self.bin_byte_budget as u64 * (5 * self.n_bins as u64 + 7 * self.cores as u64) / 4;
         STATIC_OVERHEAD_BYTES + dyn_bytes
     }
 }
@@ -175,13 +186,17 @@ const STATIC_OVERHEAD_BYTES: u64 = 512 * 1024 * 1024;
 /// 1. Reader's resident bins: `n_bins × bin_byte_budget` of FASTQ text +
 ///    `Vec<FastqRecord>` spine entries (72 bytes per record on top of ~350 byte
 ///    text records ≈ 25% extra).
-/// 2. Worker input batches in flight: up to `cores × bin_byte_budget` of text
-///    + matching spine.
+/// 2. Worker input batches in flight: up to `2 × cores × bin_byte_budget` of
+///    text + matching spine — the clumpy work channel has depth 1, so a worker
+///    holds one queued batch and one in hand.
 /// 3. Worker output Vecs growing during gzip-encode: roughly `0.5 ×` input
 ///    size at L1 (smaller at higher gzip levels, but use L1 as the upper bound).
 ///
 /// Combine: peak ≈ STATIC + B × [(n_bins + cores) × 1.25 + cores × 0.5]
 ///                = STATIC + B × (5 × n_bins + 7 × cores) / 4
+///
+/// The in-flight term charges one batch per worker where two can be resident,
+/// so this prediction is a known under-estimate — see issue #439.
 ///
 /// Solving for B given the user's budget gives the formula below. The 1.25 ×
 /// spine factor is the doubling-free post-pre-size value; the 0.5 × output
@@ -216,6 +231,7 @@ pub fn resolve_layout(memory_budget_bytes: u64, cores: usize) -> Result<ClumpLay
     Ok(ClumpLayout {
         n_bins,
         bin_byte_budget: bin_byte_budget as usize,
+        cores,
     })
 }
 
@@ -462,12 +478,21 @@ mod tests {
     }
 
     #[test]
+    fn resolve_layout_pins_the_default_cell() {
+        // 1 GiB + 4 cores is the cell #439 is about, so the sizing arithmetic may
+        // not move it silently: 4 × 512 MiB / 108.
+        let layout = resolve_layout(1024 * 1024 * 1024, 4).unwrap();
+        assert_eq!(layout.n_bins, 16);
+        assert_eq!(layout.bin_byte_budget, 19_884_107);
+    }
+
+    #[test]
     fn resolve_layout_predicted_peak_fits_budget() {
         // The whole point of the formula: predicted peak ≤ user-supplied --memory.
         for (mem_gib, cores) in [(2u64, 4), (4, 8), (8, 8), (16, 16)] {
             let budget = mem_gib * 1024 * 1024 * 1024;
             let layout = resolve_layout(budget, cores).unwrap();
-            let predicted_peak = layout.predicted_peak_bytes(cores);
+            let predicted_peak = layout.predicted_peak_bytes();
             assert!(
                 predicted_peak <= budget,
                 "predicted peak {} > budget {} for {} GiB / {} cores",

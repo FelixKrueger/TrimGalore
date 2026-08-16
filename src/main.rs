@@ -200,10 +200,10 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     }
     let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
     eprintln!(
-        "clumpify: {} bins × {} MB; predicted peak ≈ {} MB (gzip level {})",
+        "clumpify: {} bins × {} MiB; predicted peak ≈ {} MiB (gzip level {})",
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
-        layout.predicted_peak_bytes(cli.cores) / (1024 * 1024),
+        layout.predicted_peak_bytes() / (1024 * 1024),
         cli.compression,
     );
     Ok(Some(layout))

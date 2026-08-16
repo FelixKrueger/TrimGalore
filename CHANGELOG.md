@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **`--clumpify` peak memory drops 13–17% and its banner figures are now labelled MiB**
+  ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)) — the budget is not yet a
+  guaranteed bound at large `--memory` values.
+
 - **An output file is now published only if every byte it owes was written, including the
   gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the
   final name appear only after the writer was closed; it did not make "closed" mean
