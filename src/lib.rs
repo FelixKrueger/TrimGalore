@@ -14,6 +14,7 @@ pub mod fastqc;
 pub mod filters;
 pub mod format;
 pub mod io;
+pub mod library;
 pub mod parallel;
 pub mod quality;
 pub mod report;

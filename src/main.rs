@@ -386,14 +386,11 @@ fn main() -> Result<()> {
     // clip-flag list must match every `--rename`-driven `append_to_id` site
     // (`trimmer.rs` clip_5/clip_3, `specialty.rs` hardtrim) — without one of them
     // set, `--rename` appends nothing and there is nothing to lose.
+    // The clip list reads through `effective_clips()` so a `--library` preset
+    // (#440) counts here exactly as the four flags it stands in for would.
     if cli.rename
         && matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam)
-        && (cli.clip_r1.is_some()
-            || cli.clip_r2.is_some()
-            || cli.three_prime_clip_r1.is_some()
-            || cli.three_prime_clip_r2.is_some()
-            || cli.hardtrim5.is_some()
-            || cli.hardtrim3.is_some())
+        && (cli.effective_clips().any_set() || cli.hardtrim5.is_some() || cli.hardtrim3.is_some())
         && input_formats
             .iter()
             .any(|f| !matches!(f, InputFormat::UnalignedBam))
@@ -1113,14 +1110,36 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         }
     });
 
-    // RRBS: auto-set --clip_r2 2 for directional paired-end mode
-    let clip_r2 = if cli.rrbs && !cli.non_directional && cli.paired && cli.clip_r2.is_none() {
+    // #440 — fold a `--library` preset into the four clip flags. Every clip
+    // consumer below reads `clips`, never `cli.clip_*`, so a preset cannot reach
+    // one path and miss another.
+    let clips = cli.effective_clips();
+    if let Some(preset) = clips.preset {
+        eprintln!(
+            "Library preset '{}' selected: {}",
+            preset.canonical_name(),
+            clips.flag_summary()
+        );
+        for o in &clips.overrides {
+            eprintln!(
+                "{} {} was given on the command line and overrides the {} preset value {}",
+                o.flag,
+                o.user_value,
+                preset.canonical_name(),
+                o.preset_value
+            );
+        }
+    }
+
+    // RRBS: auto-set --clip_r2 2 for directional paired-end mode. A preset that
+    // supplies clip_R2 counts as "already set", same as an explicit flag.
+    let clip_r2 = if cli.rrbs && !cli.non_directional && cli.paired && clips.clip_r2.is_none() {
         eprintln!(
             "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)"
         );
         Some(2)
     } else {
-        cli.clip_r2
+        clips.clip_r2
     };
 
     if cli.rrbs {
@@ -1201,10 +1220,10 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         max_length: cli.max_length,
         max_n,
         trim_n: cli.trim_n,
-        clip_r1: cli.clip_r1,
+        clip_r1: clips.clip_r1,
         clip_r2,
-        three_prime_clip_r1: cli.three_prime_clip_r1,
-        three_prime_clip_r2: cli.three_prime_clip_r2,
+        three_prime_clip_r1: clips.three_prime_clip_r1,
+        three_prime_clip_r2: clips.three_prime_clip_r2,
         rename: cli.rename,
         nextseq: cli.nextseq.is_some(),
         rrbs: cli.rrbs,
@@ -1449,6 +1468,7 @@ fn run_single_file(
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
             input_filename: input_filename.clone(),
             input_filenames: vec![input_filename.clone()],
+            library: Some(cli.effective_clips()),
         };
 
         let file = File::create(&report_path)?;
@@ -2238,6 +2258,7 @@ fn run_ubam_output_single(
             command_line: command_line.to_string(),
             input_filename: input_filename.clone(),
             input_filenames: vec![input_filename.clone()],
+            library: Some(cli.effective_clips()),
         };
 
         let file = File::create(&report_path)?;
@@ -2616,6 +2637,7 @@ fn write_paired_reports(
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
             input_filename: descriptor.input_filename.clone(),
             input_filenames: all_input_filenames.to_vec(),
+            library: Some(cli.effective_clips()),
         };
 
         let file = File::create(&descriptor.txt_path)?;

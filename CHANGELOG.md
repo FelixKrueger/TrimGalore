@@ -5,6 +5,25 @@
 
 #### Changes
 
+- **`--library <preset>` names a library prep instead of four clip flags**
+  ([#440](https://github.com/FelixKrueger/TrimGalore/issues/440)). `emseq`, `accel` (aliases
+  `swift`, `xgen`), `zymo`, `scbs` (alias `single_cell`) and `pbat` each expand into
+  `--clip_R1` / `--clip_R2` / `--three_prime_clip_R1` / `--three_prime_clip_R2`, and nothing
+  else: adapters stay auto-detected and `--length` is untouched. The values match
+  nf-core/methylseq's presets of the same names, so a run driven through that pipeline and a
+  run driven straight through Trim Galore trim identically.
+
+  A preset is only a clip bundle, which is why `--rrbs`, `--clock` and `--implicon` stay
+  separate flags, and why Tecan/NuGEN Ovation RRBS is absent (diversity trimming is a
+  different algorithm, and it must run *without* `--rrbs`). An explicit clip flag wins over
+  the preset value it displaces, and both numbers are named in the log; a preset that supplies
+  `--clip_R2` suppresses the `--rrbs` directional auto-clip, exactly as an explicit
+  `--clip_R2` already did. Both trimming reports record the preset name and all four values in
+  force (`parameters.library` in JSON, `null` when no preset was used), so preset values can
+  change in a future release (each change gets an entry here) without making an old report
+  ambiguous. A run that passes no `--library` trims exactly as before and its text report is
+  unchanged; the only difference anywhere is the new `"library": null` key in the JSON report.
+
 - **`--clumpify` peak memory drops 13–17% and its banner figures are now labelled MiB**
   ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)) — the budget is not yet a
   guaranteed bound at large `--memory` values.
