@@ -388,16 +388,13 @@ fn main() -> Result<()> {
         reject_bam_format_mismatch_in_pair(&cli.input, &input_formats, shape)?;
     }
 
-    // #408 — format-gated, so it cannot live in `Cli::validate()`; sited after the
-    // two structural pair checks above so those report their own defect first. The
-    // clip-flag list must match every `--rename`-driven `append_to_id` site
-    // (`trimmer.rs` clip_5/clip_3, `specialty.rs` hardtrim) — without one of them
-    // set, `--rename` appends nothing and there is nothing to lose.
-    // The clip list reads through `effective_clips()` so a `--library` preset
-    // (#440) counts here exactly as the four flags it stands in for would.
+    // #408 — refused only where an `append_to_id` site can fire: a clip flag for a read
+    // this run processes, or a hardtrim. Format-gated, so it cannot live in `validate()`.
     if cli.rename
         && matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam)
-        && (cli.effective_clips().any_set() || cli.hardtrim5.is_some() || cli.hardtrim3.is_some())
+        && (cli.effective_clips().any_effective(cli.paired)
+            || cli.hardtrim5.is_some()
+            || cli.hardtrim3.is_some())
         && input_formats
             .iter()
             .any(|f| !matches!(f, InputFormat::UnalignedBam))
@@ -1127,10 +1124,14 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
             preset.canonical_name(),
             clips.flag_summary(cli.paired)
         );
-        for o in clips.overrides.iter().filter(|o| cli.paired || !o.read_2) {
+        for o in clips
+            .overrides
+            .iter()
+            .filter(|o| o.flag.applies(cli.paired))
+        {
             eprintln!(
                 "{} {} was given on the command line and overrides the {} preset value {}",
-                o.flag,
+                o.flag.name(),
                 o.user_value,
                 preset.canonical_name(),
                 o.preset_value

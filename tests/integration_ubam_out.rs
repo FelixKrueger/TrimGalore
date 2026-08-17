@@ -1226,6 +1226,173 @@ fn rename_into_ubam_refused_for_hardtrim3_fastq_input() {
     );
 }
 
+/// #450 — a Read 2 clip flag reaches no clip site on a single-end run, so nothing
+/// can be appended and there is nothing to lose. Both flags of the pair, since
+/// dropping either array entry would otherwise ship green.
+#[test]
+fn rename_into_ubam_accepted_for_inert_read_2_clip_flag() {
+    for (tag, flag, value) in [
+        ("clip_r2", "--clip_R2", "5"),
+        ("tp_clip_r2", "--three_prime_clip_R2", "7"),
+    ] {
+        // A directory per case: both runs would otherwise write sp_trimmed.bam.
+        let dir = fresh_tmpdir(&format!("tg_450_inert_{tag}"));
+        write_one_record(
+            &dir.join("sp.fastq"),
+            "@withspace 1:N:0:ACGTAC",
+            "ACGTACGTACGTACGTACGTACGTACGT",
+        );
+        let (ok, err) = run_in(
+            &dir,
+            &[
+                flag,
+                value,
+                "--rename",
+                "--output-format",
+                "ubam",
+                "sp.fastq",
+            ],
+        );
+        assert!(
+            ok,
+            "{flag} is inert on a single-end run, not a refusal:\n{err}"
+        );
+        assert!(
+            err.contains(&format!(
+                "{flag} {value} was given but is not used in this mode"
+            )),
+            "{flag} should still warn that it is being ignored:\n{err}"
+        );
+        assert!(
+            !err.contains("--rename is refused"),
+            "{flag} must not trigger the #408 refusal:\n{err}"
+        );
+        let bam = dir.join("sp_trimmed.bam");
+        assert!(
+            bam.exists(),
+            "{flag} run should have produced sp_trimmed.bam"
+        );
+        let tuples = bam_tuples(&bam);
+        let record = tuples.first().expect("no records");
+        let name = String::from_utf8_lossy(&record.0).to_string();
+        assert!(
+            !name.contains(":clip5:") && !name.contains(":clip3:"),
+            "nothing should have been appended under {flag}; got {name}"
+        );
+        // The whole premise: a Read 2 value reaches no clip site here, so the
+        // sequence keeps all 28 input bases.
+        assert_eq!(record.2.len(), 28, "{flag} must not have removed any bases");
+    }
+}
+
+/// #450 — the narrowing is about which read a flag names, not about relaxing the
+/// gate. Read 1 flags still refuse on either shape, Read 2 flags still refuse when
+/// the run has a Read 2, and a live Read 1 flag is not excused by an inert Read 2
+/// one beside it — that last row is the only one whose failure mode is #408's
+/// original silent annotation loss rather than an over-refusal.
+#[test]
+fn rename_into_ubam_still_refused_where_a_clip_can_apply() {
+    struct Case {
+        tag: &'static str,
+        args: &'static [&'static str],
+        paired: bool,
+    }
+    let cases = [
+        Case {
+            tag: "three_prime_clip_r1_se",
+            args: &["--three_prime_clip_R1", "3"],
+            paired: false,
+        },
+        Case {
+            tag: "clip_r2_paired",
+            args: &["--clip_R2", "5"],
+            paired: true,
+        },
+        Case {
+            tag: "tp_clip_r2_paired",
+            args: &["--three_prime_clip_R2", "7"],
+            paired: true,
+        },
+        Case {
+            tag: "r1_live_beside_inert_r2_se",
+            args: &["--clip_R1", "3", "--clip_R2", "5"],
+            paired: false,
+        },
+    ];
+    for case in cases {
+        let dir = fresh_tmpdir(&format!("tg_450_refused_{}", case.tag));
+        let mut argv: Vec<&str> = case.args.to_vec();
+        argv.extend_from_slice(&["--rename", "--output-format", "ubam"]);
+        let inputs: Vec<String> = if case.paired {
+            write_one_record(
+                &dir.join("r1.fastq"),
+                "@withspace 1:N:0:ACGTAC",
+                "ACGTACGTACGTACGTACGTACGTACGT",
+            );
+            write_one_record(
+                &dir.join("r2.fastq"),
+                "@withspace 2:N:0:ACGTAC",
+                "ACGTACGTACGTACGTACGTACGTACGT",
+            );
+            argv.extend_from_slice(&["--paired", "r1.fastq", "r2.fastq"]);
+            vec!["r1.fastq".to_string(), "r2.fastq".to_string()]
+        } else {
+            write_one_record(
+                &dir.join("sp.fastq"),
+                "@withspace 1:N:0:ACGTAC",
+                "ACGTACGTACGTACGTACGTACGTACGT",
+            );
+            argv.push("sp.fastq");
+            vec!["sp.fastq".to_string()]
+        };
+        let (ok, err) = run_in(&dir, &argv);
+        assert!(!ok, "{} must still exit non-zero", case.tag);
+        assert!(
+            err.contains("--rename is refused") && err.contains("--output-format ubam"),
+            "expected the #408 refusal for {}:\n{err}",
+            case.tag
+        );
+        // The whole listing, not one filename: the refusal precedes every writer,
+        // so the trimming reports must be absent too.
+        assert_eq!(
+            dir_listing(&dir),
+            inputs,
+            "{} was refused, so it must have written nothing",
+            case.tag
+        );
+    }
+}
+
+/// #450 — every preset supplies a Read 1 clip value, so no preset becomes
+/// acceptable on a single-end run. All five, not one representative.
+#[test]
+fn rename_into_ubam_refused_for_every_library_preset() {
+    for preset in ["emseq", "accel", "zymo", "scbs", "pbat"] {
+        let dir = fresh_tmpdir(&format!("tg_450_preset_{preset}"));
+        write_one_record(
+            &dir.join("sp.fastq"),
+            "@withspace 1:N:0:ACGTAC",
+            "ACGTACGTACGTACGTACGTACGTACGT",
+        );
+        let (ok, err) = run_in(
+            &dir,
+            &[
+                "--library",
+                preset,
+                "--rename",
+                "--output-format",
+                "ubam",
+                "sp.fastq",
+            ],
+        );
+        assert!(!ok, "--library {preset} must still be refused");
+        assert!(
+            err.contains("--rename is refused"),
+            "expected the #408 refusal for --library {preset}:\n{err}"
+        );
+    }
+}
+
 /// #408 — the guard sits behind `Cli::validate()`, so `--clump_only` keeps its
 /// own mode-specific message instead of being pre-empted by a mechanical one.
 #[test]

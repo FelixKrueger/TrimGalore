@@ -284,12 +284,12 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
         for o in library
             .overrides
             .iter()
-            .filter(|o| config.paired || !o.read_2)
+            .filter(|o| o.flag.applies(config.paired))
         {
             writeln!(
                 w,
                 "{} {} was given on the command line and overrides the {} preset value {}",
-                o.flag,
+                o.flag.name(),
                 o.user_value,
                 preset.canonical_name(),
                 o.preset_value
@@ -895,7 +895,7 @@ pub fn write_json_report<W: Write>(
                 write!(
                     w,
                     "{{\"flag\": \"{}\", \"preset_value\": {}, \"user_value\": {}}}",
-                    json_escape_string(o.flag),
+                    json_escape_string(o.flag.name()),
                     o.preset_value,
                     o.user_value
                 )?;
