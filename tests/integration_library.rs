@@ -144,6 +144,12 @@ fn explicit_clip_flag_overrides_the_preset_and_is_logged() {
         err.contains("--clip_R1 12") && err.contains("preset value 10"),
         "override log line missing both values:\n{err}"
     );
+    // The banner is the summary's other consumer. Only --clip_R1 is overridden here,
+    // so no Read 2 flag reaches stderr from either the banner or an override line.
+    assert!(
+        !err.contains("--clip_R2") && !err.contains("--three_prime_clip_R2"),
+        "stderr announces Read 2 clipping on a single-end run:\n{err}"
+    );
 
     // And the bytes follow the override, not the preset.
     let expected = tempdir("override_oracle");
@@ -185,22 +191,35 @@ fn both_reports_record_the_preset_and_its_expanded_values() {
 
     let text = report_text(&dir);
     assert!(text.contains("Library preset: pbat"), "got:\n{text}");
+    // Single-end: Read 2 clipping is not in force and is not listed.
     assert!(
-        text.contains("--clip_R1 8 --clip_R2 8 --three_prime_clip_R1 8 --three_prime_clip_R2 8"),
+        text.contains("Clipping in force: --clip_R1 8 --three_prime_clip_R1 8"),
         "got:\n{text}"
     );
 
     let json = report_json(&dir);
     assert_eq!(json["parameters"]["library"]["preset"], "pbat");
-    assert_eq!(json["parameters"]["library"]["clip_r1"], 8);
-    assert_eq!(json["parameters"]["library"]["three_prime_clip_r2"], 8);
-    assert_eq!(json["parameters"]["clip_r1"], 8);
     assert!(
         json["parameters"]["library"]["overrides"]
             .as_array()
             .unwrap()
             .is_empty()
     );
+
+    // The JSON records the resolved configuration, so the block and the top-level
+    // keys must agree on every one of the four values.
+    for key in [
+        "clip_r1",
+        "clip_r2",
+        "three_prime_clip_r1",
+        "three_prime_clip_r2",
+    ] {
+        assert_eq!(
+            json["parameters"]["library"][key], json["parameters"][key],
+            "{key} disagrees between the library block and the top level"
+        );
+        assert_eq!(json["parameters"]["library"][key], 8, "{key}");
+    }
 }
 
 /// A run without a preset must look exactly as it did before this feature.
@@ -211,7 +230,16 @@ fn a_run_without_a_preset_reports_no_library_block() {
     assert!(ok, "run failed:\n{err}");
 
     assert!(!report_text(&dir).contains("Library preset"));
-    assert!(report_json(&dir)["parameters"]["library"].is_null());
+    let json = report_json(&dir);
+    assert!(json["parameters"]["library"].is_null());
+    // `Value::Null` is also what a missing key yields, so pin the key's presence.
+    assert!(
+        json["parameters"]
+            .as_object()
+            .expect("parameters is an object")
+            .contains_key("library"),
+        "the library key must be present and null, not absent"
+    );
 }
 
 /// An unknown kit name has to stop the run. Trimming with no clipping at all
@@ -222,4 +250,84 @@ fn an_unknown_preset_name_is_refused() {
     let (ok, err) = run(&["--library", "nugen", "-o", dir.to_str().unwrap(), R1]);
     assert!(!ok, "unknown preset was accepted");
     assert!(err.contains("nugen"), "unhelpful error:\n{err}");
+}
+
+/// The paired half: all four values apply, so the report and the banner both list
+/// all four. Guards against a gate that drops Read 2 unconditionally.
+#[test]
+fn paired_report_lists_all_four_values() {
+    let dir = tempdir("paired_all_four");
+    let (ok, err) = run(&[
+        "--paired",
+        "--dont_gzip",
+        "--library",
+        "accel",
+        "-o",
+        dir.to_str().unwrap(),
+        R1,
+        R2,
+    ]);
+    assert!(ok, "run failed:\n{err}");
+
+    let expected = "--clip_R1 10 --clip_R2 15 --three_prime_clip_R1 10 --three_prime_clip_R2 10";
+    let text = report_text(&dir);
+    assert!(
+        text.contains(&format!("Clipping in force: {expected}")),
+        "got:\n{text}"
+    );
+    assert!(
+        err.contains(expected),
+        "the banner must list all four on a paired run:\n{err}"
+    );
+}
+
+/// Four overrides at once — the only shape that drives the JSON `overrides` array
+/// past a single element.
+#[test]
+fn preset_with_multiple_overrides_round_trips_through_json() {
+    let dir = tempdir("multi_override");
+    let (ok, err) = run(&[
+        "--paired",
+        "--dont_gzip",
+        "--library",
+        "accel",
+        "--clip_R1",
+        "1",
+        "--clip_R2",
+        "2",
+        "--three_prime_clip_R1",
+        "3",
+        "--three_prime_clip_R2",
+        "4",
+        "-o",
+        dir.to_str().unwrap(),
+        R1,
+        R2,
+    ]);
+    assert!(ok, "run failed:\n{err}");
+
+    let json = report_json(&dir);
+    let overrides = json["parameters"]["library"]["overrides"]
+        .as_array()
+        .expect("overrides is an array");
+    assert_eq!(overrides.len(), 4);
+    for (i, (flag, preset_value, user_value)) in [
+        ("--clip_R1", 10, 1),
+        ("--clip_R2", 15, 2),
+        ("--three_prime_clip_R1", 10, 3),
+        ("--three_prime_clip_R2", 10, 4),
+    ]
+    .iter()
+    .enumerate()
+    {
+        assert_eq!(overrides[i]["flag"], *flag, "override {i} flag");
+        assert_eq!(
+            overrides[i]["preset_value"], *preset_value,
+            "override {i} preset_value"
+        );
+        assert_eq!(
+            overrides[i]["user_value"], *user_value,
+            "override {i} user_value"
+        );
+    }
 }

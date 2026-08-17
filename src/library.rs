@@ -115,17 +115,19 @@ pub struct ResolvedClips {
 }
 
 impl ResolvedClips {
-    /// The clipping in force, rendered as the command line that would reproduce
-    /// it. Printed in the log and in both trimming reports, so a run stays
-    /// reproducible from its own record even if the preset changes later.
-    pub fn flag_summary(&self) -> String {
+    /// The clipping in force, rendered as the command line that would reproduce it.
+    /// R2 values are listed for paired runs only.
+    pub fn flag_summary(&self, paired: bool) -> String {
         let mut parts = Vec::new();
-        for (flag, value) in [
-            ("--clip_R1", self.clip_r1),
-            ("--clip_R2", self.clip_r2),
-            ("--three_prime_clip_R1", self.three_prime_clip_r1),
-            ("--three_prime_clip_R2", self.three_prime_clip_r2),
+        for (flag, value, read_2) in [
+            ("--clip_R1", self.clip_r1, false),
+            ("--clip_R2", self.clip_r2, true),
+            ("--three_prime_clip_R1", self.three_prime_clip_r1, false),
+            ("--three_prime_clip_R2", self.three_prime_clip_r2, true),
         ] {
+            if read_2 && !paired {
+                continue;
+            }
             if let Some(v) = value {
                 parts.push(format!("{flag} {v}"));
             }
@@ -279,5 +281,23 @@ mod tests {
         assert_eq!(r.clip_r1, None);
         assert_eq!(r.clip_r2, Some(4));
         assert!(r.overrides.is_empty());
+    }
+
+    #[test]
+    fn flag_summary_lists_all_four_for_paired() {
+        let r = resolve(Some(LibraryPreset::Accel), UserClips::default());
+        assert_eq!(
+            r.flag_summary(true),
+            "--clip_R1 10 --clip_R2 15 --three_prime_clip_R1 10 --three_prime_clip_R2 10"
+        );
+    }
+
+    #[test]
+    fn flag_summary_omits_read_2_for_single_end() {
+        let r = resolve(Some(LibraryPreset::Accel), UserClips::default());
+        assert_eq!(
+            r.flag_summary(false),
+            "--clip_R1 10 --three_prime_clip_R1 10"
+        );
     }
 }

@@ -1118,7 +1118,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
         eprintln!(
             "Library preset '{}' selected: {}",
             preset.canonical_name(),
-            clips.flag_summary()
+            clips.flag_summary(cli.paired)
         );
         for o in &clips.overrides {
             eprintln!(
