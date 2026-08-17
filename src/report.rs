@@ -281,7 +281,11 @@ pub fn write_report_header<W: Write>(w: &mut W, config: &TrimConfig) -> std::io:
             "Clipping in force: {}",
             library.flag_summary(config.paired)
         )?;
-        for o in &library.overrides {
+        for o in library
+            .overrides
+            .iter()
+            .filter(|o| config.paired || !o.read_2)
+        {
             writeln!(
                 w,
                 "{} {} was given on the command line and overrides the {} preset value {}",
@@ -1419,6 +1423,32 @@ mod tests {
         );
         assert!(!text.contains("--clip_R2"), "got:\n{text}");
         assert!(!text.contains("--three_prime_clip_R2"), "got:\n{text}");
+    }
+
+    /// The override lines are the report's other mention of Read 2 clipping, and a
+    /// single-end run must not announce one there either.
+    #[test]
+    fn test_text_report_omits_r2_override_lines_on_single_end() {
+        let mut config = test_config();
+        config.paired = false;
+        config.library = Some(crate::library::resolve(
+            Some(crate::library::LibraryPreset::EmSeq),
+            crate::library::UserClips {
+                clip_r1: Some(3),
+                clip_r2: Some(5),
+                ..crate::library::UserClips::default()
+            },
+        ));
+
+        let mut buf = Vec::new();
+        write_report_header(&mut buf, &config).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(
+            text.contains("--clip_R1 3 was given on the command line"),
+            "the Read 1 override must still be named:\n{text}"
+        );
+        assert!(!text.contains("--clip_R2"), "got:\n{text}");
     }
 
     #[test]

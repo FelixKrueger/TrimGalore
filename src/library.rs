@@ -89,6 +89,8 @@ pub struct ClipOverride {
     pub flag: &'static str,
     pub preset_value: usize,
     pub user_value: usize,
+    /// A Read 2 flag, which a single-end run cannot honour.
+    pub read_2: bool,
 }
 
 /// The four clip values a user typed, before any preset is folded in.
@@ -164,32 +166,37 @@ pub fn resolve(preset: Option<LibraryPreset>, user: UserClips) -> ResolvedClips 
 
     let clips = preset.clips();
     let mut overrides = Vec::new();
-    let mut pick =
-        |flag: &'static str, user_value: Option<usize>, preset_value: usize| match user_value {
-            Some(v) => {
-                overrides.push(ClipOverride {
-                    flag,
-                    preset_value,
-                    user_value: v,
-                });
-                Some(v)
-            }
-            None => Some(preset_value),
-        };
+    let mut pick = |flag: &'static str,
+                    user_value: Option<usize>,
+                    preset_value: usize,
+                    read_2: bool| match user_value {
+        Some(v) => {
+            overrides.push(ClipOverride {
+                flag,
+                preset_value,
+                user_value: v,
+                read_2,
+            });
+            Some(v)
+        }
+        None => Some(preset_value),
+    };
 
     ResolvedClips {
         preset: Some(preset),
-        clip_r1: pick("--clip_R1", user.clip_r1, clips.clip_r1),
-        clip_r2: pick("--clip_R2", user.clip_r2, clips.clip_r2),
+        clip_r1: pick("--clip_R1", user.clip_r1, clips.clip_r1, false),
+        clip_r2: pick("--clip_R2", user.clip_r2, clips.clip_r2, true),
         three_prime_clip_r1: pick(
             "--three_prime_clip_R1",
             user.three_prime_clip_r1,
             clips.three_prime_clip_r1,
+            false,
         ),
         three_prime_clip_r2: pick(
             "--three_prime_clip_R2",
             user.three_prime_clip_r2,
             clips.three_prime_clip_r2,
+            true,
         ),
         overrides,
     }
@@ -264,6 +271,7 @@ mod tests {
                 flag: "--clip_R1",
                 preset_value: 10,
                 user_value: 12,
+                read_2: false,
             }]
         );
     }
@@ -281,6 +289,31 @@ mod tests {
         assert_eq!(r.clip_r1, None);
         assert_eq!(r.clip_r2, Some(4));
         assert!(r.overrides.is_empty());
+    }
+
+    /// `read_2` is set at `pick`'s call sites rather than parsed out of the flag
+    /// name, so the name is available here as an independent oracle.
+    #[test]
+    fn every_override_knows_which_read_it_belongs_to() {
+        let r = resolve(
+            Some(LibraryPreset::Accel),
+            UserClips {
+                clip_r1: Some(1),
+                clip_r2: Some(2),
+                three_prime_clip_r1: Some(3),
+                three_prime_clip_r2: Some(4),
+            },
+        );
+        assert_eq!(r.overrides.len(), 4);
+        for o in &r.overrides {
+            assert_eq!(
+                o.read_2,
+                o.flag.ends_with("_R2"),
+                "{} has read_2 = {}",
+                o.flag,
+                o.read_2
+            );
+        }
     }
 
     #[test]

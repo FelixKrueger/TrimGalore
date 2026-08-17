@@ -331,3 +331,65 @@ fn preset_with_multiple_overrides_round_trips_through_json() {
         );
     }
 }
+
+/// No surface announces a Read 2 clip that a single-end run did not perform. The
+/// warning names the flag on purpose — it says the value was *not* used — so the
+/// assertion targets the override sentence rather than the flag name.
+#[test]
+fn single_end_announces_no_read_2_clip() {
+    let dir = tempdir("se_no_r2_announcement");
+    let (ok, err) = run(&[
+        "--dont_gzip",
+        "--library",
+        "emseq",
+        "--clip_R2",
+        "5",
+        "-o",
+        dir.to_str().unwrap(),
+        R1,
+    ]);
+    assert!(ok, "run failed:\n{err}");
+
+    assert!(
+        !err.contains("--clip_R2 5 was given on the command line"),
+        "stderr announces a Read 2 override on a single-end run:\n{err}"
+    );
+    assert!(
+        err.contains("is not used in this mode"),
+        "it should say the value was ignored:\n{err}"
+    );
+
+    let text = report_text(&dir);
+    assert!(
+        !text.contains("--clip_R2"),
+        "the report must not mention Read 2 clipping at all:\n{text}"
+    );
+}
+
+/// The paired half: Read 2 overrides do apply, so both surfaces keep naming them.
+#[test]
+fn paired_still_announces_r2_overrides() {
+    let dir = tempdir("pe_keeps_r2_announcement");
+    let (ok, err) = run(&[
+        "--paired",
+        "--dont_gzip",
+        "--library",
+        "emseq",
+        "--clip_R2",
+        "5",
+        "-o",
+        dir.to_str().unwrap(),
+        R1,
+        R2,
+    ]);
+    assert!(ok, "run failed:\n{err}");
+    assert!(
+        err.contains("--clip_R2 5 was given on the command line"),
+        "the banner must still name a Read 2 override on a paired run:\n{err}"
+    );
+    let text = report_text(&dir);
+    assert!(
+        text.contains("--clip_R2 5 was given on the command line"),
+        "the report must still name it:\n{text}"
+    );
+}

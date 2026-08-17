@@ -1135,6 +1135,43 @@ impl Cli {
             }
         }
 
+        // A mode that cannot honour a clip flag says so, rather than ignoring it silently.
+        let inert = if self.hardtrim5.is_some() || self.hardtrim3.is_some() {
+            Some(("--hardtrim5/--hardtrim3 do not honour the clip flags", true))
+        } else if self.clock {
+            Some(("--clock does not honour the clip flags", true))
+        } else if self.implicon.is_some() {
+            Some(("--implicon does not honour the clip flags", true))
+        } else if !self.paired {
+            Some((
+                "it applies to Read 2 of a pair, and this is a single-end run",
+                false,
+            ))
+        } else {
+            None
+        };
+        if let Some((reason, all_four)) = inert {
+            for (flag, value) in [
+                ("--clip_R1", if all_four { self.clip_r1 } else { None }),
+                (
+                    "--three_prime_clip_R1",
+                    if all_four {
+                        self.three_prime_clip_r1
+                    } else {
+                        None
+                    },
+                ),
+                ("--clip_R2", self.clip_r2),
+                ("--three_prime_clip_R2", self.three_prime_clip_r2),
+            ] {
+                if let Some(n) = value {
+                    eprintln!(
+                        "WARNING: {flag} {n} was given but is not used in this mode ({reason}). Ignoring."
+                    );
+                }
+            }
+        }
+
         // Deprecation warnings for Perl-era flags
         if self.gzip {
             eprintln!(
@@ -2488,6 +2525,74 @@ mod tests {
             !err.contains("--library"),
             "the range error must not mention --library, got: {err}"
         );
+    }
+
+    #[test]
+    fn hardtrim_conflict_precedes_the_library_refusal() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--hardtrim5",
+            "20",
+            "--hardtrim3",
+            "20",
+            "--library",
+            "emseq",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("cannot be combined in one invocation"),
+            "expected the #386 conflict first, got: {err}"
+        );
+        assert!(!err.contains("--library"), "got: {err}");
+    }
+
+    #[test]
+    fn clock_arity_error_precedes_the_library_refusal() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--clock",
+            "--paired",
+            "--library",
+            "pbat",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("requires an even number of input files"),
+            "expected the arity error first, got: {err}"
+        );
+        assert!(!err.contains("--library"), "got: {err}");
+    }
+
+    #[test]
+    fn missing_input_precedes_the_library_refusal() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--hardtrim5",
+            "20",
+            "--library",
+            "emseq",
+            "no_such_file.fq.gz",
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("Input file not found"),
+            "expected the missing-input error first, got: {err}"
+        );
+        assert!(!err.contains("--library"), "got: {err}");
+    }
+
+    /// A clip flag a mode cannot honour is a warning, never a refusal — unlike
+    /// `--library`, which is refused because it is new.
+    #[test]
+    fn inert_clip_flag_is_a_warning_not_an_error() {
+        Cli::parse_from(["trim_galore", "--clip_R2", "5", R1])
+            .validate()
+            .expect("--clip_R2 on a single-end run warns, it does not fail");
+        Cli::parse_from(["trim_galore", "--hardtrim5", "20", "--clip_R1", "3", R1])
+            .validate()
+            .expect("--clip_R1 under --hardtrim5 warns, it does not fail");
     }
 
     // ── #421 acceptance twins: these arms do reach `fastqc::run` ──
