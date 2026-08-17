@@ -140,98 +140,159 @@ pub struct ClumpLayout {
     /// Worker count this layout was sized for; the prediction is only valid for
     /// that count.
     cores: usize,
+    /// Static reservation this layout was sized against.
+    static_bytes: u64,
 }
 
 impl ClumpLayout {
-    /// Layout with an explicit core count, for callers that bypass
-    /// `resolve_layout`.
-    pub fn new(n_bins: usize, bin_byte_budget: usize, cores: usize) -> Self {
+    /// Layout with an explicit bin count and budget, for callers that bypass
+    /// `resolve_layout`. The reservation is the trim-phase constant.
+    pub fn new(n_bins: usize, bin_byte_budget: usize, workers: usize) -> Self {
         Self {
             n_bins,
             bin_byte_budget,
-            cores,
+            cores: workers,
+            static_bytes: STATIC_TRIM_BYTES,
         }
     }
 
     /// Predicted peak RSS in bytes. Inverse of the formula in `resolve_layout`,
     /// so the startup banner cannot disagree with the sizing.
     pub fn predicted_peak_bytes(&self) -> u64 {
-        let dyn_bytes =
-            self.bin_byte_budget as u64 * (5 * self.n_bins as u64 + 7 * self.cores as u64) / 4;
-        STATIC_OVERHEAD_BYTES + dyn_bytes
+        let dyn_bytes = self.bin_byte_budget as u64 * dyn_denominator(self.n_bins, self.cores) / 16;
+        self.static_bytes + dyn_bytes
     }
 }
 
-/// Minimum `--memory` (in bytes) that `--clumpify` needs at this `cores` count
-/// for the bin pool to clear `MIN_BIN_BYTES`. Used by `main.rs` to decide
-/// whether to warn-and-fall-back to plain mode rather than bail.
-pub fn clumpify_min_memory_bytes(cores: usize) -> u64 {
-    let n_bins = (16_usize).max(4 * cores) as u64;
-    let denom = 5 * n_bins + 7 * cores as u64;
-    STATIC_OVERHEAD_BYTES + (MIN_BIN_BYTES * denom).div_ceil(4)
+/// `16 × (σ·n_bins + k·cores)` — the resident multiple of one bin budget, with
+/// σ = 23/16 for the bin pool and k = 4 per worker.
+fn dyn_denominator(n_bins: usize, cores: usize) -> u64 {
+    23 * n_bins as u64 + 64 * cores as u64
 }
 
-/// Fixed memory overhead (FastQC histograms, allocator retention, Rust runtime,
-/// gzip decoder state, IO buffers) reserved out of `--memory` before sizing the
-/// bin pool. Calibrated empirically against macOS `/usr/bin/time -l` "peak
-/// memory footprint" on 31.5 M-record ATAC-seq runs (May 2026); Linux RSS
-/// bookkeeping is leaner, so the constant is conservative there too.
-const STATIC_OVERHEAD_BYTES: u64 = 512 * 1024 * 1024;
+/// The three thread counts the memory model needs. They differ: `--clump_only`
+/// is synchronous, and `--fastqc_args -t N` sets FastQC's threads independently.
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutInputs {
+    /// Drives `n_bins`. Keep it the user's `--cores` so bin grouping — and
+    /// therefore output layout — does not shift with the other two.
+    pub bin_cores: usize,
+    /// Workers that can hold batches in flight; 1 on the synchronous paths.
+    pub workers: usize,
+    /// FastQC's thread count, or `None` when no report was requested.
+    pub fastqc_threads: Option<usize>,
+}
 
-/// Compute `(n_bins, bin_byte_budget)` from a memory budget and core count.
+impl LayoutInputs {
+    /// Every count equal, for the parallel trimming path.
+    pub fn uniform(cores: usize, fastqc_threads: Option<usize>) -> Self {
+        Self {
+            bin_cores: cores,
+            workers: cores,
+            fastqc_threads,
+        }
+    }
+
+    fn n_bins(&self) -> usize {
+        (16_usize).max(4 * self.bin_cores)
+    }
+}
+
+/// Static reservation for a run, in bytes.
+fn static_bytes_for(inputs: &LayoutInputs) -> u64 {
+    match inputs.fastqc_threads {
+        Some(threads) => {
+            let charged = threads.min(FASTQC_CHARGED_THREAD_CAP) as u64;
+            STATIC_TRIM_BYTES + STATIC_FASTQC_PER_THREAD_BYTES.saturating_mul(charged)
+        }
+        None => STATIC_TRIM_BYTES,
+    }
+}
+
+/// Minimum `--memory` (in bytes) these inputs need for the bin pool to clear
+/// `MIN_BIN_BYTES`. Used by `main.rs` to decide whether to warn-and-fall-back to
+/// plain mode rather than bail.
+pub fn clumpify_min_memory_bytes(inputs: &LayoutInputs) -> u64 {
+    let dyn_min = (MIN_BIN_BYTES * dyn_denominator(inputs.n_bins(), inputs.workers)).div_ceil(16);
+    ((static_bytes_for(inputs) + dyn_min) * MARGIN_DEN).div_ceil(MARGIN_NUM)
+}
+
+/// Resident cost outside the bin pool: Rust runtime, gzip state, IO buffers and
+/// allocator retention. Measured peak on 10 M-pair paired runs is 205 MiB on
+/// macOS/arm64 and 173 MiB on Linux/x86_64.
+const STATIC_TRIM_BYTES: u64 = 224 * 1024 * 1024;
+
+/// FastQC's additional resident cost per thread. Its phase follows trimming but
+/// the pool's pages stay resident, so it adds rather than maxes.
+/// See `plans/08162026_clumpify-memory-accounting/phase2/CALIBRATION.md`.
+const STATIC_FASTQC_PER_THREAD_BYTES: u64 = 24 * 1024 * 1024;
+
+/// Threads beyond this are not charged, so the floor cannot run away on
+/// high-core hosts. Scaling above it is unmeasured.
+const FASTQC_CHARGED_THREAD_CAP: usize = 16;
+
+/// The budget is sized to `MARGIN_NUM / MARGIN_DEN` of `--memory`, leaving ~9%
+/// for run-to-run variation. Largest observed within-cell spread is 96 MiB.
+const MARGIN_NUM: u64 = 10;
+const MARGIN_DEN: u64 = 11;
+
+/// Compute `(n_bins, bin_byte_budget)` from a memory budget, core count and
+/// whether FastQC was requested.
 ///
-/// The goal is **peak RSS ≤ memory_budget**. Three big chunks consume RAM
-/// during a clumpify run, plus a roughly fixed overhead:
+/// The goal is **peak RSS ≤ memory_budget**. Resident memory is a fixed term
+/// plus a multiple of one bin budget `B`:
 ///
-/// 1. Reader's resident bins: `n_bins × bin_byte_budget` of FASTQ text +
-///    `Vec<FastqRecord>` spine entries (72 bytes per record on top of ~350 byte
-///    text records ≈ 25% extra).
-/// 2. Worker input batches in flight: up to `2 × cores × bin_byte_budget` of
-///    text + matching spine — the clumpy work channel has depth 1, so a worker
-///    holds one queued batch and one in hand.
-/// 3. Worker output Vecs growing during gzip-encode: roughly `0.5 ×` input
-///    size at L1 (smaller at higher gzip levels, but use L1 as the upper bound).
+/// 1. Reader's resident bins: `σ × n_bins × B`, text plus `Vec<FastqRecord>`
+///    spine, σ = 23/16.
+/// 2. Per worker: `k × B` for the queued batch, the batch in hand, and the
+///    compressed output waiting on the result channel, k = 4.
 ///
-/// Combine: peak ≈ STATIC + B × [(n_bins + cores) × 1.25 + cores × 0.5]
-///                = STATIC + B × (5 × n_bins + 7 × cores) / 4
+///   n_bins          = max(16, 4 × bin_cores)
+///   usable          = memory_budget × 10/11 − static reservation
+///   bin_byte_budget = 16 × usable / (23 × n_bins + 64 × workers)
 ///
-/// The in-flight term charges one batch per worker where two can be resident,
-/// so this prediction is a known under-estimate — see issue #439.
-///
-/// Solving for B given the user's budget gives the formula below. The 1.25 ×
-/// spine factor is the doubling-free post-pre-size value; the 0.5 × output
-/// factor is the L1 worst case.
-///
-///   n_bins          = max(16, 4 × cores)
-///   usable          = memory_budget − STATIC_OVERHEAD_BYTES
-///   bin_byte_budget = 4 × usable / (5 × n_bins + 7 × cores)
+/// σ and k are fitted from a 10 M-pair paired-end matrix over `cores ∈ {2,3,4}`
+/// with `n_bins` pinned at 16, taking the worst of two reps per cell; `cores ∈
+/// {8,16}` were held out and predicted within 5%. Measured values are σ = 1.29
+/// (Linux) / 1.41 (macOS) and k = 3.71 / 3.99; the constants take the worse of
+/// each. The 10/11 factor is margin: the largest within-cell spread was 96 MiB.
+/// See `plans/08162026_clumpify-memory-accounting/phase2/CALIBRATION.md`.
 ///
 /// If the derived budget falls below `MIN_BIN_BYTES`, bails — better to fail
 /// loudly than silently produce a degraded output.
-pub fn resolve_layout(memory_budget_bytes: u64, cores: usize) -> Result<ClumpLayout> {
-    if cores == 0 {
+pub fn resolve_layout(memory_budget_bytes: u64, inputs: &LayoutInputs) -> Result<ClumpLayout> {
+    if inputs.bin_cores == 0 || inputs.workers == 0 {
         bail!("clumpify layout requires at least one worker core");
     }
-    let n_bins = (16_usize).max(4 * cores);
-    let usable = memory_budget_bytes.saturating_sub(STATIC_OVERHEAD_BYTES);
-    let denom = 5 * (n_bins as u64) + 7 * (cores as u64);
-    let bin_byte_budget = (usable.saturating_mul(4)) / denom;
+    let n_bins = inputs.n_bins();
+    let static_bytes = static_bytes_for(inputs);
+    let budgeted = memory_budget_bytes.saturating_mul(MARGIN_NUM) / MARGIN_DEN;
+    let usable = budgeted.saturating_sub(static_bytes);
+    let denom = dyn_denominator(n_bins, inputs.workers);
+    let bin_byte_budget = (usable.saturating_mul(16)) / denom;
     if bin_byte_budget < MIN_BIN_BYTES {
         bail!(
-            "--memory budget too small for --cores {cores}: after reserving {} MiB \
-             for static overhead (FastQC, allocator, gzip state), the derived bin \
-             budget is {} bytes — below the {}-byte per-bin floor. Increase --memory \
-             (try ≥ {} MiB) or decrease --cores.",
-            STATIC_OVERHEAD_BYTES / (1024 * 1024),
+            "--memory budget too small for --cores {}: after reserving {} MiB \
+             for static overhead (allocator, gzip state, IO buffers{}) and 9% margin, \
+             the derived bin budget is {} bytes — below the {}-byte per-bin floor. \
+             Increase --memory (try ≥ {} MiB) or decrease --cores.",
+            inputs.bin_cores,
+            static_bytes / (1024 * 1024),
+            if inputs.fastqc_threads.is_some() {
+                ", FastQC"
+            } else {
+                ""
+            },
             bin_byte_budget,
             MIN_BIN_BYTES,
-            (STATIC_OVERHEAD_BYTES + (MIN_BIN_BYTES * denom).div_ceil(4)) / (1024 * 1024),
+            clumpify_min_memory_bytes(inputs).div_ceil(1024 * 1024),
         );
     }
     Ok(ClumpLayout {
         n_bins,
         bin_byte_budget: bin_byte_budget as usize,
-        cores,
+        cores: inputs.workers,
+        static_bytes,
     })
 }
 
@@ -457,70 +518,190 @@ mod tests {
         assert!(parse_memory_size("M").is_err());
     }
 
+    /// Inputs where all three counts are the user's `--cores`, FastQC optional.
+    fn ins(cores: usize, fastqc: bool) -> LayoutInputs {
+        LayoutInputs::uniform(cores, fastqc.then_some(cores))
+    }
+
     #[test]
     fn resolve_layout_default() {
-        // 4 GiB + 2 cores: usable=3.5 GiB, n_bins=16, denom=5×16+7×2=94,
-        // bin_byte_budget = 4×3584 MiB / 94 ≈ 152 MiB.
-        let layout = resolve_layout(4 * 1024 * 1024 * 1024, 2).unwrap();
+        // 4 GiB + 2 cores: usable = 4 GiB×10/11 − 224 MiB, n_bins=16,
+        // denom = 23×16 + 64×2 = 496, so B = 16 × usable / 496 ≈ 113 MiB.
+        let layout = resolve_layout(4 * 1024 * 1024 * 1024, &ins(2, false)).unwrap();
         assert_eq!(layout.n_bins, 16);
-        assert!(layout.bin_byte_budget >= 150 * 1024 * 1024);
-        assert!(layout.bin_byte_budget < 156 * 1024 * 1024);
+        assert!(layout.bin_byte_budget >= 112 * 1024 * 1024);
+        assert!(layout.bin_byte_budget < 114 * 1024 * 1024);
     }
 
     #[test]
     fn resolve_layout_scales_with_cores() {
-        // 4 GiB + 8 cores: usable=3.5 GiB, n_bins=32, denom=5×32+7×8=216,
-        // bin_byte_budget = 4×3584 MiB / 216 ≈ 66 MiB.
-        let layout = resolve_layout(4 * 1024 * 1024 * 1024, 8).unwrap();
+        // 4 GiB + 8 cores: n_bins=32, denom = 23×32 + 64×8 = 1248, B ≈ 45 MiB.
+        let layout = resolve_layout(4 * 1024 * 1024 * 1024, &ins(8, false)).unwrap();
         assert_eq!(layout.n_bins, 32);
-        assert!(layout.bin_byte_budget >= 65 * 1024 * 1024);
-        assert!(layout.bin_byte_budget < 70 * 1024 * 1024);
+        assert!(layout.bin_byte_budget >= 44 * 1024 * 1024);
+        assert!(layout.bin_byte_budget < 46 * 1024 * 1024);
     }
 
     #[test]
     fn resolve_layout_pins_the_default_cell() {
         // 1 GiB + 4 cores is the cell #439 is about, so the sizing arithmetic may
-        // not move it silently: 4 × 512 MiB / 108.
-        let layout = resolve_layout(1024 * 1024 * 1024, 4).unwrap();
+        // not move it silently: 16 × (1 GiB×10/11 − 224 MiB) / 624.
+        let layout = resolve_layout(1024 * 1024 * 1024, &ins(4, false)).unwrap();
         assert_eq!(layout.n_bins, 16);
-        assert_eq!(layout.bin_byte_budget, 19_884_107);
+        assert_eq!(layout.bin_byte_budget, 19_006_356);
+    }
+
+    #[test]
+    fn resolve_layout_fastqc_reserves_more_and_shrinks_bins() {
+        // FastQC's histograms are charged on top of the trim-phase reservation,
+        // so the same budget yields a smaller pool.
+        let budget = 1024 * 1024 * 1024;
+        let plain = resolve_layout(budget, &ins(4, false)).unwrap();
+        let with_qc = resolve_layout(budget, &ins(4, true)).unwrap();
+        assert!(
+            with_qc.bin_byte_budget < plain.bin_byte_budget,
+            "FastQC layout {} should be smaller than {}",
+            with_qc.bin_byte_budget,
+            plain.bin_byte_budget
+        );
+        // The difference is the per-core reservation spread over the denominator.
+        let expected = (24u64 * 4 * 1024 * 1024 * 16 / 624) as usize;
+        let delta = plain.bin_byte_budget - with_qc.bin_byte_budget;
+        assert!(
+            delta.abs_diff(expected) <= 1024,
+            "delta {delta}, expected ~{expected}"
+        );
     }
 
     #[test]
     fn resolve_layout_predicted_peak_fits_budget() {
-        // The whole point of the formula: predicted peak ≤ user-supplied --memory.
-        for (mem_gib, cores) in [(2u64, 4), (4, 8), (8, 8), (16, 16)] {
+        // The whole point of the formula: predicted peak ≤ user-supplied --memory,
+        // with and without FastQC.
+        for (mem_gib, cores, fastqc) in [
+            (2u64, 4, false),
+            (4, 8, false),
+            (8, 8, true),
+            (16, 16, false),
+            (2, 2, true),
+        ] {
             let budget = mem_gib * 1024 * 1024 * 1024;
-            let layout = resolve_layout(budget, cores).unwrap();
+            let layout = resolve_layout(budget, &ins(cores, fastqc)).unwrap();
             let predicted_peak = layout.predicted_peak_bytes();
             assert!(
                 predicted_peak <= budget,
-                "predicted peak {} > budget {} for {} GiB / {} cores",
+                "predicted peak {} > budget {} for {} GiB / {} cores (fastqc {})",
                 predicted_peak,
                 budget,
                 mem_gib,
-                cores
+                cores,
+                fastqc
             );
         }
     }
 
     #[test]
-    fn resolve_layout_bails_when_too_small() {
-        // 560 MiB - 512 MiB STATIC = 48 MiB usable. With 8 cores: denom=216,
-        // bin_byte_budget = 4 × 48 MiB / 216 ≈ 0.89 MiB < 1 MiB floor.
-        let res = resolve_layout(560 * 1024 * 1024, 8);
-        assert!(res.is_err(), "expected bail, got {res:?}");
+    fn resolve_layout_bails_just_below_the_floor() {
+        // One byte under the floor must bail, and the message must name the
+        // reservation it actually charged.
+        let inputs = ins(8, false);
+        let floor = clumpify_min_memory_bytes(&inputs);
+        let res = resolve_layout(floor - 1, &inputs);
+        assert!(
+            res.is_err(),
+            "expected bail one byte under {floor}, got {res:?}"
+        );
         let msg = format!("{}", res.unwrap_err());
         assert!(msg.contains("--memory"));
         assert!(msg.contains("static overhead"));
+        assert!(
+            msg.contains(&format!("{} MiB", STATIC_TRIM_BYTES / (1024 * 1024))),
+            "bail should name the charged reservation: {msg}"
+        );
     }
 
     #[test]
-    fn resolve_layout_bails_below_static_overhead() {
-        // Below 512 MiB STATIC, usable saturates to 0 → budget is 0 → fails.
-        let res = resolve_layout(256 * 1024 * 1024, 4);
+    fn resolve_layout_bails_below_the_reservation() {
+        // Under the reservation itself, usable saturates to 0.
+        let below = STATIC_TRIM_BYTES - 1024 * 1024;
+        let res = resolve_layout(below, &ins(4, false));
         let msg = format!("{}", res.unwrap_err());
         assert!(msg.contains("--memory"));
+    }
+
+    #[test]
+    fn clumpify_floor_matches_the_smallest_resolvable_budget() {
+        // The advertised floor must itself resolve, one byte less must not, and
+        // the MiB figure quoted to the user must resolve too — the caller rounds
+        // bytes to MiB for the message, so a truncating round would advertise an
+        // unusable budget.
+        for cores in [1usize, 2, 3, 4, 8, 16, 32] {
+            for fastqc in [false, true] {
+                let inputs = ins(cores, fastqc);
+                let floor = clumpify_min_memory_bytes(&inputs);
+                assert!(
+                    resolve_layout(floor, &inputs).is_ok(),
+                    "advertised floor {floor} does not resolve at {cores} cores (fastqc {fastqc})"
+                );
+                assert!(
+                    resolve_layout(floor - 1, &inputs).is_err(),
+                    "a byte below the floor still resolves at {cores} cores (fastqc {fastqc})"
+                );
+                let advised_mib = floor.div_ceil(1024 * 1024);
+                assert!(
+                    resolve_layout(advised_mib * 1024 * 1024, &inputs).is_ok(),
+                    "the advised {advised_mib} MiB does not resolve at {cores} cores \
+                     (fastqc {fastqc})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fastqc_reservation_scales_with_threads_and_is_capped() {
+        // Charged per FastQC thread, so two thread counts must differ...
+        let budget = 4 * 1024 * 1024 * 1024;
+        let four = LayoutInputs::uniform(4, Some(4));
+        let eight = LayoutInputs::uniform(4, Some(8));
+        assert!(
+            static_bytes_for(&eight) > static_bytes_for(&four),
+            "8 FastQC threads should reserve more than 4"
+        );
+        assert_eq!(
+            static_bytes_for(&eight) - static_bytes_for(&four),
+            STATIC_FASTQC_PER_THREAD_BYTES * 4
+        );
+        // ...and beyond the cap it stops growing, so the floor cannot run away.
+        let capped = LayoutInputs::uniform(4, Some(FASTQC_CHARGED_THREAD_CAP));
+        let over = LayoutInputs::uniform(4, Some(FASTQC_CHARGED_THREAD_CAP * 4));
+        assert_eq!(static_bytes_for(&capped), static_bytes_for(&over));
+        // Bin budget follows the reservation, not `--cores`.
+        let a = resolve_layout(budget, &four).unwrap().bin_byte_budget;
+        let b = resolve_layout(budget, &eight).unwrap().bin_byte_budget;
+        assert!(a > b, "more FastQC threads must not yield a larger pool");
+    }
+
+    #[test]
+    fn synchronous_paths_are_not_charged_for_absent_workers() {
+        // `--clump_only` runs one worker while still binning by the user's cores,
+        // so it must get a larger pool than the parallel path at the same budget.
+        let budget = 1024 * 1024 * 1024;
+        let parallel = resolve_layout(budget, &LayoutInputs::uniform(8, None)).unwrap();
+        let sync = resolve_layout(
+            budget,
+            &LayoutInputs {
+                bin_cores: 8,
+                workers: 1,
+                fastqc_threads: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(sync.n_bins, parallel.n_bins, "bin grouping must not shift");
+        assert!(
+            sync.bin_byte_budget > parallel.bin_byte_budget,
+            "one worker ({}) should buy a bigger pool than eight ({})",
+            sync.bin_byte_budget,
+            parallel.bin_byte_budget
+        );
     }
 
     #[test]

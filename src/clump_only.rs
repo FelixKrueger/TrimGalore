@@ -272,7 +272,15 @@ pub fn clump_only_single(
     }
 
     // Layout sizing uses a floor of 1 core (v1 is single-threaded).
-    let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
+    let layout = clump::resolve_layout(
+        memory_budget_bytes,
+        &clump::LayoutInputs {
+            bin_cores: cores.max(1),
+            workers: 1,
+            fastqc_threads: fastqc_requested
+                .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
+        },
+    )?;
 
     let input_compressed = naming::is_gzipped(input);
     let output_path = naming::clumped_output_name(input, output_dir, basename, gzip_output);
@@ -410,7 +418,15 @@ pub fn clump_only_paired(
         }
     }
 
-    let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
+    let layout = clump::resolve_layout(
+        memory_budget_bytes,
+        &clump::LayoutInputs {
+            bin_cores: cores.max(1),
+            workers: 1,
+            fastqc_threads: fastqc_requested
+                .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
+        },
+    )?;
 
     let input_compressed = naming::is_gzipped(input_r1) || naming::is_gzipped(input_r2);
     let (out_r1_path, out_r2_path) =
@@ -745,7 +761,15 @@ pub fn clump_only_single_to_bam(
     no_report_file: bool,
     input_phred_offset: u8,
 ) -> Result<ClumpOnlyStats> {
-    let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
+    let layout = clump::resolve_layout(
+        memory_budget_bytes,
+        &clump::LayoutInputs {
+            bin_cores: cores.max(1),
+            workers: 1,
+            fastqc_threads: fastqc_requested
+                .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
+        },
+    )?;
 
     let input_fmt = detect_input_format(input)?;
     let source_header = if matches!(input_fmt, InputFormat::UnalignedBam) {
@@ -902,7 +926,15 @@ pub fn clump_only_paired_to_bam_one_pair(
         );
     }
 
-    let layout = clump::resolve_layout(memory_budget_bytes, cores.max(1))?;
+    let layout = clump::resolve_layout(
+        memory_budget_bytes,
+        &clump::LayoutInputs {
+            bin_cores: cores.max(1),
+            workers: 1,
+            fastqc_threads: fastqc_requested
+                .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
+        },
+    )?;
 
     // Open readers + peek header + compute output path + input-format label
     // according to the input shape. Returns via `PairedInputSetup` to avoid
@@ -1185,7 +1217,7 @@ mod tests {
     /// Small memory budget large enough to pass the `resolve_layout`
     /// floor at cores=1.
     fn small_memory_budget() -> u64 {
-        // resolve_layout requires STATIC_OVERHEAD (512 MiB) + enough for
+        // resolve_layout requires the trim-phase reservation + enough for
         // MIN_BIN_BYTES per bin. Pick 1 GiB to comfortably exceed the floor.
         1024 * 1024 * 1024
     }
