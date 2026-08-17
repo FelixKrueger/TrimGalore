@@ -410,8 +410,8 @@ jobs:
           measure 1G_c4        1 --clumpify --paired --cores 4 --memory 1G "$F51R1" "$F51R2"
           measure 1G_c4_fastqc 1 --clumpify --paired --fastqc --cores 4 --memory 1G "$F51R1" "$F51R2"
           # 25 bp is above the prediction today: the per-bin coefficient is
-          # fitted per byte, not per record. Recorded, not gated on the promise,
-          # until the refit lands - see the short-read issue.
+          # fitted per byte, not per record (#457). Recorded, not gated on the
+          # promise, until that refit lands.
           measure 25bp_1G_c4   0 --clumpify --paired --cores 4 --memory 1G "$F25R1" "$F25R2"
           measure multipair_c4 0 --clumpify --paired --cores 4 --memory 1G \
             "$F51R1" "$F51R2" "${RUNNER_TEMP}/dup_R1.fastq.gz" "${RUNNER_TEMP}/dup_R2.fastq.gz"

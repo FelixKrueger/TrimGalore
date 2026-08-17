@@ -21,4 +21,4 @@
 # measured ~9 points lower in the #439 calibration. Do not copy these in.
 #   1G_c4          0.94
 #   1G_c4_fastqc   0.72
-#   25bp_1G_c4     1.07   <- above 1.0: see the short-read issue, not a regression
+#   25bp_1G_c4     1.07   <- above 1.0 by #457, not a regression
