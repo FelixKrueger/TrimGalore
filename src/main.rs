@@ -181,7 +181,12 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     }
     let memory_bytes =
         clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
-    let min_required = clump::clumpify_min_memory_bytes(cli.cores);
+    let layout_inputs = clump::LayoutInputs::uniform(
+        cli.cores,
+        cli.fastqc_requested()
+            .then(|| fastqc::resolved_threads(cli.fastqc_args.as_deref(), cli.cores)),
+    );
+    let min_required = clump::clumpify_min_memory_bytes(&layout_inputs);
     if memory_bytes < min_required {
         eprintln!();
         eprintln!(
@@ -189,7 +194,7 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
              (need ≥ {} MiB).",
             cli.memory,
             cli.cores,
-            min_required / (1024 * 1024),
+            min_required.div_ceil(1024 * 1024),
         );
         eprintln!(
             "         Falling back to plain mode (no read reordering). \
@@ -198,7 +203,7 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
         eprintln!();
         return Ok(None);
     }
-    let layout = clump::resolve_layout(memory_bytes, cli.cores)?;
+    let layout = clump::resolve_layout(memory_bytes, &layout_inputs)?;
     eprintln!(
         "clumpify: {} bins × {} MiB; predicted peak ≈ {} MiB (gzip level {})",
         layout.n_bins,

@@ -34,6 +34,23 @@ use fastqc_rust::{config::FastQCConfig, runner};
 ///                 directory (fastqc-rust's default).
 /// `cores`       — threading budget for `fastqc-rust`'s internal rayon
 ///                 pool. Always at least 1.
+/// Threads `run` will give FastQC: `--fastqc_args -t N` overrides `cores`.
+/// The memory model charges this, not `--cores`.
+pub fn resolved_threads(fastqc_args: Option<&str>, cores: usize) -> usize {
+    let mut threads = cores.max(1);
+    if let Some(raw) = fastqc_args {
+        let tokens: Vec<&str> = raw.split_whitespace().collect();
+        for (i, tok) in tokens.iter().enumerate() {
+            if matches!(*tok, "-t" | "--threads")
+                && let Some(v) = tokens.get(i + 1).and_then(|t| t.parse::<usize>().ok())
+            {
+                threads = v.max(1);
+            }
+        }
+    }
+    threads
+}
+
 pub fn run(
     output_path: &Path,
     fastqc_args: Option<&str>,
