@@ -38,7 +38,8 @@
   names the budget alongside the prediction (`predicted peak ≈ 930 of 1024 MiB budget`) so the
   ~9% headroom is visible. Very short reads are not yet covered: the per-bin coefficient is
   fitted per byte rather than per record, so a 25 bp library packs more records into the same
-  bin bytes and can exceed the budget at `--cores 2` — tracked separately.
+  bin bytes and can exceed the budget at `--cores 2`
+  ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)).
 
 - **An output file is now published only if every byte it owes was written, including the
   gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the
