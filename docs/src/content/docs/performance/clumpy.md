@@ -88,35 +88,42 @@ The minimizer computation uses 2-bit packed integer ops (one O(1) bitwise step p
 
 `--memory` (default `1G`) is a Trim Galore-wide memory budget.
 
-The clumpify dispatcher sizes the per-bin sort runs against it, with the formula picked in an attempt to get the predicted peak RSS ≤ `--memory`:
+The clumpify dispatcher sizes the per-bin sort runs against it, using coefficients fitted to measured peak RSS on both macOS/arm64 and Linux/x86_64:
 
 $$
 \begin{aligned}
 n_{\text{bins}}          &= \max(16,\; 4 \times \text{cores}) \\[0.8em]
-\text{usable}            &= \text{memory} - 512\,\text{MiB}
-  \quad\small\text{(FastQC + allocator + runtime overhead)} \\[0.8em]
-\text{bin\_byte\_budget} &= \frac{4 \times \text{usable}}{5 \times n_{\text{bins}} + 7 \times \text{cores}}
+\text{static}            &= 224\,\text{MiB} \;+\; 24\,\text{MiB} \times \min(\text{FastQC threads},\, 16) \\[0.8em]
+\text{usable}            &= \text{memory} \times \tfrac{10}{11} - \text{static} \\[0.8em]
+\text{bin\_byte\_budget} &= \frac{16 \times \text{usable}}{23 \times n_{\text{bins}} + 64 \times \text{workers}}
 \end{aligned}
 $$
 
-So with `--cores 8 --memory 1G` you get **32 bins × 12 MB**; with `--cores 8 --memory 4G` you get 32 bins × 66 MB. The binary prints those resolved values at startup.
+Three terms need naming. **static** is the resident cost outside the bin pool — allocator, gzip state and I/O buffers — and the FastQC term is charged only when a report is requested, capped at 16 threads because scaling above that is unmeasured. The **10/11** factor holds back ~9% of the budget as headroom for run-to-run variation, which is why the predicted peak the binary prints is always a little under the `--memory` you gave it. **workers** is the number of threads that can hold a batch in flight: `--cores` on the trimming path, and 1 under [`--clump_only`](/modes/clump-only/), which is single-threaded.
+
+So with `--cores 8 --memory 1G` you get **32 bins × 9 MiB**; with `--cores 8 --memory 4G` you get 32 bins × 44 MiB. The binary prints those resolved values at startup.
 
 In theory, bigger budget → bigger per-gzip-member sort runs → better compression. In practice, increasing memory doesn't seem to make very much difference in our tests.
 
+:::caution[Savings figures predate the current sizing]
+The savings in the tables above were measured before the memory model was refitted in v2.4 ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)), which reduced bin sizes by 24–31% at budgets of 2 GiB and above. Figures at the default `--memory 1G` are unaffected; the RRBS row's `--memory 4G+` entry is the one most likely to have moved and is pending re-measurement.
+:::
+
 #### Below-floor behaviour
 
-`--clumpify` needs a minimum of ~535 MiB to run (mostly from a fixed 512 MiB reservation for FastQC, allocator, and runtime overhead). The exact floor varies slightly with `--cores` but stays in the 535–730 MiB range for any sensible core count.
+`--clumpify` needs a minimum budget that rises with `--cores`, because both the bin pool and the per-worker reservation scale with it. Over `--cores` 2–32 the floor runs from **281 MiB** to **590 MiB** without `--fastqc`, and from **334 MiB** to **1012 MiB** with it. Above `--cores 32` it keeps climbing — at `--cores 64` it is 933 MiB, or 1356 MiB with `--fastqc`, which is above the 1 GiB default.
 
 If `--memory` is below the floor, Trim Galore prints a warning and falls back to plain mode:
 
 ```
-WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 552 MiB).
+WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 311 MiB).
          Falling back to plain mode (no read reordering). Increase --memory or
          drop --clumpify to silence this warning.
 ```
 
-The trim itself proceeds normally; only the read-reordering step is skipped.
-Memory usage without `--clumpify` is typically significantly lower, around the 100MB mark.
+The trim itself proceeds normally; only the read-reordering step is skipped. [`--clump_only`](/modes/clump-only/) is the exception: reordering is the entire job there, so a below-floor budget fails rather than degrading.
+
+Memory usage without `--clumpify` depends on read length rather than on file size. Short-read runs sit around the 100 MB mark (104 MiB for 10 M × 51 bp paired at `--cores 4`), but the per-worker batch is a fixed number of *records*, so multi-kb reads use substantially more — see [Threading](/performance/threading/).
 
 ### What doesn't change
 
