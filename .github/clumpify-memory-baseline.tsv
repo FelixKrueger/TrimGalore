@@ -17,8 +17,13 @@
 # here unnoticed.
 #
 # cell<TAB>baseline_peak_over_prediction
-# Reference values measured on macOS/arm64, which is NOT the runner: Linux
-# measured ~9 points lower in the #439 calibration. Do not copy these in.
-#   1G_c4          0.94
-#   1G_c4_fastqc   0.72
-#   25bp_1G_c4     1.07   <- above 1.0 by #457, not a regression
+#
+# First runner observations (2026-08-17, run 32065004600), one rep each. Two or
+# three more runs are needed before these become the enforced baseline, because a
+# single rep cannot separate the cell's spread from its centre.
+#
+#   cell            runner   macOS/arm64   note
+#   1G_c4           0.770    0.939         runner is ~17 points lower, not the ~9 the
+#   1G_c4_fastqc    0.697    0.724           #439 calibration estimated
+#   25bp_1G_c4      0.941    1.07          #457 does not breach here; --cores 2 unmeasured
+#   multipair_c4    0.792    -             no sign of cross-pair page retention
