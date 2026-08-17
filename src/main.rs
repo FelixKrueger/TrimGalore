@@ -1125,7 +1125,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
             preset.canonical_name(),
             clips.flag_summary(cli.paired)
         );
-        for o in &clips.overrides {
+        for o in clips.overrides.iter().filter(|o| cli.paired || !o.read_2) {
             eprintln!(
                 "{} {} was given on the command line and overrides the {} preset value {}",
                 o.flag,
