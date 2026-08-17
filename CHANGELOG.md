@@ -29,12 +29,17 @@
   ambiguous. A run that passes no `--library` trims exactly as before and its text report is
   unchanged; the only difference anywhere is the new `"library": null` key in the JSON report.
 
-- **`--clumpify` keeps peak memory inside the `--memory` budget it prints**
-  ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)) — peak drops 13–17% from
-  holding fewer bins in flight and the sizing model is refitted against measured peak RSS
-  (paired 10 M-read runs, 2–16 cores, macOS and Linux), so budgets above ~2 GiB and
+- **`--clumpify` keeps peak memory inside the `--memory` budget it prints, on reads of ~50 bp
+  and longer** ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)) — peak drops
+  13–17% from holding fewer bins in flight and the sizing model is refitted against measured
+  peak RSS (paired 10 M-read runs, 2–16 cores, macOS and Linux), so budgets above ~2 GiB and
   `--fastqc` runs now get smaller bins, and `.fq.gz` output differs from earlier releases on
-  identical input (same records, different gzip member boundaries).
+  identical input (same records, different gzip member boundaries). The startup banner now
+  names the budget alongside the prediction (`predicted peak ≈ 930 of 1024 MiB budget`) so the
+  ~9% headroom is visible. Very short reads are not yet covered: the per-bin coefficient is
+  fitted per byte rather than per record, so a 25 bp library packs more records into the same
+  bin bytes and can exceed the budget at `--cores 2`
+  ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)).
 
 - **An output file is now published only if every byte it owes was written, including the
   gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the

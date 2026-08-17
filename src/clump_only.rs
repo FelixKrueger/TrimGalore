@@ -280,13 +280,14 @@ pub fn clump_only_single(
             fastqc_threads: fastqc_requested
                 .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
         },
-    )?;
+    )
+    .context("--clump_only cannot run within the given --memory")?;
 
     let input_compressed = naming::is_gzipped(input);
     let output_path = naming::clumped_output_name(input, output_dir, basename, gzip_output);
 
     eprintln!(
-        "clump-only: reordering '{}' -> '{}' ({} bins × {} MiB budget, gzip level {}{})",
+        "clump-only: reordering '{}' -> '{}' ({} bins × {} MiB each, gzip level {}{})",
         input.display(),
         output_path.display(),
         layout.n_bins,
@@ -426,14 +427,15 @@ pub fn clump_only_paired(
             fastqc_threads: fastqc_requested
                 .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
         },
-    )?;
+    )
+    .context("--clump_only cannot run within the given --memory")?;
 
     let input_compressed = naming::is_gzipped(input_r1) || naming::is_gzipped(input_r2);
     let (out_r1_path, out_r2_path) =
         naming::clumped_paired_output_names(input_r1, input_r2, output_dir, basename, gzip_output);
 
     eprintln!(
-        "clump-only (paired): '{}' + '{}' -> '{}' + '{}' ({} bins × {} MiB, gzip level {}{})",
+        "clump-only (paired): '{}' + '{}' -> '{}' + '{}' ({} bins × {} MiB each, gzip level {}{})",
         input_r1.display(),
         input_r2.display(),
         out_r1_path.display(),
@@ -769,7 +771,8 @@ pub fn clump_only_single_to_bam(
             fastqc_threads: fastqc_requested
                 .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
         },
-    )?;
+    )
+    .context("--clump_only cannot run within the given --memory")?;
 
     let input_fmt = detect_input_format(input)?;
     let source_header = if matches!(input_fmt, InputFormat::UnalignedBam) {
@@ -781,7 +784,7 @@ pub fn clump_only_single_to_bam(
     let output_path = naming::clumped_bam_output_name(input, output_dir, basename);
 
     eprintln!(
-        "clump-only (uBAM out): reordering '{}' -> '{}' ({} bins × {} MiB budget, BGZF)",
+        "clump-only (uBAM out): reordering '{}' -> '{}' ({} bins × {} MiB each, BGZF)",
         input.display(),
         output_path.display(),
         layout.n_bins,
@@ -934,7 +937,8 @@ pub fn clump_only_paired_to_bam_one_pair(
             fastqc_threads: fastqc_requested
                 .then(|| crate::fastqc::resolved_threads(fastqc_args, cores.max(1))),
         },
-    )?;
+    )
+    .context("--clump_only cannot run within the given --memory")?;
 
     // Open readers + peek header + compute output path + input-format label
     // according to the input shape. Returns via `PairedInputSetup` to avoid
@@ -1028,7 +1032,7 @@ pub fn clump_only_paired_to_bam_one_pair(
         format!("{} + {}", inputs[0].display(), inputs[1].display())
     };
     eprintln!(
-        "clump-only (uBAM out, paired): '{}' -> '{}' ({} bins × {} MiB budget, BGZF)",
+        "clump-only (uBAM out, paired): '{}' -> '{}' ({} bins × {} MiB each, BGZF)",
         input_display,
         output_path.display(),
         layout.n_bins,

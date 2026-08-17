@@ -190,4 +190,37 @@ mod tests {
         let config = parse("-t abc");
         assert_eq!(config.threads, FastQCConfig::default().threads);
     }
+
+    // `resolved_threads` feeds the clumpify memory model's FastQC reservation,
+    // so a wrong answer makes the printed prediction stop being a bound (#439).
+
+    #[test]
+    fn resolved_threads_defaults_to_cores() {
+        assert_eq!(resolved_threads(None, 4), 4);
+        assert_eq!(resolved_threads(Some("--nogroup"), 8), 8);
+    }
+
+    #[test]
+    fn resolved_threads_takes_an_explicit_count_over_cores() {
+        assert_eq!(resolved_threads(Some("-t 16"), 2), 16);
+        assert_eq!(resolved_threads(Some("--threads 16"), 2), 16);
+        assert_eq!(resolved_threads(Some("--nogroup -t 6 --quiet"), 2), 6);
+    }
+
+    #[test]
+    fn resolved_threads_is_never_zero() {
+        assert_eq!(resolved_threads(None, 0), 1);
+        assert_eq!(resolved_threads(Some("-t 0"), 4), 1);
+    }
+
+    #[test]
+    fn resolved_threads_ignores_an_unparsable_count() {
+        assert_eq!(resolved_threads(Some("-t abc"), 4), 4);
+        assert_eq!(resolved_threads(Some("-t"), 4), 4);
+    }
+
+    #[test]
+    fn resolved_threads_takes_the_last_explicit_count() {
+        assert_eq!(resolved_threads(Some("-t 2 -t 9"), 4), 9);
+    }
 }

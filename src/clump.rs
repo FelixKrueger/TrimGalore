@@ -147,7 +147,12 @@ pub struct ClumpLayout {
 impl ClumpLayout {
     /// Layout with an explicit bin count and budget, for callers that bypass
     /// `resolve_layout`. The reservation is the trim-phase constant.
-    pub fn new(n_bins: usize, bin_byte_budget: usize, workers: usize) -> Self {
+    ///
+    /// Test-only: a budget below `MIN_BIN_BYTES` makes `predicted_peak_bytes`
+    /// meaningless, so production layouts come from `resolve_layout` alone.
+    #[cfg(test)]
+    pub(crate) fn new(n_bins: usize, bin_byte_budget: usize, workers: usize) -> Self {
+        debug_assert!(n_bins > 0 && bin_byte_budget as u64 >= MIN_BIN_BYTES);
         Self {
             n_bins,
             bin_byte_budget,
@@ -168,6 +173,29 @@ impl ClumpLayout {
 /// σ = 23/16 for the bin pool and k = 4 per worker.
 fn dyn_denominator(n_bins: usize, cores: usize) -> u64 {
     23 * n_bins as u64 + 64 * cores as u64
+}
+
+/// Per-worker channel depths. `k` above charges for `work + 1 in hand +
+/// result_per_core`, so their sum is the constant and neither may move alone.
+#[derive(Debug, Clone, Copy)]
+pub struct ChannelDepths {
+    pub work: usize,
+    pub result_per_core: usize,
+}
+
+/// A clumpy batch is a whole bin, so a shallower work queue caps resident bins.
+pub fn channel_depths(clumpy: bool) -> ChannelDepths {
+    if clumpy {
+        ChannelDepths {
+            work: 1,
+            result_per_core: 2,
+        }
+    } else {
+        ChannelDepths {
+            work: 2,
+            result_per_core: 2,
+        }
+    }
 }
 
 /// The three thread counts the memory model needs. They differ: `--clump_only`
@@ -552,6 +580,80 @@ mod tests {
     }
 
     #[test]
+    fn sizing_constants_are_pinned_across_the_role_space() {
+        // Hand-computed bin budgets. A coefficient edit — σ, k, the static
+        // reservation, the FastQC per-thread charge, its cap, or the margin —
+        // moves at least one of these, which the swept test below cannot see.
+        // Do not trim this table: the 17-thread cell is the only one that
+        // observes FASTQC_CHARGED_THREAD_CAP.
+        let gib = 1024 * 1024 * 1024u64;
+        let cases: [(u64, LayoutInputs, usize); 6] = [
+            (gib, LayoutInputs::uniform(4, None), 19_006_356),
+            (
+                gib,
+                LayoutInputs {
+                    bin_cores: 4,
+                    workers: 1,
+                    fastqc_threads: None,
+                },
+                27_453_626,
+            ),
+            (
+                gib,
+                LayoutInputs {
+                    bin_cores: 4,
+                    workers: 4,
+                    fastqc_threads: Some(16),
+                },
+                8_681_915,
+            ),
+            (
+                gib,
+                LayoutInputs {
+                    bin_cores: 4,
+                    workers: 4,
+                    fastqc_threads: Some(17),
+                },
+                8_681_915,
+            ),
+            (gib, LayoutInputs::uniform(2, None), 23_911_222),
+            (4 * gib, LayoutInputs::uniform(32, None), 11_761_649),
+        ];
+        for (budget, inputs, expected) in cases {
+            let layout = resolve_layout(budget, &inputs).unwrap();
+            assert_eq!(
+                layout.bin_byte_budget, expected,
+                "pin moved for budget {budget} inputs {inputs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn clumpify_floor_at_the_default_cell_is_pinned_absolutely() {
+        // Relative floor tests cannot see MIN_BIN_BYTES being lowered, because
+        // both sides move together. This pins the constant and the figure the
+        // docs publish for --cores 2 in one assertion.
+        let floor = clumpify_min_memory_bytes(&ins(2, false));
+        assert_eq!(floor.div_ceil(1024 * 1024), 281);
+    }
+
+    #[test]
+    fn channel_depths_sum_to_the_per_worker_coefficient() {
+        // k = 4 in dyn_denominator charges for the queued batch, the batch in
+        // hand, and the result slots. Raising either depth invalidates the fit.
+        let clumpy = channel_depths(true);
+        assert_eq!(clumpy.work, 1);
+        assert_eq!(clumpy.result_per_core, 2);
+        assert_eq!(
+            clumpy.work + 1 + clumpy.result_per_core,
+            4,
+            "channel depths must sum to k = 4 (64/16 in dyn_denominator); see \
+             plans/08162026_clumpify-memory-accounting/phase2/CALIBRATION.md"
+        );
+        assert_eq!(channel_depths(false).work, 2);
+    }
+
+    #[test]
     fn resolve_layout_fastqc_reserves_more_and_shrinks_bins() {
         // FastQC's histograms are charged on top of the trim-phase reservation,
         // so the same budget yields a smaller pool.
@@ -596,6 +698,40 @@ mod tests {
                 cores,
                 fastqc
             );
+        }
+    }
+
+    #[test]
+    fn floor_and_sizing_round_consistently_without_overflow() {
+        // Not a coefficient guard — `predicted ≤ budget` holds for any σ, k or
+        // static, because the sizing and the prediction read the same helpers.
+        // What this pins: the floor is the *least* resolvable budget across the
+        // input space (a rounding direction that disagrees between the two makes
+        // advertised budgets unusable), and the unchecked multiplies in
+        // `predicted_peak_bytes` and `clumpify_min_memory_bytes` stay inside u64.
+        for cores in [1usize, 2, 3, 4, 8, 16, 17, 32, 1024, 65536] {
+            for fastqc in [false, true] {
+                let inputs = ins(cores, fastqc);
+                let floor = clumpify_min_memory_bytes(&inputs);
+
+                let at = resolve_layout(floor, &inputs);
+                assert!(at.is_ok(), "floor {floor} must resolve for {inputs:?}");
+                assert!(at.unwrap().bin_byte_budget as u64 >= MIN_BIN_BYTES);
+                assert!(
+                    resolve_layout(floor - 1, &inputs).is_err(),
+                    "one byte under {floor} must bail for {inputs:?}"
+                );
+
+                for budget in [floor, floor + 1, u64::MAX / 2, u64::MAX] {
+                    if let Ok(layout) = resolve_layout(budget, &inputs) {
+                        let predicted = layout.predicted_peak_bytes();
+                        assert!(
+                            predicted <= budget,
+                            "predicted {predicted} > budget {budget} for {inputs:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 
