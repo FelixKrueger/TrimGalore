@@ -1,0 +1,24 @@
+# Recorded peak-RSS baselines for the `clumpify-memory` CI job (#439).
+#
+# The job gates on two things. The *promise* — measured peak <= the peak the
+# binary printed — is absolute and platform-independent. The *drift* band is
+# relative to the ratios below, because gating on the promise alone cannot see a
+# regression on Linux: at the expected ~0.85 ratio a work-channel-depth revert
+# adds ~72-104 MiB and still lands under the printed prediction.
+#
+# Fail if a cell's peak/prediction rises more than 0.05 above its baseline, or
+# falls more than 0.10 below it. A depth revert is a 0.08-0.11 move, so it
+# breaches the upper bound on any platform; a silent fallback to plain mode or a
+# fixture that stopped filling the bin pool is a multi-point drop.
+#
+# BOOTSTRAP: while this line is present the job records ratios and warns instead
+# of enforcing the band. Delete it once the values below are filled in from two
+# or three green runs on the runner. It is printed on every run so it cannot sit
+# here unnoticed.
+#
+# cell<TAB>baseline_peak_over_prediction
+# Reference values measured on macOS/arm64, which is NOT the runner: Linux
+# measured ~9 points lower in the #439 calibration. Do not copy these in.
+#   1G_c4          0.94
+#   1G_c4_fastqc   0.72
+#   25bp_1G_c4     1.07   <- above 1.0: see the short-read issue, not a regression
