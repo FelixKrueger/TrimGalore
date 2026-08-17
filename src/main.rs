@@ -204,11 +204,13 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
         return Ok(None);
     }
     let layout = clump::resolve_layout(memory_bytes, &layout_inputs)?;
+    // Naming the budget makes the ~9% margin visible arithmetic.
     eprintln!(
-        "clumpify: {} bins × {} MiB; predicted peak ≈ {} MiB (gzip level {})",
+        "clumpify: {} bins × {} MiB; predicted peak ≈ {} of {} MiB budget (gzip level {})",
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
         layout.predicted_peak_bytes() / (1024 * 1024),
+        memory_bytes / (1024 * 1024),
         cli.compression,
     );
     Ok(Some(layout))

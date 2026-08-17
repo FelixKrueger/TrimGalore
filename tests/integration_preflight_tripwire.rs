@@ -594,10 +594,16 @@ fn se_trim_clumpify() {
         out.stderr
     );
 
-    // Both banner figures are MiB: bins before the semicolon, peak before "(gzip".
+    // The bins figure is MiB, and the peak/budget pair is pinned by value: this case
+    // runs at the default --memory 1G, where 1024 × 10/11 truncates to 930. Asserting
+    // the arithmetic catches a divisor change that a unit label alone would not, since
+    // the peak no longer carries a unit of its own.
     assert!(
-        out.stderr.contains("MiB; predicted peak ≈") && out.stderr.contains("MiB (gzip level"),
-        "clumpify banner must label both figures MiB:\n{}",
+        out.stderr.contains("MiB; predicted peak ≈")
+            && out
+                .stderr
+                .contains("predicted peak ≈ 930 of 1024 MiB budget"),
+        "clumpify banner must pin both figures and their divisors:\n{}",
         out.stderr
     );
 }

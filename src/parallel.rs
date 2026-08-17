@@ -113,8 +113,8 @@ pub fn run_paired_end_parallel(
     );
 
     // Per-worker channels (round-robin distribution — no MPMC dependency needed)
-    // A clumpy batch is a whole bin, so a shallower queue caps resident bins.
-    let queue_depth = if clump_layout.is_some() { 1 } else { 2 };
+    let depths = clump::channel_depths(clump_layout.is_some());
+    let queue_depth = depths.work;
     let mut work_txs: Vec<mpsc::SyncSender<PairedWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<PairedWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
@@ -127,7 +127,8 @@ pub fn run_paired_end_parallel(
     // so reader-side errors surface to the main thread without waiting on the
     // reader_handle.join() that happens after the result loop drains. *(Plan v2
     // Step 6a; B-Crit-1.)*
-    let (result_tx, result_rx) = mpsc::sync_channel::<Result<PairedBatchResult>>(cores * 2);
+    let (result_tx, result_rx) =
+        mpsc::sync_channel::<Result<PairedBatchResult>>(cores * depths.result_per_core);
 
     std::thread::scope(|s| -> Result<(TrimStats, TrimStats, PairValidationStats)> {
         // ── Worker threads ──────────────────────────────────────────────
@@ -940,7 +941,8 @@ pub fn run_single_end_parallel(
     clump_layout: Option<ClumpLayout>,
 ) -> Result<TrimStats> {
     // A clumpy batch is a whole bin, so a shallower queue caps resident bins.
-    let queue_depth = if clump_layout.is_some() { 1 } else { 2 };
+    let depths = clump::channel_depths(clump_layout.is_some());
+    let queue_depth = depths.work;
     let mut work_txs: Vec<mpsc::SyncSender<SingleWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<SingleWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
@@ -956,7 +958,8 @@ pub fn run_single_end_parallel(
     // printed "Worker error" and broke, and the main loop then ended on a
     // closed channel with nothing to distinguish it from a clean EOF — so a
     // short output was committed with exit 0 (#434).
-    let (result_tx, result_rx) = mpsc::sync_channel::<Result<SingleBatchResult>>(cores * 2);
+    let (result_tx, result_rx) =
+        mpsc::sync_channel::<Result<SingleBatchResult>>(cores * depths.result_per_core);
 
     std::thread::scope(|s| -> Result<TrimStats> {
         // ── Worker threads ──────────────────────────────────────────────
