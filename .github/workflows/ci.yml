@@ -299,8 +299,23 @@ jobs:
           set -euo pipefail
           # GNU time, not the bash builtin: the builtin has no -v. A missing
           # binary must fail here rather than yield an empty parse later.
-          command -v /usr/bin/time >/dev/null || sudo apt-get install -y time
-          /usr/bin/time -v true 2>&1 | grep -q 'Maximum resident set size'
+          # Presence is not capability: the runner ships a /usr/bin/time whose
+          # -v is unrecognised, and `2>&1 | grep -q` hid the usage message inside
+          # the pipe, so the probe failed silently in 42 ms. Capture to a file,
+          # then decide.
+          probe () { /usr/bin/time -v true 2>"${RUNNER_TEMP}/time_probe.txt" || true; }
+          has_rss () { grep -c 'Maximum resident set size' "${RUNNER_TEMP}/time_probe.txt" >/dev/null; }
+          probe
+          if ! has_rss; then
+            echo "installing GNU time; the preinstalled /usr/bin/time reported:"
+            sed -n '1,5p' "${RUNNER_TEMP}/time_probe.txt" || true
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq time
+            probe
+          fi
+          has_rss || { echo "::error::no /usr/bin/time that reports peak RSS"; \
+                       sed -n '1,10p' "${RUNNER_TEMP}/time_probe.txt"; exit 1; }
+          echo "peak-RSS probe OK: $(grep 'Maximum resident set size' "${RUNNER_TEMP}/time_probe.txt")"
           # Disk is not independent of memory: a stalled writer backs up the
           # result channel and the pending map, so an out-of-space run reports
           # inflated peak RSS and looks like a model breach.
