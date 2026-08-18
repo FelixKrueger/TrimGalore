@@ -139,6 +139,39 @@ fn has_trim_galore_pg(path: &Path) -> bool {
 
 // ── SE positive path ──────────────────────────────────────────────
 
+/// #456 — the two uBAM-out banners carry the same peak/budget pair as the FASTQ
+/// ones. Covered here as well as in `integration_clump_only.rs` because deleting
+/// the figure from only these two would otherwise ship green.
+#[test]
+fn ubam_out_banners_report_the_predicted_peak() {
+    let r1 = fixture("BS-seq_10K_R1.fastq.gz");
+    let r2 = fixture("BS-seq_10K_R2.fastq.gz");
+
+    for (tag, paired) in [("se", false), ("pe", true)] {
+        let dir = fresh_tmpdir(&format!("peak_ubam_{tag}"));
+        let mut cmd = Command::new(binary());
+        cmd.args(["--clump_only", "--output-format", "ubam", "--cores", "2"]);
+        if paired {
+            cmd.arg("--paired");
+        }
+        cmd.args(["-o", dir.to_str().unwrap()]).arg(&r1);
+        if paired {
+            cmd.arg(&r2);
+        }
+        let out = cmd.output().expect("trim_galore failed to run");
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success(), "{tag} uBAM-out run failed:\n{err}");
+        assert!(
+            err.contains("clump-only (uBAM out"),
+            "{tag}: the uBAM-out banner did not print, so this proves nothing:\n{err}"
+        );
+        assert!(
+            err.contains("predicted peak ≈ 930 of 1024 MiB budget"),
+            "{tag}: uBAM-out banner must name the peak and its budget:\n{err}"
+        );
+    }
+}
+
 #[test]
 fn se_ubam_out_from_fastq_in() {
     let dir = fresh_tmpdir("se_fq_to_bam");

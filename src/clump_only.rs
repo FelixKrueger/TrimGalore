@@ -287,11 +287,13 @@ pub fn clump_only_single(
     let output_path = naming::clumped_output_name(input, output_dir, basename, gzip_output);
 
     eprintln!(
-        "clump-only: reordering '{}' -> '{}' ({} bins × {} MiB each, gzip level {}{})",
+        "clump-only: reordering '{}' -> '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, gzip level {}{})",
         input.display(),
         output_path.display(),
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
+        layout.predicted_peak_bytes() / (1024 * 1024),
+        memory_budget_bytes / (1024 * 1024),
         compression,
         if gzip_output { "" } else { ", --dont_gzip" },
     );
@@ -435,13 +437,15 @@ pub fn clump_only_paired(
         naming::clumped_paired_output_names(input_r1, input_r2, output_dir, basename, gzip_output);
 
     eprintln!(
-        "clump-only (paired): '{}' + '{}' -> '{}' + '{}' ({} bins × {} MiB each, gzip level {}{})",
+        "clump-only (paired): '{}' + '{}' -> '{}' + '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, gzip level {}{})",
         input_r1.display(),
         input_r2.display(),
         out_r1_path.display(),
         out_r2_path.display(),
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
+        layout.predicted_peak_bytes() / (1024 * 1024),
+        memory_budget_bytes / (1024 * 1024),
         compression,
         if gzip_output { "" } else { ", --dont_gzip" },
     );
@@ -784,11 +788,13 @@ pub fn clump_only_single_to_bam(
     let output_path = naming::clumped_bam_output_name(input, output_dir, basename);
 
     eprintln!(
-        "clump-only (uBAM out): reordering '{}' -> '{}' ({} bins × {} MiB each, BGZF)",
+        "clump-only (uBAM out): reordering '{}' -> '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, BGZF)",
         input.display(),
         output_path.display(),
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
+        layout.predicted_peak_bytes() / (1024 * 1024),
+        memory_budget_bytes / (1024 * 1024),
     );
 
     let mut reader = crate::format::open_sync_reader(input, preserve_tags)?;
@@ -1032,11 +1038,13 @@ pub fn clump_only_paired_to_bam_one_pair(
         format!("{} + {}", inputs[0].display(), inputs[1].display())
     };
     eprintln!(
-        "clump-only (uBAM out, paired): '{}' -> '{}' ({} bins × {} MiB each, BGZF)",
+        "clump-only (uBAM out, paired): '{}' -> '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, BGZF)",
         input_display,
         output_path.display(),
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
+        layout.predicted_peak_bytes() / (1024 * 1024),
+        memory_budget_bytes / (1024 * 1024),
     );
 
     let mut writer = BamWriter::create(

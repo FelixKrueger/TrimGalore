@@ -96,6 +96,40 @@ fn se_byte_identity_gzip() -> Result<()> {
     Ok(())
 }
 
+/// #456 — the memory visibility added for `--clumpify` under #439 must reach
+/// `--clump_only` too, which fails below the memory floor rather than falling back.
+/// Both figures are pinned by value: at the default `--memory 1G`, 1024 × 10/11
+/// truncates to 930, so the arithmetic is asserted and not just the label.
+#[test]
+fn banner_reports_the_predicted_peak() -> Result<()> {
+    let r1 = fixture("BS-seq_10K_R1.fastq.gz");
+    let r2 = fixture("BS-seq_10K_R2.fastq.gz");
+
+    for (tag, args) in [
+        ("se", vec!["--clump_only", "--cores", "2"]),
+        ("pe", vec!["--clump_only", "--paired", "--cores", "2"]),
+    ] {
+        let dir = tempdir(&format!("peak_{tag}"));
+        let mut cmd = Command::new(binary());
+        cmd.args(&args).args(["-o", dir.to_str().unwrap()]).arg(&r1);
+        if tag == "pe" {
+            cmd.arg(&r2);
+        }
+        let out = cmd.output()?;
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success(), "{tag} run failed:\n{err}");
+        assert!(
+            err.contains("clump-only"),
+            "{tag}: clump-only did not engage, so this proves nothing:\n{err}"
+        );
+        assert!(
+            err.contains("predicted peak ≈ 930 of 1024 MiB budget"),
+            "{tag}: banner must name the peak and the budget it came from:\n{err}"
+        );
+    }
+    Ok(())
+}
+
 // ── Byte-identity: SE (gzip in / plain out via --dont_gzip) ────────
 
 #[test]
