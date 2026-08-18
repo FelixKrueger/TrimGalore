@@ -309,8 +309,9 @@ pub struct Cli {
 
     /// Add clipped sequences to read IDs for --clip_R1/R2, --three_prime_clip_R1/R2, and --hardtrim5/3.
     /// Appends :clip5:SEQ and/or :clip3:SEQ to the read ID (each half only when that side was clipped). Useful for UMI handling.
-    /// Refused with --output-format ubam when any input is FASTQ, because a BAM read name cannot hold the
-    /// annotation once the header carries a description; also refused by --clump_only, which does not mutate IDs.
+    /// Refused with --output-format ubam when any input is FASTQ and a clipping flag applies to the run,
+    /// because a BAM read name cannot hold the annotation once the header carries a description;
+    /// also refused by --clump_only, which does not mutate IDs.
     #[clap(long = "rename")]
     pub rename: bool,
 
@@ -1151,20 +1152,21 @@ impl Cli {
             None
         };
         if let Some((reason, all_four)) = inert {
-            for (flag, value) in [
-                ("--clip_R1", if all_four { self.clip_r1 } else { None }),
-                (
-                    "--three_prime_clip_R1",
-                    if all_four {
-                        self.three_prime_clip_r1
-                    } else {
-                        None
-                    },
-                ),
-                ("--clip_R2", self.clip_r2),
-                ("--three_prime_clip_R2", self.three_prime_clip_r2),
+            use crate::library::ClipFlag;
+            let typed = self.user_clips();
+            // Each read's 5' flag before its 3' one, so a two-flag warning pair
+            // reads in clipping order.
+            for flag in [
+                ClipFlag::ClipR1,
+                ClipFlag::ThreePrimeClipR1,
+                ClipFlag::ClipR2,
+                ClipFlag::ThreePrimeClipR2,
             ] {
-                if let Some(n) = value {
+                if !all_four && !flag.read_2() {
+                    continue;
+                }
+                if let Some(n) = typed.value(flag) {
+                    let flag = flag.name();
                     eprintln!(
                         "WARNING: {flag} {n} was given but is not used in this mode ({reason}). Ignoring."
                     );
@@ -1223,15 +1225,19 @@ impl Cli {
     /// preset name and each displaced number, which is what the log line and both
     /// trimming reports print.
     pub fn effective_clips(&self) -> crate::library::ResolvedClips {
-        crate::library::resolve(
-            self.library,
-            crate::library::UserClips {
-                clip_r1: self.clip_r1,
-                clip_r2: self.clip_r2,
-                three_prime_clip_r1: self.three_prime_clip_r1,
-                three_prime_clip_r2: self.three_prime_clip_r2,
-            },
-        )
+        crate::library::resolve(self.library, self.user_clips())
+    }
+
+    /// The values as typed. Only the inert-flag warning wants these directly, so
+    /// that it cannot report a flag a preset supplied; anything needing the values
+    /// in force goes through `effective_clips()`, which folds the preset in.
+    pub(crate) fn user_clips(&self) -> crate::library::UserClips {
+        crate::library::UserClips {
+            clip_r1: self.clip_r1,
+            clip_r2: self.clip_r2,
+            three_prime_clip_r1: self.three_prime_clip_r1,
+            three_prime_clip_r2: self.three_prime_clip_r2,
+        }
     }
 }
 

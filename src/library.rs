@@ -16,6 +16,57 @@
 //! Presets may change between releases (see `CHANGELOG.md`). That is safe because
 //! both trimming reports record the expanded values, so an old report stays
 //! self-describing and a past run is reproducible from its own record.
+//!
+//! `ClipFlag` also lives here. It names the four clip flags and the read each
+//! belongs to, which the inert-flag warning and the `--rename` uBAM guard need
+//! with no preset involved.
+
+/// One of the four end-clipping flags.
+///
+/// An enum rather than a string table: the read a flag belongs to is one match
+/// arm rather than a fact each consumer re-derives, and a fifth flag will not
+/// compile until every consumer handles it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipFlag {
+    ClipR1,
+    ClipR2,
+    ThreePrimeClipR1,
+    ThreePrimeClipR2,
+}
+
+impl ClipFlag {
+    /// The closed set, for `any_effective` and the drift tests. This order is
+    /// deliberately neither display order, so no display site can iterate it and
+    /// still look correct.
+    pub const ALL: [ClipFlag; 4] = [
+        ClipFlag::ClipR2,
+        ClipFlag::ClipR1,
+        ClipFlag::ThreePrimeClipR2,
+        ClipFlag::ThreePrimeClipR1,
+    ];
+
+    /// Flag name as the user would type it. These four strings reach the JSON
+    /// report, so they are output.
+    pub fn name(self) -> &'static str {
+        match self {
+            ClipFlag::ClipR1 => "--clip_R1",
+            ClipFlag::ClipR2 => "--clip_R2",
+            ClipFlag::ThreePrimeClipR1 => "--three_prime_clip_R1",
+            ClipFlag::ThreePrimeClipR2 => "--three_prime_clip_R2",
+        }
+    }
+
+    /// A Read 2 flag.
+    pub fn read_2(self) -> bool {
+        matches!(self, ClipFlag::ClipR2 | ClipFlag::ThreePrimeClipR2)
+    }
+
+    /// This flag names a read the run processes. `paired` means `--paired`; the
+    /// modes that pair two files without it read no clip flag at all.
+    pub fn applies(self, paired: bool) -> bool {
+        paired || !self.read_2()
+    }
+}
 
 /// The four end-clipping values a preset expands into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,12 +136,9 @@ impl LibraryPreset {
 /// One clip flag given on the command line over a preset that also sets it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClipOverride {
-    /// Flag name as the user would type it, e.g. `--clip_R1`.
-    pub flag: &'static str,
+    pub flag: ClipFlag,
     pub preset_value: usize,
     pub user_value: usize,
-    /// A Read 2 flag, which a single-end run cannot honour.
-    pub read_2: bool,
 }
 
 /// The four clip values a user typed, before any preset is folded in.
@@ -121,28 +169,53 @@ impl ResolvedClips {
     /// R2 values are listed for paired runs only.
     pub fn flag_summary(&self, paired: bool) -> String {
         let mut parts = Vec::new();
-        for (flag, value, read_2) in [
-            ("--clip_R1", self.clip_r1, false),
-            ("--clip_R2", self.clip_r2, true),
-            ("--three_prime_clip_R1", self.three_prime_clip_r1, false),
-            ("--three_prime_clip_R2", self.three_prime_clip_r2, true),
+        // This order is user-visible in both trimming reports: 5' before 3',
+        // Read 1 before Read 2.
+        for flag in [
+            ClipFlag::ClipR1,
+            ClipFlag::ClipR2,
+            ClipFlag::ThreePrimeClipR1,
+            ClipFlag::ThreePrimeClipR2,
         ] {
-            if read_2 && !paired {
+            if !flag.applies(paired) {
                 continue;
             }
-            if let Some(v) = value {
-                parts.push(format!("{flag} {v}"));
+            if let Some(v) = self.value(flag) {
+                parts.push(format!("{} {v}", flag.name()));
             }
         }
         parts.join(" ")
     }
 
-    /// True when any of the four values is set, from either source.
-    pub fn any_set(&self) -> bool {
-        self.clip_r1.is_some()
-            || self.clip_r2.is_some()
-            || self.three_prime_clip_r1.is_some()
-            || self.three_prime_clip_r2.is_some()
+    /// The value in force for `flag`, preset folded in.
+    pub fn value(&self, flag: ClipFlag) -> Option<usize> {
+        match flag {
+            ClipFlag::ClipR1 => self.clip_r1,
+            ClipFlag::ClipR2 => self.clip_r2,
+            ClipFlag::ThreePrimeClipR1 => self.three_prime_clip_r1,
+            ClipFlag::ThreePrimeClipR2 => self.three_prime_clip_r2,
+        }
+    }
+
+    /// True when a clip value in force belongs to a read this run processes.
+    /// Says nothing about whether the *mode* honours clip flags; the caller's
+    /// hardtrim terms cover that.
+    pub fn any_effective(&self, paired: bool) -> bool {
+        ClipFlag::ALL
+            .iter()
+            .any(|&f| f.applies(paired) && self.value(f).is_some())
+    }
+}
+
+impl UserClips {
+    /// The value the user typed for `flag`, before any preset.
+    pub fn value(&self, flag: ClipFlag) -> Option<usize> {
+        match flag {
+            ClipFlag::ClipR1 => self.clip_r1,
+            ClipFlag::ClipR2 => self.clip_r2,
+            ClipFlag::ThreePrimeClipR1 => self.three_prime_clip_r1,
+            ClipFlag::ThreePrimeClipR2 => self.three_prime_clip_r2,
+        }
     }
 }
 
@@ -166,16 +239,13 @@ pub fn resolve(preset: Option<LibraryPreset>, user: UserClips) -> ResolvedClips 
 
     let clips = preset.clips();
     let mut overrides = Vec::new();
-    let mut pick = |flag: &'static str,
-                    user_value: Option<usize>,
-                    preset_value: usize,
-                    read_2: bool| match user_value {
+    let mut pick = |flag: ClipFlag, user_value: Option<usize>, preset_value: usize| match user_value
+    {
         Some(v) => {
             overrides.push(ClipOverride {
                 flag,
                 preset_value,
                 user_value: v,
-                read_2,
             });
             Some(v)
         }
@@ -184,19 +254,17 @@ pub fn resolve(preset: Option<LibraryPreset>, user: UserClips) -> ResolvedClips 
 
     ResolvedClips {
         preset: Some(preset),
-        clip_r1: pick("--clip_R1", user.clip_r1, clips.clip_r1, false),
-        clip_r2: pick("--clip_R2", user.clip_r2, clips.clip_r2, true),
+        clip_r1: pick(ClipFlag::ClipR1, user.clip_r1, clips.clip_r1),
+        clip_r2: pick(ClipFlag::ClipR2, user.clip_r2, clips.clip_r2),
         three_prime_clip_r1: pick(
-            "--three_prime_clip_R1",
+            ClipFlag::ThreePrimeClipR1,
             user.three_prime_clip_r1,
             clips.three_prime_clip_r1,
-            false,
         ),
         three_prime_clip_r2: pick(
-            "--three_prime_clip_R2",
+            ClipFlag::ThreePrimeClipR2,
             user.three_prime_clip_r2,
             clips.three_prime_clip_r2,
-            true,
         ),
         overrides,
     }
@@ -268,10 +336,9 @@ mod tests {
         assert_eq!(
             r.overrides,
             vec![ClipOverride {
-                flag: "--clip_R1",
+                flag: ClipFlag::ClipR1,
                 preset_value: 10,
                 user_value: 12,
-                read_2: false,
             }]
         );
     }
@@ -291,29 +358,95 @@ mod tests {
         assert!(r.overrides.is_empty());
     }
 
-    /// `read_2` is set at `pick`'s call sites rather than parsed out of the flag
-    /// name, so the name is available here as an independent oracle.
+    /// `read_2` is a match on the variant, not a parse of the name, so the name
+    /// serves here as an independent oracle.
     #[test]
-    fn every_override_knows_which_read_it_belongs_to() {
-        let r = resolve(
-            Some(LibraryPreset::Accel),
-            UserClips {
-                clip_r1: Some(1),
-                clip_r2: Some(2),
-                three_prime_clip_r1: Some(3),
-                three_prime_clip_r2: Some(4),
-            },
-        );
-        assert_eq!(r.overrides.len(), 4);
-        for o in &r.overrides {
+    fn every_clip_flag_knows_which_read_it_belongs_to() {
+        for f in ClipFlag::ALL {
             assert_eq!(
-                o.read_2,
-                o.flag.ends_with("_R2"),
+                f.read_2(),
+                f.name().ends_with("_R2"),
                 "{} has read_2 = {}",
-                o.flag,
-                o.read_2
+                f.name(),
+                f.read_2()
             );
         }
+    }
+
+    /// A fifth variant makes the match non-exhaustive, which forces a visit here.
+    /// Nothing forces it into `ALL`, whose length is a literal.
+    #[test]
+    fn all_holds_every_clip_flag_once() {
+        for f in ClipFlag::ALL {
+            match f {
+                ClipFlag::ClipR1
+                | ClipFlag::ClipR2
+                | ClipFlag::ThreePrimeClipR1
+                | ClipFlag::ThreePrimeClipR2 => {}
+            }
+        }
+        let mut names: Vec<&str> = ClipFlag::ALL.iter().map(|f| f.name()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), 4, "ALL must hold each flag exactly once");
+    }
+
+    /// These four strings reach the JSON report, so a typo is a silent output
+    /// change. The `_R2` oracle above passes with or without the leading dashes.
+    #[test]
+    fn clip_flag_names_are_the_command_line_spellings() {
+        assert_eq!(ClipFlag::ClipR1.name(), "--clip_R1");
+        assert_eq!(ClipFlag::ClipR2.name(), "--clip_R2");
+        assert_eq!(ClipFlag::ThreePrimeClipR1.name(), "--three_prime_clip_R1");
+        assert_eq!(ClipFlag::ThreePrimeClipR2.name(), "--three_prime_clip_R2");
+    }
+
+    /// #450 — a Read 2 value reaches no clip site on a single-end run.
+    #[test]
+    fn any_effective_discounts_read_2_on_single_end() {
+        let r2_only = resolve(
+            None,
+            UserClips {
+                clip_r2: Some(5),
+                ..UserClips::default()
+            },
+        );
+        assert!(!r2_only.any_effective(false));
+        assert!(r2_only.any_effective(true));
+
+        let tp_r2_only = resolve(
+            None,
+            UserClips {
+                three_prime_clip_r2: Some(7),
+                ..UserClips::default()
+            },
+        );
+        assert!(!tp_r2_only.any_effective(false));
+        assert!(tp_r2_only.any_effective(true));
+
+        // Read 1 counts on either shape, and a live R1 flag is not masked by an
+        // inert R2 one.
+        for user in [
+            UserClips {
+                clip_r1: Some(3),
+                ..UserClips::default()
+            },
+            UserClips {
+                three_prime_clip_r1: Some(3),
+                ..UserClips::default()
+            },
+            UserClips {
+                clip_r1: Some(3),
+                clip_r2: Some(5),
+                ..UserClips::default()
+            },
+        ] {
+            let r = resolve(None, user);
+            assert!(r.any_effective(false));
+            assert!(r.any_effective(true));
+        }
+
+        assert!(!resolve(None, UserClips::default()).any_effective(true));
     }
 
     #[test]

@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **`--rename --output-format ubam` no longer refuses over a clip flag that applies to no read**
+  ([#450](https://github.com/FelixKrueger/TrimGalore/issues/450)). A Read 2 clip flag on a single-end
+  run is still warned about and ignored, but no longer blocks the run.
+
 - **`--library <preset>` names a library prep instead of four clip flags**
   ([#440](https://github.com/FelixKrueger/TrimGalore/issues/440)). `emseq`, `accel` (aliases
   `swift`, `xgen`), `zymo`, `scbs` (alias `single_cell`) and `pbat` each expand into

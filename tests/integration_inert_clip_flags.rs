@@ -237,4 +237,54 @@ fn each_inert_flag_gets_its_own_line() {
     );
     assert!(err.contains("--clip_R2 5"), "got:\n{err}");
     assert!(err.contains("--three_prime_clip_R2 7"), "got:\n{err}");
+    // 5' before 3', so the pair reads in clipping order.
+    assert!(
+        err.find("--clip_R2 5") < err.find("--three_prime_clip_R2 7"),
+        "expected --clip_R2 before --three_prime_clip_R2:\n{err}"
+    );
+}
+
+/// All four at once, under a mode where all four are inert. The four-flag order
+/// is otherwise unexercised — every other case sets at most two.
+#[test]
+fn all_four_inert_flags_warn_in_clipping_order() {
+    let dir = tempdir("four_lines");
+    let (ok, err) = run(&[
+        "--hardtrim5",
+        "20",
+        "--clip_R1",
+        "3",
+        "--three_prime_clip_R1",
+        "4",
+        "--clip_R2",
+        "5",
+        "--three_prime_clip_R2",
+        "7",
+        "-o",
+        dir.to_str().unwrap(),
+        R1,
+    ]);
+    assert!(ok, "run failed:\n{err}");
+    assert_eq!(
+        err.lines().filter(|l| l.contains(INERT)).count(),
+        4,
+        "expected one warning line per inert flag, got:\n{err}"
+    );
+    let positions: Vec<Option<usize>> = [
+        "--clip_R1 3",
+        "--three_prime_clip_R1 4",
+        "--clip_R2 5",
+        "--three_prime_clip_R2 7",
+    ]
+    .iter()
+    .map(|f| err.find(f))
+    .collect();
+    assert!(
+        positions.iter().all(|p| p.is_some()),
+        "every flag must be named:\n{err}"
+    );
+    assert!(
+        positions.windows(2).all(|w| w[0] < w[1]),
+        "expected Read 1 5'/3' then Read 2 5'/3':\n{err}"
+    );
 }
