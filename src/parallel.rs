@@ -712,6 +712,8 @@ fn read_pairs_round_robin(
             (None, None, None) => {
                 if !batch_r1.is_empty() {
                     let idx = (seq as usize) % txs.len();
+                    // Safe to drop: a dead receiver means that worker already errored,
+                    // and publication is gated on the worker join.
                     let _ = txs[idx].send(Some((seq, batch_r1, batch_r2, None)));
                 }
                 for tx in txs {
@@ -752,6 +754,8 @@ fn read_pairs_round_robin(
             (None, None, Some(None)) => {
                 if !batch_r1.is_empty() {
                     let idx = (seq as usize) % txs.len();
+                    // Safe to drop: a dead receiver means that worker already errored,
+                    // and publication is gated on the worker join.
                     let _ = txs[idx].send(Some((seq, batch_r1, batch_r2, Some(batch_pt))));
                 }
                 for tx in txs {
@@ -1202,6 +1206,8 @@ fn read_single_round_robin(
 
     if !batch.is_empty() {
         let idx = (seq as usize) % txs.len();
+        // Safe to drop: a dead receiver means that worker already errored, and
+        // publication is gated on the worker join.
         let _ = txs[idx].send(Some((seq, batch)));
     }
     for tx in txs {
