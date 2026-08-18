@@ -58,9 +58,13 @@ Peak resident set size on the 84M-read Buckberry fixture (Trim Galore v2.1.0-bet
 | 4 | 73.0 MB | |
 | 8 | 91.6 MB | |
 
-The c1 → c2 step is by far the largest (+55 MB) — that's the four infrastructure threads spinning up their I/O buffers. Past c2, each additional pair of workers adds ~7 MB on average; the bulk of which is the per-worker compression buffer. Memory growth is bounded and predictable, well-suited to cluster scheduling: even worst-case at the saturation point (`--cores 8`), the process never exceeds ~100 MB.
+The c1 → c2 step is by far the largest (+55 MB) — that's the four infrastructure threads spinning up their I/O buffers. Past c2, each additional pair of workers adds ~7 MB on average; the bulk of which is the per-worker compression buffer. Memory growth is bounded and predictable, well-suited to cluster scheduling: on these 150 bp reads, even worst-case at the saturation point (`--cores 8`), the process stays under ~100 MB. That ceiling belongs to the read length rather than to the tool, as the long-read figures below show.
 
-For context, mainstream multi-threaded FASTQ trimmers typically use a lot more RAM: Cutadapt 100–300 MB, fastp 100+ MB, BBDuk (JVM) 1–4 GB. Trim Galore v2 stays under 100 MB across all reasonable core counts — well below the noise floor of cluster scheduler memory allocation. **Peak RSS scales with read length, not input file size:** at `--cores 8`, a 1M-read 50-bp fixture sits at ~28 MB and an 84M-read 150-bp fixture at ~92 MB — bounded by the per-worker batch + channel buffers, which don't grow with total input length.
+For context, mainstream multi-threaded FASTQ trimmers typically use a lot more RAM: Cutadapt 100–300 MB, fastp 100+ MB, BBDuk (JVM) 1–4 GB. On short reads Trim Galore v2 stays under 100 MB across all reasonable core counts — well below the noise floor of cluster scheduler memory allocation: at `--cores 8`, a 1M-read 50-bp fixture sits at ~28 MB and an 84M-read 150-bp fixture at ~92 MB.
+
+**Peak RSS scales with read length**, because the batch sizes are counts of records rather than of bytes, so a batch holds as many bytes as its reads happen to be. Measured in plain mode at `--cores 4` on 400 MB of input: ~75 MiB at 150 bp, ~245 MiB at 1 kb, ~800 MiB at 10 kb.
+
+**At a fixed read length it also grows with input size, until the pipeline saturates.** The 10 kb figure above is still input-limited: 400 MB holds only ~4.7 batches against roughly 20 slots of resident capacity. Feeding more of the same reads gives 1366 MiB at 764 MB of input, 2052 MiB at 1.2 GB, and a plateau near 2.3 GiB from about 3 GB upward — so ~2.3 GiB, not ~100 MB, is the honest ceiling for 10 kb reads. `--cores 1` is the exception at ~10 MiB, because the worker pool is bypassed and no batches exist. Budget from the read length you actually have; ONT and PacBio inputs need substantially more headroom than the short-read figures suggest.
 
 ## I/O and cache behaviour
 
