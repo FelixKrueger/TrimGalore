@@ -9,10 +9,10 @@
   ([#456](https://github.com/FelixKrueger/TrimGalore/issues/456)). All four banners name the
   peak and the `--memory` budget it was sized against.
 
-- **`--clumpify` no longer reports gzip when it writes plain output**
-  ([#453](https://github.com/FelixKrueger/TrimGalore/issues/453)). Output encoding follows the
-  input's, so a plain input now prints `(plain output)` and a warning that the reordering gains
-  nothing without a compressor.
+- **The clumping banners report the encoding they write, not the configured level**
+  ([#453](https://github.com/FelixKrueger/TrimGalore/issues/453)). `--clumpify` on a plain input
+  prints `(plain output)` plus a warning that the reordering gains nothing without a compressor,
+  and `--clump_only --dont_gzip` no longer names a gzip level alongside the flag disabling it.
 
 - **`--rename --output-format ubam` is now refused on the `--rrbs` directional paired path**
   ([#459](https://github.com/FelixKrueger/TrimGalore/issues/459)). That path auto-sets

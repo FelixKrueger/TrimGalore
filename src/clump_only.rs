@@ -240,6 +240,17 @@ fn write_records_member<W: Write>(
     }
 }
 
+/// The encoding the run writes, for the startup banner. A plain input and
+/// `--dont_gzip` both land here, so the banner must not name a compression level
+/// it will not apply.
+fn banner_encoding(gzip_output: bool, compression: u32) -> String {
+    if gzip_output {
+        format!("gzip level {compression}")
+    } else {
+        "plain output".to_string()
+    }
+}
+
 /// Run `--clump_only` on a single-end FASTQ input.
 ///
 /// Byte-identity: every record R in the input file appears in the output
@@ -287,15 +298,14 @@ pub fn clump_only_single(
     let output_path = naming::clumped_output_name(input, output_dir, basename, gzip_output);
 
     eprintln!(
-        "clump-only: reordering '{}' -> '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, gzip level {}{})",
+        "clump-only: reordering '{}' -> '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, {})",
         input.display(),
         output_path.display(),
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
         layout.predicted_peak_bytes() / (1024 * 1024),
         memory_budget_bytes / (1024 * 1024),
-        compression,
-        if gzip_output { "" } else { ", --dont_gzip" },
+        banner_encoding(gzip_output, compression),
     );
 
     let mut reader = FastqReader::open(input)
@@ -437,7 +447,7 @@ pub fn clump_only_paired(
         naming::clumped_paired_output_names(input_r1, input_r2, output_dir, basename, gzip_output);
 
     eprintln!(
-        "clump-only (paired): '{}' + '{}' -> '{}' + '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, gzip level {}{})",
+        "clump-only (paired): '{}' + '{}' -> '{}' + '{}' ({} bins × {} MiB each; predicted peak ≈ {} of {} MiB budget, {})",
         input_r1.display(),
         input_r2.display(),
         out_r1_path.display(),
@@ -446,8 +456,7 @@ pub fn clump_only_paired(
         layout.bin_byte_budget / (1024 * 1024),
         layout.predicted_peak_bytes() / (1024 * 1024),
         memory_budget_bytes / (1024 * 1024),
-        compression,
-        if gzip_output { "" } else { ", --dont_gzip" },
+        banner_encoding(gzip_output, compression),
     );
 
     let mut reader_r1 = FastqReader::open(input_r1)
