@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **The documented memory ceiling now reflects long reads**
+  ([#454](https://github.com/FelixKrueger/TrimGalore/issues/454)). `~100 MB` held only for
+  short reads; the threading docs now give measured figures up to ~2.3 GiB at 10 kb.
+
 - **`--clump_only` now prints its predicted peak memory, like `--clumpify` does**
   ([#456](https://github.com/FelixKrueger/TrimGalore/issues/456)). All four banners name the
   peak and the `--memory` budget it was sized against.
