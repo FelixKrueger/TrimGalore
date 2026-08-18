@@ -1176,9 +1176,21 @@ impl Cli {
 
         // Deprecation warnings for Perl-era flags
         if self.gzip {
-            eprintln!(
-                "WARNING: --gzip is deprecated in Trim Galore v2.0. Output is gzipped by default. Use --dont_gzip to disable. Ignoring."
-            );
+            // Output compression follows the input, so "gzipped by default" holds
+            // only for a gzipped input.
+            if self
+                .input
+                .first()
+                .is_some_and(|p| !crate::io::is_gzipped(p))
+            {
+                eprintln!(
+                    "WARNING: --gzip is deprecated in Trim Galore v2.0. Output compression follows the input, so this plain-text input produces plain-text output and no flag changes that. Ignoring."
+                );
+            } else {
+                eprintln!(
+                    "WARNING: --gzip is deprecated in Trim Galore v2.0. Output is gzipped by default. Use --dont_gzip to disable. Ignoring."
+                );
+            }
         }
         if self.path_to_cutadapt.is_some() {
             eprintln!(

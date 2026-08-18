@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **`--gzip`'s deprecation notice no longer promises gzipped output for a plain-text input**
+  ([#453](https://github.com/FelixKrueger/TrimGalore/issues/453)). Output compression follows
+  the input, and the notice now says so on that path.
+
 - **The documented memory ceiling now reflects long reads**
   ([#454](https://github.com/FelixKrueger/TrimGalore/issues/454)). `~100 MB` held only for
   short reads; the threading docs now give measured figures up to ~2.3 GiB at 10 kb.
