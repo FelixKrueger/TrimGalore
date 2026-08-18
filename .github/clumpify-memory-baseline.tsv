@@ -47,6 +47,15 @@
 #     across the trim->FastQC boundary, so this cell is timing-sensitive in a way
 #     the pure-trim cells are not.
 #
+#   2G_c4            -       -      -       -       -   no observations yet
+#     The cell that carried #439's original breach (1.173 -> 1.014 -> 0.887 of
+#     budget across two fix phases). Recorded rather than gated: a 2 GiB pool needs
+#     ~2.3x this fixture to saturate, so its ratio reads low and cannot approach
+#     the printed prediction. That depression is expected — do not read it as
+#     headroom. Lever A still moves it ~+0.09 to +0.13, since B is 42.0 MiB here
+#     against 18.1 at 1G/c4, so it is a usable drift cell once it has a
+#     double-digit sample. See #458.
+#
 #   1G_c2           25  0.8789  0.860   0.894   0.034   2.9x at +0.09 — just under the bar
 #   25bp_1G_c2      25  1.0301  1.007   1.050   0.043   4.2x at +0.09 — eligible next pass
 #     25bp_1G_c2 is #457: over the printed prediction, inside the budget, on
