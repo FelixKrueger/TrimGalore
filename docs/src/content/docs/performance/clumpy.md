@@ -64,7 +64,7 @@ trim_galore --clumpify --compression 9 --memory 4G <input>
 trim_galore --compression 6 <input>
 ```
 
-`--clumpify` requires `--cores >= 2` (it feeds the existing parallel worker pool with binned batches) and gzip output (`--dont_gzip` is rejected).
+`--clumpify` requires `--cores >= 2` (it feeds the existing parallel worker pool with binned batches). `--dont_gzip` is accepted and produces plain output, as it does for `--clump_only`; clumping still reorders the records, it just buys no compression gain.
 
 `--compression` is independent: it works with or without `--clumpify`, and applies to the regular trimming pipeline too.
 

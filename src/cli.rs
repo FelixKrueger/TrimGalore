@@ -745,11 +745,6 @@ impl Cli {
                     "--clumpify requires --cores >= 2 (the bin dispatcher feeds parallel workers)"
                 );
             }
-            if self.dont_gzip {
-                anyhow::bail!(
-                    "--clumpify and --dont_gzip are mutually exclusive (clumping plain text is pointless)"
-                );
-            }
             if self.clock {
                 anyhow::bail!("--clumpify is not yet supported with --clock");
             }
@@ -1828,8 +1823,11 @@ mod tests {
         );
     }
 
+    /// #453 — `--dont_gzip` is accepted here, matching `--clump_only`. The
+    /// neighbouring `--cores` rule still applies, so this also proves the arm
+    /// is reached rather than short-circuited earlier.
     #[test]
-    fn test_clumpify_rejects_dont_gzip() {
+    fn test_clumpify_accepts_dont_gzip() {
         let cli = Cli::parse_from([
             "trim_galore",
             "--clumpify",
@@ -1838,8 +1836,11 @@ mod tests {
             "--dont_gzip",
             R1,
         ]);
+        assert!(cli.validate().is_ok(), "got: {:?}", cli.validate().err());
+
+        let cli = Cli::parse_from(["trim_galore", "--clumpify", "--dont_gzip", R1]);
         let err = cli.validate().unwrap_err().to_string();
-        assert!(err.contains("--dont_gzip"), "got: {err}");
+        assert!(err.contains("--cores >= 2"), "got: {err}");
     }
 
     #[test]

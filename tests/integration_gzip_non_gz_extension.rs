@@ -109,6 +109,56 @@ fn read_output_raw(dir: &Path, stem: &str) -> String {
 
 /// Single-end `.bgz`. The path that already worked before this change; kept so
 /// a future regression in the sniff is caught here too.
+/// #453 — `--clumpify` accepts `--dont_gzip`, as `--clump_only` already did. The
+/// refusal it replaced called clumping plain text pointless while the tool did
+/// exactly that on plain input, so the reason was never true.
+#[test]
+fn clumpify_accepts_dont_gzip_and_writes_plain_output() {
+    let dir = fresh_tmpdir("tg_453_clumpify_plain");
+    let input = dir.join("sample.fq.gz");
+    write_gz(&input, &sample_reads("cy"));
+
+    let out = Command::new(binary())
+        .args([
+            "--clumpify",
+            "--dont_gzip",
+            "--cores",
+            "2",
+            "-o",
+            dir.to_str().unwrap(),
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .expect("binary must run");
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        out.status.success(),
+        "--clumpify --dont_gzip must be accepted:\n{err}"
+    );
+    assert!(
+        !err.contains("mutually exclusive"),
+        "the refusal must be gone:\n{err}"
+    );
+
+    // Plain output, and every record still present: --dont_gzip changes the
+    // container, not the contents.
+    let plain = dir.join("sample_trimmed.fq");
+    assert!(
+        plain.exists(),
+        "expected plain output, got: {:?}",
+        std::fs::read_dir(&dir).map(|d| d
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>())
+    );
+    let body = std::fs::read_to_string(&plain).expect("read plain output");
+    assert_eq!(
+        body.lines().count() / 4,
+        8,
+        "all eight records must survive:\n{body}"
+    );
+}
+
 /// #453 — output compression follows the input, so `--gzip`'s deprecation notice
 /// must not promise gzipped output for a plain-text input, where no flag delivers it.
 #[test]
