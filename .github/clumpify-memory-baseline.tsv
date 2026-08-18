@@ -3,43 +3,70 @@
 # The job gates on two things. The *promise* — measured peak <= the peak the
 # binary printed — is absolute and platform-independent. The *drift* band is
 # relative to the ratios below, because gating on the promise alone cannot see a
-# regression on Linux: at the expected ~0.85 ratio a work-channel-depth revert
+# regression on Linux: at the measured ~0.78 ratio a work-channel-depth revert
 # adds ~72-104 MiB and still lands under the printed prediction.
 #
-# Fail if a cell's peak/prediction rises more than 0.05 above its baseline, or
-# falls more than 0.10 below it. A depth revert is a 0.08-0.11 move, so it
+# Fail if a cell peak/prediction rises more than 0.05 above its baseline, or
+# falls more than 0.10 below it. A depth revert is a 0.078-0.11 move, so it
 # breaches the upper bound on any platform; a silent fallback to plain mode or a
 # fixture that stopped filling the bin pool is a multi-point drop.
 #
-# BOOTSTRAP: while this line is present the job records ratios and warns instead
-# of enforcing the band. Delete it once the values below are filled in from two
-# or three green runs on the runner. It is printed on every run so it cannot sit
-# here unnoticed.
+# A cell is banded only if it has >= 3 reps that predate the PR adding its row,
+# AND a false-red multiple >= 3x: a spurious red must need an excursion at least
+# three times the largest yet observed for that cell. Reps from the adding PR do
+# not count toward the bar, or a cell would certify itself. Cells under the bar
+# are measured and printed but not banded, and the BANDED list in ci.yml keeps a
+# deliberate omission distinguishable from a typo.
+#
+# On a lone red 5-7 points above baseline on unmodified code: re-run once. If it
+# clears it was spread, not drift. Do not widen the band on one reading.
 #
 # cell<TAB>baseline_peak_over_prediction
+1G_c4	0.777
+25bp_1G_c4	0.923
+multipair_c4	0.790
 #
-# Runner observations. Reps 1-2 measured identical code: the only difference
-# between 69d8f67 and 3f1a930 is this file's comment block, so they pool. Two
-# more reps are needed before these become the enforced baseline, because a pair
-# bounds a cell's spread without estimating it.
+# Baselines are the means of reps 1-4, half-up to 3 dp (1G_c4 3.108/4 = 0.7770;
+# 25bp_1G_c4 3.691/4 = 0.92275 -> 0.923; multipair_c4 3.160/4 = 0.7900). Rep 5 is
+# deliberately excluded from the centre: it is the run that first enforced these
+# bands, so it serves as their independent confirmation. Fold it in at the next
+# deliberate re-baseline.
 #
-#   cell            rep1     rep2     mean      macOS/arm64
-#   1G_c4           0.770    0.782    0.776     0.939
-#   1G_c4_fastqc    0.697    0.701    0.699     0.724
-#   25bp_1G_c4      0.941    0.924    0.9325    1.054-1.075
-#   multipair_c4    0.792    0.787    0.790     -
+#   cell            rep1   rep2   rep3   rep4   rep5    range   false red   miss
+#   1G_c4           0.770  0.782  0.785  0.771  0.785   0.015   6.7x        3.7x
+#   25bp_1G_c4      0.941  0.924  0.914  0.912  0.929   0.029   3.4x        1.9x
+#   multipair_c4    0.792  0.787  0.789  0.792  0.808   0.021   4.8x        2.7x
 #
-#   rep1  69d8f67  run 32065004600
-#   rep2  3f1a930  run 32065624366
+# 25bp_1G_c4 is banded at a 1.9x miss margin because a depth revert moves every
+# cell at once, so a miss needs every banded cell to miss: 1G_c4 carries that
+# direction at 3.7x. multipair_c4 looked like the carrier at 11.2x on four reps
+# and is 2.7x on five, which is why the redundancy argument names the widest
+# margin currently measured rather than a fixed cell.
 #
-# Record the commit for every rep. Reps whose binaries differ must not be pooled;
-# `git diff --quiet <rep1> <repN> -- src Cargo.lock` is the check, and a rep that
-# fails it is dropped in favour of another push.
+# Measured but NOT banded:
 #
-# The runner sits ~16 points below macOS at the gating cell, not the ~9 the #439
-# calibration estimated. Observed spread is 0.4-1.7 points.
+#   1G_c4_fastqc    0.697  0.701  0.707  0.745  0.701   0.048   2.1x        1.2x
+#     Widest of the six. A +0.05 band would trigger at 0.7625 against an observed
+#     max of 0.745 — 1.75 points of headroom on a 4.8-point range — so banding it
+#     would red on correct code. It stays promise-gated (peak <= prediction, at
+#     0.745 of 1.000). FastQC cost scales with --cores and the allocator holds the
+#     pool pages across the trim->FastQC boundary, so this cell is timing-
+#     sensitive in a way the pure-trim cells are not.
 #
-# 1G_c2 and 25bp_1G_c2 record from reps 3-4 onward and have no row yet: two reps
-# is below the bar above. 25bp_1G_c2 is #457's worst cell on macOS, where it
-# exceeds the budget; a Linux breach there needs a c4->c2 increment of +0.169,
-# 2.4x the +0.070 macOS shows.
+#   1G_c2           -      -      0.867  0.894  0.878   0.027   3.7x        2.1x
+#   25bp_1G_c2      -      -      1.031  1.026  1.043   0.017   5.9x        3.3x
+#     Both now clear the 3x multiple, but their third rep IS rep 5, which does not
+#     count toward the bar. Band them in the next pass, on an independent
+#     confirmation. 25bp_1G_c2 also tripled its range on that third draw (0.005 ->
+#     0.017), which is the signal to wait rather than to proceed: dispersion from
+#     two draws is biased low, not merely imprecise. That is how 1G_c4_fastqc
+#     looked tightest of the six on its first two reps.
+#     25bp_1G_c2 is #457: over the printed prediction, inside the budget, on
+#     Linux. Its value will move when sigma is refitted, needing a re-baseline.
+#
+# Reps: rep1 69d8f67 (run 32065004600), rep2 3f1a930 (32065624366),
+#       rep3 7d676b7 (32109372844), rep4 bc48bf0 (32110691552),
+#       rep5 7a218b0 (32113210868, the run that enforced these bands).
+# Every rep passes `git diff --quiet 69d8f67 <rep> -- src Cargo.lock`, so they
+# pool. Reps built from different sources must not be pooled into one mean; when
+# src/ moves, judge whether the change can reach the clump path before pooling.

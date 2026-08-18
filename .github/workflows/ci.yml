@@ -344,6 +344,11 @@ jobs:
         run: |
           set -euo pipefail
           base=.github/clumpify-memory-baseline.tsv
+          # A missing file would leave every lookup empty and the band silently off.
+          test -f "$base" || { echo "::error::baseline file missing: $base"; exit 1; }
+          # Cells with a committed baseline. A label here without exactly one row
+          # means the drift band is not armed for it.
+          BANDED="1G_c4 25bp_1G_c4 multipair_c4"
           bootstrap=0
           if grep -q '^# BOOTSTRAP' "$base"; then
             bootstrap=1
@@ -351,6 +356,15 @@ jobs:
           Record the ratios below in $base and delete the BOOTSTRAP line."
           fi
           fail=0
+
+          # Assert before measuring so a broken baseline shows at the top of the log,
+          # but with fail=1 rather than exit so the ratios still print for repair.
+          if [ "$bootstrap" = 0 ]; then
+            for label in $BANDED; do
+              awk -v c="$label" '$1==c {n++} END{exit !(n==1)}' "$base" \
+                || { echo "::error::$label has no single baseline row in $base - the drift band is not armed for it"; fail=1; }
+            done
+          fi
 
           # $1 label  $2 gating(1|0)  $3.. trim_galore args
           measure () {
