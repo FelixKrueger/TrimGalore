@@ -388,11 +388,12 @@ fn main() -> Result<()> {
         reject_bam_format_mismatch_in_pair(&cli.input, &input_formats, shape)?;
     }
 
-    // #408 — refused only where an `append_to_id` site can fire: a clip flag for a read
-    // this run processes, or a hardtrim. Format-gated, so it cannot live in `validate()`.
+    // #408 — refused only where an `append_to_id` site can fire: a clip that applies to a
+    // read this run processes, or a hardtrim. Format-gated, so it cannot live in `validate()`.
     if cli.rename
         && matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam)
         && (cli.effective_clips().any_effective(cli.paired)
+            || cli.rrbs_sets_clip_r2()
             || cli.hardtrim5.is_some()
             || cli.hardtrim3.is_some())
         && input_formats
@@ -1141,7 +1142,7 @@ fn setup_trimming(cli: &Cli, input_file: &Path) -> SetupResult {
 
     // RRBS: auto-set --clip_r2 2 for directional paired-end mode. A preset that
     // supplies clip_R2 counts as "already set", same as an explicit flag.
-    let clip_r2 = if cli.rrbs && !cli.non_directional && cli.paired && clips.clip_r2.is_none() {
+    let clip_r2 = if cli.rrbs_sets_clip_r2() && clips.clip_r2.is_none() {
         eprintln!(
             "Setting the option '--clip_r2 2' (to remove methylation bias from the start of Read 2)"
         );

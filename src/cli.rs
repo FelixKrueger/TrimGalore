@@ -1228,6 +1228,12 @@ impl Cli {
         crate::library::resolve(self.library, self.user_clips())
     }
 
+    /// `--rrbs` auto-sets `--clip_R2 2` on the directional paired path, so a run
+    /// can clip Read 2 with no clip flag on the command line.
+    pub fn rrbs_sets_clip_r2(&self) -> bool {
+        self.rrbs && !self.non_directional && self.paired
+    }
+
     /// The values as typed. Only the inert-flag warning wants these directly, so
     /// that it cannot report a flag a preset supplied; anything needing the values
     /// in force goes through `effective_clips()`, which folds the preset in.
@@ -2587,6 +2593,33 @@ mod tests {
             "expected the missing-input error first, got: {err}"
         );
         assert!(!err.contains("--library"), "got: {err}");
+    }
+
+    /// #459 — each conjunct is load-bearing, so each is dropped in turn. The
+    /// `--rename` uBAM guard and `setup_trimming` both read this one predicate.
+    #[test]
+    fn rrbs_sets_clip_r2_only_on_the_directional_paired_path() {
+        let cli = Cli::parse_from(["trim_galore", "--rrbs", "--paired", R1, R2]);
+        assert!(cli.rrbs_sets_clip_r2());
+
+        // Drop --rrbs.
+        let cli = Cli::parse_from(["trim_galore", "--paired", R1, R2]);
+        assert!(!cli.rrbs_sets_clip_r2());
+
+        // Drop --paired.
+        let cli = Cli::parse_from(["trim_galore", "--rrbs", R1]);
+        assert!(!cli.rrbs_sets_clip_r2());
+
+        // Add --non_directional.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--rrbs",
+            "--non_directional",
+            "--paired",
+            R1,
+            R2,
+        ]);
+        assert!(!cli.rrbs_sets_clip_r2());
     }
 
     /// A clip flag a mode cannot honour is a warning, never a refusal — unlike
