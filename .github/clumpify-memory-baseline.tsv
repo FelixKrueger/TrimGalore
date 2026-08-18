@@ -18,12 +18,28 @@
 #
 # cell<TAB>baseline_peak_over_prediction
 #
-# First runner observations (2026-08-17, run 32065004600), one rep each. Two or
-# three more runs are needed before these become the enforced baseline, because a
-# single rep cannot separate the cell's spread from its centre.
+# Runner observations. Reps 1-2 measured identical code: the only difference
+# between 69d8f67 and 3f1a930 is this file's comment block, so they pool. Two
+# more reps are needed before these become the enforced baseline, because a pair
+# bounds a cell's spread without estimating it.
 #
-#   cell            runner   macOS/arm64   note
-#   1G_c4           0.770    0.939         runner is ~17 points lower, not the ~9 the
-#   1G_c4_fastqc    0.697    0.724           #439 calibration estimated
-#   25bp_1G_c4      0.941    1.07          #457 does not breach here; --cores 2 unmeasured
-#   multipair_c4    0.792    -             no sign of cross-pair page retention
+#   cell            rep1     rep2     mean      macOS/arm64
+#   1G_c4           0.770    0.782    0.776     0.939
+#   1G_c4_fastqc    0.697    0.701    0.699     0.724
+#   25bp_1G_c4      0.941    0.924    0.9325    1.054-1.075
+#   multipair_c4    0.792    0.787    0.790     -
+#
+#   rep1  69d8f67  run 32065004600
+#   rep2  3f1a930  run 32065624366
+#
+# Record the commit for every rep. Reps whose binaries differ must not be pooled;
+# `git diff --quiet <rep1> <repN> -- src Cargo.lock` is the check, and a rep that
+# fails it is dropped in favour of another push.
+#
+# The runner sits ~16 points below macOS at the gating cell, not the ~9 the #439
+# calibration estimated. Observed spread is 0.4-1.7 points.
+#
+# 1G_c2 and 25bp_1G_c2 record from reps 3-4 onward and have no row yet: two reps
+# is below the bar above. 25bp_1G_c2 is #457's worst cell on macOS, where it
+# exceeds the budget; a Linux breach there needs a c4->c2 increment of +0.169,
+# 2.4x the +0.070 macOS shows.

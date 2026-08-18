@@ -430,6 +430,9 @@ jobs:
           measure 25bp_1G_c4   0 --clumpify --paired --cores 4 --memory 1G "$F25R1" "$F25R2"
           measure multipair_c4 0 --clumpify --paired --cores 4 --memory 1G \
             "$F51R1" "$F51R2" "${RUNNER_TEMP}/dup_R1.fastq.gz" "${RUNNER_TEMP}/dup_R2.fastq.gz"
+          # --cores 2 is too tight to gate; both cells record their ratio only.
+          measure 1G_c2        0 --clumpify --paired --cores 2 --memory 1G "$F51R1" "$F51R2"
+          measure 25bp_1G_c2   0 --clumpify --paired --cores 2 --memory 1G "$F25R1" "$F25R2"
 
           exit $fail
 
