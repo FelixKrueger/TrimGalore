@@ -109,6 +109,67 @@ fn read_output_raw(dir: &Path, stem: &str) -> String {
 
 /// Single-end `.bgz`. The path that already worked before this change; kept so
 /// a future regression in the sniff is caught here too.
+/// #453 — output compression follows the input, so `--gzip`'s deprecation notice
+/// must not promise gzipped output for a plain-text input, where no flag delivers it.
+#[test]
+fn gzip_deprecation_notice_matches_what_the_run_will_do() {
+    let plain_claim = "produces plain-text output and no flag changes that";
+    let gz_claim = "Output is gzipped by default";
+
+    // Plain input: the notice must describe follow-the-input.
+    let dir = fresh_tmpdir("tg_453_plain");
+    let input = dir.join("sample.fastq");
+    std::fs::write(&input, sample_reads("se")).expect("write plain input");
+    let out = Command::new(binary())
+        .args([
+            "--gzip",
+            "-o",
+            dir.to_str().unwrap(),
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .expect("binary must run");
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(out.status.success(), "plain run must succeed:\n{err}");
+    assert!(
+        err.contains(plain_claim),
+        "plain input must not be told its output is gzipped:\n{err}"
+    );
+    assert!(
+        !err.contains(gz_claim),
+        "the gzipped-by-default claim is false here:\n{err}"
+    );
+    assert!(
+        dir.join("sample_trimmed.fq").exists(),
+        "plain input gives plain output, which is what the notice now says: {:?}",
+        std::fs::read_dir(&dir).map(|d| d.count())
+    );
+
+    // Gzipped input: the original wording is correct and must be kept.
+    let dir = fresh_tmpdir("tg_453_gz");
+    let input = dir.join("sample.fq.gz");
+    write_gz(&input, &sample_reads("se"));
+    let out = Command::new(binary())
+        .args([
+            "--gzip",
+            "-o",
+            dir.to_str().unwrap(),
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .expect("binary must run");
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(out.status.success(), "gzipped run must succeed:\n{err}");
+    assert!(
+        err.contains(gz_claim),
+        "gzipped input keeps the original wording:\n{err}"
+    );
+    assert!(
+        !err.contains(plain_claim),
+        "the follow-the-input wording belongs to plain input only:\n{err}"
+    );
+}
+
 #[test]
 fn single_end_bgz_input_is_decompressed() {
     let dir = fresh_tmpdir("tg_bgz_se");
