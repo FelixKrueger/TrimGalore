@@ -114,7 +114,7 @@ pub fn run_paired_end_parallel(
 
     // Per-worker channels (round-robin distribution — no MPMC dependency needed)
     let depths = clump::channel_depths(clump_layout.is_some());
-    let queue_depth = depths.work;
+    let queue_depth = 2; // VALIDATION 8 form (b): literal re-inlined, helper bypassed
     let mut work_txs: Vec<mpsc::SyncSender<PairedWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<PairedWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
@@ -942,7 +942,7 @@ pub fn run_single_end_parallel(
 ) -> Result<TrimStats> {
     // A clumpy batch is a whole bin, so a shallower queue caps resident bins.
     let depths = clump::channel_depths(clump_layout.is_some());
-    let queue_depth = depths.work;
+    let queue_depth = 2; // VALIDATION 8 form (b): literal re-inlined, helper bypassed
     let mut work_txs: Vec<mpsc::SyncSender<SingleWork>> = Vec::with_capacity(cores);
     let mut work_rxs: Vec<mpsc::Receiver<SingleWork>> = Vec::with_capacity(cores);
     for _ in 0..cores {
