@@ -130,6 +130,36 @@ fn banner_reports_the_predicted_peak() -> Result<()> {
     Ok(())
 }
 
+// ── Banner reports the encoding written, not the configured level (#453) ────────
+
+#[test]
+fn dont_gzip_banner_does_not_name_a_compression_level() {
+    let dir = tempdir("se_banner_plain");
+    let input = fixture("BS-seq_10K_R1.fastq.gz");
+
+    let out = Command::new(binary())
+        .args([
+            "--clump_only",
+            "--dont_gzip",
+            "--cores",
+            "2",
+            "-o",
+            dir.to_str().unwrap(),
+        ])
+        .arg(&input)
+        .output()
+        .expect("failed to run trim_galore");
+    assert!(out.status.success(), "--clump_only --dont_gzip failed");
+
+    // The run writes plain text, so naming a gzip level would be false — and the
+    // report already prints equal in/out byte counts beside it.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("MiB budget, plain output)") && !stderr.contains("gzip level"),
+        "--dont_gzip must not advertise a compression level:\n{stderr}"
+    );
+}
+
 // ── Byte-identity: SE (gzip in / plain out via --dont_gzip) ────────
 
 #[test]

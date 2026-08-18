@@ -606,6 +606,20 @@ fn se_trim_clumpify() {
         "clumpify banner must pin both figures and their divisors:\n{}",
         out.stderr
     );
+
+    // This case's input is plain, so the output is plain: the banner must report the
+    // encoding it writes rather than the configured level, and the run must say the
+    // reordering buys nothing without a compressor.
+    assert!(
+        out.stderr.contains("MiB budget (plain output)") && !out.stderr.contains("gzip level"),
+        "a plain-output run must not advertise gzip:\n{}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("WARNING: the output is not compressed"),
+        "clumping with no compressor must say so:\n{}",
+        out.stderr
+    );
 }
 
 #[test]

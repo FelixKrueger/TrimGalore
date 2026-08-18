@@ -205,14 +205,28 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     }
     let layout = clump::resolve_layout(memory_bytes, &layout_inputs)?;
     // Naming the budget makes the ~9% margin visible arithmetic.
+    let gzipped = naming::output_is_gzipped(cli.dont_gzip, &cli.input[0]);
+    let encoding = if gzipped {
+        format!("gzip level {}", cli.compression)
+    } else {
+        "plain output".to_string()
+    };
     eprintln!(
-        "clumpify: {} bins × {} MiB; predicted peak ≈ {} of {} MiB budget (gzip level {})",
+        "clumpify: {} bins × {} MiB; predicted peak ≈ {} of {} MiB budget ({})",
         layout.n_bins,
         layout.bin_byte_budget / (1024 * 1024),
         layout.predicted_peak_bytes() / (1024 * 1024),
         memory_bytes / (1024 * 1024),
-        cli.compression,
+        encoding,
     );
+    // Clumping only pays off through a compressor, so say when there is none.
+    if !gzipped {
+        eprintln!(
+            "WARNING: the output is not compressed, so --clumpify's reordering gains \
+             nothing here — output encoding follows the input's. Supply gzipped input, \
+             or drop --clumpify to skip the memory reservation."
+        );
+    }
     Ok(Some(layout))
 }
 
@@ -421,7 +435,7 @@ fn main() -> Result<()> {
     // gzipped inputs in one invocation isn't a supported configuration.
     // See #245 for the parity rationale (Rust v2.1.0-beta.5 always gzipped
     // regardless of input, breaking pipelines that globbed `*.fq` no-gz).
-    let gzip = !cli.dont_gzip && naming::is_gzipped(&cli.input[0]);
+    let gzip = naming::output_is_gzipped(cli.dont_gzip, &cli.input[0]);
     let output_dir = cli.output_dir.as_deref();
 
     // Auto-create --output_dir if it doesn't exist. See io::ensure_output_dir

@@ -75,7 +75,7 @@ Composes with:
 - `--memory <SIZE>` (bin-buffer sizing, e.g. `4G`)
 - `--cores <N>` — v1 is single-threaded internally, so this does not affect speed, but it does set the bin count (`max(16, 4 × cores)`) and therefore the memory floor below. Values 1–4 all give 16 bins; the floor only starts moving at `--cores 5`.
 - `--fastqc` — runs on the reordered output; fastqc-rust reads both FASTQ and BAM natively
-- `--dont_gzip` — FASTQ output only, produces `*_clumped.fq` (plain). Rejected with `--output-format ubam` (BAM is always BGZF-compressed).
+- `--dont_gzip` — FASTQ output only, produces `*_clumped.fq` (plain). Rejected with `--output-format ubam` (BAM is always BGZF-compressed). Supported here although `--clumpify` refuses it: reordering is the whole job in this mode, and clumped plain output still compresses better under whatever tool is applied next.
 - `--basename BASE` — output becomes `BASE_clumped.fq(.gz)` (SE FASTQ), `BASE_clumped_{1,2}.fq(.gz)` (PE FASTQ), or `BASE_clumped.bam` (uBAM)
 - `--output-format ubam` — produces uBAM output. Composes with all of the above except `--dont_gzip`.
 - `--preserve-tags TAG1,TAG2,…` — uBAM only. Aux tags round-trip through the reorder. A/Z/i/f scalars supported; B (array) and H (hex) rejected at BAM-read time.
