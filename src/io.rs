@@ -35,6 +35,13 @@ pub fn is_gzipped(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("gz"))
 }
 
+/// Whether the run writes gzipped output: the first input's encoding, unless
+/// `--dont_gzip`. Every message describing the output must read this rather than
+/// the configured compression level, or it can claim gzip over plain text.
+pub fn output_is_gzipped(dont_gzip: bool, first_input: &Path) -> bool {
+    !dont_gzip && is_gzipped(first_input)
+}
+
 /// Case-folded (ASCII lowercase) view of a path; the folding half of `collision_key`.
 fn norm_path(p: &Path) -> String {
     p.to_string_lossy().to_ascii_lowercase()
@@ -1623,6 +1630,15 @@ mod tests {
         assert_eq!(out, PathBuf::from("/data/sample.fq.gz_clumping_report.txt"));
         // Confirm it's NOT the trimming-report shape.
         assert_ne!(out, report_name(input, None));
+    }
+
+    #[test]
+    fn output_is_gzipped_follows_the_input_unless_dont_gzip() {
+        // The banner and the writers must not be able to disagree.
+        assert!(output_is_gzipped(false, Path::new("s.fastq.gz")));
+        assert!(!output_is_gzipped(false, Path::new("s.fastq")));
+        assert!(!output_is_gzipped(true, Path::new("s.fastq.gz")));
+        assert!(!output_is_gzipped(true, Path::new("s.fastq")));
     }
 
     #[test]
