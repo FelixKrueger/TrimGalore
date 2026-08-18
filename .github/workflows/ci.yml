@@ -268,6 +268,174 @@ jobs:
   # run UI). No external uploader (Codecov/Coveralls) — keeping coverage
   # data local for now; integration with a third-party service is a
   # separate decision.
+  clumpify-memory:
+    name: Clumpify peak RSS (#439)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    # No `needs:` — this runs in parallel with the rest, not on anyone's critical
+    # path. Cold cargo cache plus four measured cells; `rust-tests` allows 45.
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Cache cargo (clumpify-memory job)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clumpmem-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-clumpmem-
+
+      - name: Build binary and fixture generator
+        run: cargo build --release --bin trim_galore --example mk_clump_fixture
+
+      - name: Assert the harness can measure at all
+        run: |
+          set -euo pipefail
+          # GNU time, not the bash builtin: the builtin has no -v. A missing
+          # binary must fail here rather than yield an empty parse later.
+          # Presence is not capability: the runner ships a /usr/bin/time whose
+          # -v is unrecognised, and `2>&1 | grep -q` hid the usage message inside
+          # the pipe, so the probe failed silently in 42 ms. Capture to a file,
+          # then decide.
+          probe () { /usr/bin/time -v true 2>"${RUNNER_TEMP}/time_probe.txt" || true; }
+          has_rss () { grep -c 'Maximum resident set size' "${RUNNER_TEMP}/time_probe.txt" >/dev/null; }
+          probe
+          if ! has_rss; then
+            echo "installing GNU time; the preinstalled /usr/bin/time reported:"
+            sed -n '1,5p' "${RUNNER_TEMP}/time_probe.txt" || true
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq time
+            probe
+          fi
+          has_rss || { echo "::error::no /usr/bin/time that reports peak RSS"; \
+                       sed -n '1,10p' "${RUNNER_TEMP}/time_probe.txt"; exit 1; }
+          echo "peak-RSS probe OK: $(grep 'Maximum resident set size' "${RUNNER_TEMP}/time_probe.txt")"
+          # Disk is not independent of memory: a stalled writer backs up the
+          # result channel and the pending map, so an out-of-space run reports
+          # inflated peak RSS and looks like a model breach.
+          free_kb=$(df -Pk "${RUNNER_TEMP}" | awk 'NR==2 {print $4}')
+          echo "free in RUNNER_TEMP: $((free_kb / 1024)) MiB"
+          test "$free_kb" -ge 8388608 \
+            || { echo "::error::need >= 8 GiB free to measure memory honestly"; exit 1; }
+
+      - name: Generate fixtures
+        run: |
+          set -euo pipefail
+          gen=./target/release/examples/mk_clump_fixture
+          # Full size at both read lengths. 10M pairs is where the bin pool
+          # reaches steady state; below ~6M every ratio is depressed and the
+          # job cannot see a regression. The 25 bp cell must not be halved for
+          # the same reason.
+          "$gen" 10000000 51 "${RUNNER_TEMP}/f51"
+          "$gen" 10000000 25 "${RUNNER_TEMP}/f25"
+          # Multi-pair needs distinct paths to the same bytes: passing the same
+          # pair twice is refused as a duplicate, which would kill the job.
+          ln -s "${RUNNER_TEMP}/f51_R1.fastq.gz" "${RUNNER_TEMP}/dup_R1.fastq.gz"
+          ln -s "${RUNNER_TEMP}/f51_R2.fastq.gz" "${RUNNER_TEMP}/dup_R2.fastq.gz"
+          ls -la "${RUNNER_TEMP}"/*.fastq.gz
+
+      - name: Measure and gate
+        run: |
+          set -euo pipefail
+          base=.github/clumpify-memory-baseline.tsv
+          bootstrap=0
+          if grep -q '^# BOOTSTRAP' "$base"; then
+            bootstrap=1
+            echo "::warning::baseline is in BOOTSTRAP mode - drift band not enforced. \
+          Record the ratios below in $base and delete the BOOTSTRAP line."
+          fi
+          fail=0
+
+          # $1 label  $2 gating(1|0)  $3.. trim_galore args
+          measure () {
+            local label="$1" gating="$2"; shift 2
+            local log="${RUNNER_TEMP}/${label}.log"
+            local out="${RUNNER_TEMP}/out_${label}"
+            mkdir -p "$out"
+            # Capture first, check status, parse second. Piping into grep would
+            # replace the child's exit status with the filter's, and grep
+            # succeeding on a failed run's banner is exactly the trap: a
+            # parseable log from a failed run looks like data.
+            local rc=0
+            /usr/bin/time -v ./target/release/trim_galore "$@" -o "$out" \
+              >"${log}.stdout" 2>"$log" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::$label exited $rc"; tail -20 "$log"; fail=1; return
+            fi
+            grep -q '^clumpify:' "$log" \
+              || { echo "::error::$label: clumpify never engaged, so this cell proves nothing"; fail=1; return; }
+            ls "$out"/*.fq.gz >/dev/null 2>&1 \
+              || { echo "::error::$label: output is not gzipped"; fail=1; return; }
+
+            local peak_kb pred_mib budget_mib
+            peak_kb=$(sed -n 's/.*Maximum resident set size (kbytes): \([0-9][0-9]*\).*/\1/p' "$log" | head -1)
+            # head -1: the multi-pair cell prints one banner per pair, and the
+            # promise is per-process, so the first prediction is the one to use.
+            pred_mib=$(sed -n 's/.*predicted peak ≈ \([0-9][0-9]*\) of \([0-9][0-9]*\) MiB budget.*/\1/p' "$log" | head -1)
+            budget_mib=$(sed -n 's/.*predicted peak ≈ \([0-9][0-9]*\) of \([0-9][0-9]*\) MiB budget.*/\2/p' "$log" | head -1)
+            case "${peak_kb}:${pred_mib}:${budget_mib}" in
+              ''|*::*|:*) echo "::error::$label: parse produced an empty field (peak=$peak_kb pred=$pred_mib budget=$budget_mib)"; fail=1; return;;
+            esac
+
+            # Compare in KiB on both sides: a second truncation to MiB is where
+            # a unit slip has already cost this project a calibration run.
+            local pred_kb budget_kb ratio
+            pred_kb=$((pred_mib * 1024)); budget_kb=$((budget_mib * 1024))
+            ratio=$(awk -v p="$peak_kb" -v q="$pred_kb" 'BEGIN{printf "%.3f", p/q}')
+            printf '%-14s peak %5d MiB  pred %5d MiB  budget %5d MiB  peak/pred %s  peak/budget %s\n' \
+              "$label" "$((peak_kb / 1024))" "$pred_mib" "$budget_mib" "$ratio" \
+              "$(awk -v p="$peak_kb" -v q="$budget_kb" 'BEGIN{printf "%.3f", p/q}')"
+
+            # The binary owns both sides of peak <= prediction, and prediction is
+            # identically budget x 10/11, so deleting the margin would inflate
+            # the prediction to the budget and pass. Pin the margin itself.
+            # 2 MiB of slack: the printed prediction is truncated to whole MiB,
+            # so exact equality has under 100 KiB of headroom. Removing the
+            # margin is a ~93 MiB move, which this still catches by ~45x.
+            local expect_kb
+            expect_kb=$((budget_kb * 10 / 11))
+            awk -v a="$pred_kb" -v b="$expect_kb" 'BEGIN{exit (a-b<-2048 || a-b>2048)}' \
+              || { echo "::error::$label: prediction $pred_kb KiB is not budget x 10/11 ($expect_kb KiB)"; fail=1; }
+
+            if [ "$gating" = 1 ]; then
+              test "$peak_kb" -le "$pred_kb" \
+                || { echo "::error::$label: peak exceeded the printed prediction"; fail=1; }
+            fi
+
+            local want
+            want=$(awk -v c="$label" '$1==c {print $2}' "$base" 2>/dev/null || true)
+            if [ -n "$want" ] && [ "$bootstrap" = 0 ]; then
+              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r > w + 0.05)}' \
+                && { echo "::error::$label: peak/pred $ratio is >0.05 above baseline $want"; fail=1; }
+              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r < w - 0.10)}' \
+                && { echo "::error::$label: peak/pred $ratio is >0.10 below baseline $want - fixture may have stopped filling the pool"; fail=1; }
+            fi
+            rm -f "$out"/*.fq.gz
+          }
+
+          F51R1="${RUNNER_TEMP}/f51_R1.fastq.gz"; F51R2="${RUNNER_TEMP}/f51_R2.fastq.gz"
+          F25R1="${RUNNER_TEMP}/f25_R1.fastq.gz"; F25R2="${RUNNER_TEMP}/f25_R2.fastq.gz"
+
+          measure 1G_c4        1 --clumpify --paired --cores 4 --memory 1G "$F51R1" "$F51R2"
+          measure 1G_c4_fastqc 1 --clumpify --paired --fastqc --cores 4 --memory 1G "$F51R1" "$F51R2"
+          # 25 bp is above the prediction today: the per-bin coefficient is
+          # fitted per byte, not per record (#457). Recorded, not gated on the
+          # promise, until that refit lands.
+          measure 25bp_1G_c4   0 --clumpify --paired --cores 4 --memory 1G "$F25R1" "$F25R2"
+          measure multipair_c4 0 --clumpify --paired --cores 4 --memory 1G \
+            "$F51R1" "$F51R2" "${RUNNER_TEMP}/dup_R1.fastq.gz" "${RUNNER_TEMP}/dup_R2.fastq.gz"
+          # --cores 2 is too tight to gate; both cells record their ratio only.
+          measure 1G_c2        0 --clumpify --paired --cores 2 --memory 1G "$F51R1" "$F51R2"
+          measure 25bp_1G_c2   0 --clumpify --paired --cores 2 --memory 1G "$F25R1" "$F25R2"
+
+          exit $fail
+
   coverage:
     name: Coverage (cargo-llvm-cov)
     if: github.event_name != 'schedule'

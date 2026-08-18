@@ -676,32 +676,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_layout_predicted_peak_fits_budget() {
-        // The whole point of the formula: predicted peak ≤ user-supplied --memory,
-        // with and without FastQC.
-        for (mem_gib, cores, fastqc) in [
-            (2u64, 4, false),
-            (4, 8, false),
-            (8, 8, true),
-            (16, 16, false),
-            (2, 2, true),
-        ] {
-            let budget = mem_gib * 1024 * 1024 * 1024;
-            let layout = resolve_layout(budget, &ins(cores, fastqc)).unwrap();
-            let predicted_peak = layout.predicted_peak_bytes();
-            assert!(
-                predicted_peak <= budget,
-                "predicted peak {} > budget {} for {} GiB / {} cores (fastqc {})",
-                predicted_peak,
-                budget,
-                mem_gib,
-                cores,
-                fastqc
-            );
-        }
-    }
-
-    #[test]
     fn floor_and_sizing_round_consistently_without_overflow() {
         // Not a coefficient guard — `predicted ≤ budget` holds for any σ, k or
         // static, because the sizing and the prediction read the same helpers.
