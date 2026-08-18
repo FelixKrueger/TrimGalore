@@ -53,7 +53,7 @@ Single-base expansion (`A{10}` to `AAAAAAAAAA`) is also supported for both `-a` 
 
 You can override auto-detection by passing a sequence directly via `-a`, or by using one of the named presets: `--illumina`, `--nextera`, `--small_rna`, `--stranded_illumina`, or `--bgiseq` (run `--help` for one-line descriptions). The first 13 bp of the standard Illumina adapter (`AGATCGGAAGAGC`) cover most TruSeq, Sanger iTag, and similar kits, and sit on both sides of paired-end inserts before the index sequence — for normal sequencing, `--illumina` or auto-detection is enough.
 
-`-a2` sets the Read 2 adapter and so needs a Read 2 to apply to. Where there is none, it is accepted, a warning naming the reason is printed to stderr, and it is ignored: under `--hardtrim5`, `--hardtrim3`, `--clock` and `--implicon`, none of which perform adapter trimming, and on any single-end run. In those four shapes the value is not parsed either, so a malformed sequence is discarded rather than reported — see [Cross-flag interactions](/guide/flags/#cross-flag-interactions).
+`-a2` sets the Read 2 adapter. Where it cannot apply, it is accepted, a warning naming the reason is printed to stderr, and it is ignored: under `--hardtrim5`, `--hardtrim3`, `--clock` and `--implicon`, none of which perform adapter trimming even though they do read a Read 2, and on any single-end run, where there is no Read 2. In those four shapes the value is not parsed either, so a malformed sequence is discarded rather than reported — see [Cross-flag interactions](/guide/flags/#cross-flag-interactions).
 
 ## Stringency: why the 1 bp default is correct
 
