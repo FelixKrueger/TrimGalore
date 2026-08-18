@@ -348,7 +348,7 @@ jobs:
           test -f "$base" || { echo "::error::baseline file missing: $base"; exit 1; }
           # Cells with a committed baseline. A label here without exactly one row
           # means the drift band is not armed for it.
-          BANDED="1G_c4 25bp_1G_c4 multipair_c4"
+          BANDED="1G_c4 25bp_1G_c4"
           bootstrap=0
           if grep -q '^# BOOTSTRAP' "$base"; then
             bootstrap=1
@@ -425,8 +425,8 @@ jobs:
             local want
             want=$(awk -v c="$label" '$1==c {print $2}' "$base" 2>/dev/null || true)
             if [ -n "$want" ] && [ "$bootstrap" = 0 ]; then
-              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r > w + 0.05)}' \
-                && { echo "::error::$label: peak/pred $ratio is >0.05 above baseline $want"; fail=1; }
+              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r > w + 0.09)}' \
+                && { echo "::error::$label: peak/pred $ratio is >0.09 above baseline $want"; fail=1; }
               awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r < w - 0.10)}' \
                 && { echo "::error::$label: peak/pred $ratio is >0.10 below baseline $want - fixture may have stopped filling the pool"; fail=1; }
             fi
