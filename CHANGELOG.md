@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **`--clump_only` now prints its predicted peak memory, like `--clumpify` does**
+  ([#456](https://github.com/FelixKrueger/TrimGalore/issues/456)). All four banners name the
+  peak and the `--memory` budget it was sized against.
+
 - **`--rename --output-format ubam` is now refused on the `--rrbs` directional paired path**
   ([#459](https://github.com/FelixKrueger/TrimGalore/issues/459)). That path auto-sets
   `--clip_R2 2`, so the annotation was being appended and then dropped without a word.
