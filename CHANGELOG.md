@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **`--rename --output-format ubam` is now refused on the `--rrbs` directional paired path**
+  ([#459](https://github.com/FelixKrueger/TrimGalore/issues/459)). That path auto-sets
+  `--clip_R2 2`, so the annotation was being appended and then dropped without a word.
+
 - **`--rename --output-format ubam` no longer refuses over a clip flag that applies to no read**
   ([#450](https://github.com/FelixKrueger/TrimGalore/issues/450)). A Read 2 clip flag on a single-end
   run is still warned about and ignored, but no longer blocks the run.

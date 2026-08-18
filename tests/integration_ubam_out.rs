@@ -1363,6 +1363,96 @@ fn rename_into_ubam_still_refused_where_a_clip_can_apply() {
     }
 }
 
+/// #459 — `--rrbs` auto-sets `--clip_R2 2` on the directional paired path, so a run
+/// with no clip flag on the command line still clips Read 2 and still appends. The
+/// three shapes where the auto-clip does not fire must stay accepted.
+#[test]
+fn rename_into_ubam_accounts_for_the_rrbs_auto_clip() {
+    struct Case {
+        tag: &'static str,
+        args: &'static [&'static str],
+        paired: bool,
+        refused: bool,
+    }
+    let cases = [
+        Case {
+            tag: "rrbs_directional_paired",
+            args: &["--rrbs"],
+            paired: true,
+            refused: true,
+        },
+        // --non_directional skips the auto-clip, so nothing is appended.
+        Case {
+            tag: "rrbs_non_directional_paired",
+            args: &["--rrbs", "--non_directional"],
+            paired: true,
+            refused: false,
+        },
+        // The auto-clip is paired-only.
+        Case {
+            tag: "rrbs_single_end",
+            args: &["--rrbs"],
+            paired: false,
+            refused: false,
+        },
+    ];
+    for case in cases {
+        let dir = fresh_tmpdir(&format!("tg_459_{}", case.tag));
+        let mut argv: Vec<&str> = case.args.to_vec();
+        argv.extend_from_slice(&["--rename", "--output-format", "ubam"]);
+        let inputs: Vec<String> = if case.paired {
+            write_one_record(
+                &dir.join("r1.fastq"),
+                "@withspace 1:N:0:ACGTAC",
+                "ACGTACGTACGTACGTACGTACGTACGT",
+            );
+            write_one_record(
+                &dir.join("r2.fastq"),
+                "@withspace 2:N:0:ACGTAC",
+                "TTACGTACGTACGTACGTACGTACGTA",
+            );
+            argv.extend_from_slice(&["--paired", "r1.fastq", "r2.fastq"]);
+            vec!["r1.fastq".to_string(), "r2.fastq".to_string()]
+        } else {
+            write_one_record(
+                &dir.join("sp.fastq"),
+                "@withspace 1:N:0:ACGTAC",
+                "ACGTACGTACGTACGTACGTACGTACGT",
+            );
+            argv.push("sp.fastq");
+            vec!["sp.fastq".to_string()]
+        };
+        let (ok, err) = run_in(&dir, &argv);
+        if case.refused {
+            assert!(!ok, "{} must exit non-zero", case.tag);
+            assert!(
+                err.contains("--rename is refused"),
+                "expected the #408 refusal for {}:\n{err}",
+                case.tag
+            );
+            // The refusal precedes every writer, so nothing may be written — and it
+            // must also precede the auto-clip's own log line.
+            assert_eq!(
+                dir_listing(&dir),
+                inputs,
+                "{} was refused, so it must have written nothing",
+                case.tag
+            );
+        } else {
+            assert!(
+                ok,
+                "{} has no Read 2 clip to append, so it must run:\n{err}",
+                case.tag
+            );
+            assert!(
+                !err.contains("--rename is refused"),
+                "{} must not be refused:\n{err}",
+                case.tag
+            );
+        }
+    }
+}
+
 /// #450 — every preset supplies a Read 1 clip value, so no preset becomes
 /// acceptable on a single-end run. All five, not one representative.
 #[test]
