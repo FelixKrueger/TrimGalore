@@ -447,6 +447,8 @@ jobs:
           # --cores 2 is too tight to gate; both cells record their ratio only.
           measure 1G_c2        0 --clumpify --paired --cores 2 --memory 1G "$F51R1" "$F51R2"
           measure 25bp_1G_c2   0 --clumpify --paired --cores 2 --memory 1G "$F25R1" "$F25R2"
+          # A 2 GiB pool needs ~2.3x this fixture to saturate, so it cannot near its peak.
+          measure 2G_c4        0 --clumpify --paired --cores 4 --memory 2G "$F51R1" "$F51R2"
 
           exit $fail
 
