@@ -49,7 +49,7 @@ Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34%
 
 ## Memory profile
 
-Peak resident set size on the 84M-read Buckberry fixture (Trim Galore v2.1.0-beta.7, measured via `/usr/bin/time -v`):
+Peak resident set size on the 84M-read paired-end Buckberry fixture (65 bp reads; Trim Galore v2.1.0-beta.7, measured via `/usr/bin/time -v`):
 
 | `--cores` | Peak RSS | Notes |
 |----------:|---------:|-------|
@@ -58,9 +58,11 @@ Peak resident set size on the 84M-read Buckberry fixture (Trim Galore v2.1.0-bet
 | 4 | 73.0 MB | |
 | 8 | 91.6 MB | |
 
-The c1 → c2 step is by far the largest (+55 MB) — that's the four infrastructure threads spinning up their I/O buffers. Past c2, each additional pair of workers adds ~7 MB on average; the bulk of which is the per-worker compression buffer. Memory growth is bounded and predictable, well-suited to cluster scheduling: on these 150 bp reads, even worst-case at the saturation point (`--cores 8`), the process stays under ~100 MB. That ceiling belongs to the read length rather than to the tool, as the long-read figures below show.
+The c1 → c2 step is by far the largest (+55 MB) — that's the four infrastructure threads spinning up their I/O buffers. Past c2, each additional pair of workers adds ~7 MB on average; the bulk of which is the per-worker compression buffer. Memory growth is bounded and predictable, well-suited to cluster scheduling: on these 65 bp reads, even worst-case at the saturation point (`--cores 8`), the process stays under ~100 MB. That ceiling belongs to the read length rather than to the tool, as the long-read figures below show.
 
-For context, mainstream multi-threaded FASTQ trimmers typically use a lot more RAM: Cutadapt 100–300 MB, fastp 100+ MB, BBDuk (JVM) 1–4 GB. On short reads Trim Galore v2 stays under 100 MB across all reasonable core counts — well below the noise floor of cluster scheduler memory allocation: at `--cores 8`, a 1M-read 50-bp fixture sits at ~28 MB and an 84M-read 150-bp fixture at ~92 MB.
+For context, mainstream multi-threaded FASTQ trimmers typically use a lot more RAM: Cutadapt 100–300 MB, fastp 100+ MB, BBDuk (JVM) 1–4 GB. On short reads Trim Galore v2 stays under 100 MB across all reasonable core counts — well below the noise floor of cluster scheduler memory allocation: at `--cores 8`, a 1M-read 50-bp fixture sits at ~28 MB and an 84M-read 65 bp fixture at ~92 MB.
+
+**The next release uses roughly twice this on the plain path.** Between v2.3.0 and current development, paired peak RSS on the fixture above moves from 60 to 98 MiB at `--cores 4`, and from 74 to 146 MiB at `--cores 8`. Most of that is `mimalloc` replacing the platform allocator, which buys ~30% wall-clock at `--cores 8` in exchange for retaining more pages. Budget from the larger figure.
 
 **Peak RSS scales with read length**, because the batch sizes are counts of records rather than of bytes, so a batch holds as many bytes as its reads happen to be. Measured in plain mode at `--cores 4` on 400 MB of input: ~75 MiB at 150 bp, ~245 MiB at 1 kb, ~800 MiB at 10 kb.
 

@@ -5,6 +5,14 @@
 
 #### Changes
 
+- **The threading docs name the memory fixture's read length**
+  ([nf-core/rnaseq#1903](https://github.com/nf-core/rnaseq/issues/1903)). The 84M-read Buckberry pair
+  is 65 bp, not the 150 bp the memory section claimed.
+
+- **The threading docs record the plain-path memory arriving in the next release**
+  ([#437](https://github.com/FelixKrueger/TrimGalore/issues/437)). Peak RSS moves from 74 to 146 MiB
+  at `--cores 8`, mostly `mimalloc` trading memory for ~30% wall-clock.
+
 - **`--gzip`'s deprecation notice no longer promises gzipped output for a plain-text input**
   ([#453](https://github.com/FelixKrueger/TrimGalore/issues/453)). Output compression follows
   the input, and the notice now says so on that path.
