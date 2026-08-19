@@ -5,6 +5,10 @@
 
 #### Changes
 
+- **The threading docs no longer imply plain-path memory is too small to budget for**
+  ([nf-core/rnaseq#1903](https://github.com/nf-core/rnaseq/issues/1903)). The figures are heap, and a
+  cgroup scheduler also charges page cache, so the page now says to allocate with headroom.
+
 - **The threading docs name the memory fixture's read length**
   ([nf-core/rnaseq#1903](https://github.com/nf-core/rnaseq/issues/1903)). The 84M-read Buckberry pair
   is 65 bp, not the 150 bp the memory section claimed.
