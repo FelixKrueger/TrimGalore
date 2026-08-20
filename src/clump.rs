@@ -187,7 +187,7 @@ pub struct ChannelDepths {
 pub fn channel_depths(clumpy: bool) -> ChannelDepths {
     if clumpy {
         ChannelDepths {
-            work: 1,
+            work: 2,
             result_per_core: 2,
         }
     } else {
