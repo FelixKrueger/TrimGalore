@@ -6,9 +6,17 @@
 # regression on Linux: a work-channel-depth revert was measured at +0.126 to
 # +0.151 of prediction and every cell it moved still sat under the printed peak.
 #
-# Fail if a cell peak/prediction rises more than 0.09 above its baseline, or
-# falls more than 0.10 below it. A silent fallback to plain mode or a fixture
+# Fail if a cell peak/prediction rises more than 0.065 above its baseline, or
+# falls more than 0.072 below it. A silent fallback to plain mode or a fixture
 # that stopped filling the bin pool is a multi-point drop.
+#
+# The width narrowed from 0.09 with the #457 refit, and had to: lever A is one
+# extra whole bin per worker, so its size in ratio-of-prediction units is
+# proportional to B, and B fell by 1.435. The delta falls with it, 0.126 -> 0.088
+# and 0.128 -> 0.089, which at width 0.09 leaves a *negative* margin — the band
+# would read as armed while sitting wider than the regression it exists to catch.
+# The noise side pays for the narrowing: the half-ranges scale down by the same
+# 1.435, so 0.065 is still 3.4x and 4.3x them.
 #
 # Band a cell only when the width satisfies both sides:
 #
@@ -20,28 +28,80 @@
 # dispersion LOW by construction — they cannot land far apart as often as they
 # can land close — so a threshold set from a handful of reps is set too tight.
 #
+# BOOTSTRAP - the centres below are POST-REFIT and measured, but n = 1 each, so
+# the band is not enforced yet.
+#
+# Measured on run 32341837369 (PR #474, commit 467865a), the first Linux run after
+# the #457 refit took sigma_16 23 -> 33 and k_16 64 -> 92. They replace pre-refit
+# centres of 0.788 and 0.914; the whole set moved by -0.15 to -0.28.
+#
+# Deleting the BOOTSTRAP line needs BOTH sides of the width rule above, and only
+# the centre half is in hand:
+#   1. half-ranges from a double-digit sample per cell. These centres are single
+#      observations, and the rule above is explicit that few draws estimate
+#      dispersion low; the current +0.065 width was derived by scaling the
+#      pre-refit half-ranges by 1/1.435, which is an inference, not a measurement.
+#   2. the post-refit lever-A delta, by reverting `channel_depths(true).work` to 2
+#      once and recording the rise. The 0.126-0.151 figures came from doing exactly
+#      that; B-proportionality gives the delta's direction, not its size.
+#
+# The failure mode changed when these centres did: while they were pre-refit,
+# deleting this line redded the band on the next run and said so. Centred on
+# reality it would now pass on n = 1 instead, so this comment is the only thing
+# standing between a premature deletion and a band nobody has validated.
+#
+# Arming on one observation against an inferred width is what this file's own
+# history warns about: +0.09 exists because a tighter band false-fired on an
+# unrelated PR. The promise gate (peak <= printed prediction) is enforcing on
+# 1G_c4, 1G_c4_fastqc, 25bp_1G_c4 and 25bp_1G_c2 meanwhile, so no cell is
+# unguarded while the band is off.
+#
+# For the record, the other five cells on the same run: 1G_c4_fastqc 0.541,
+# multipair_c4 0.608, 1G_c2 0.648, 25bp_1G_c2 0.748, 2G_c4 0.608.
+#
+# Lever A measured post-refit on run 32344279194 (work 1 -> 2, against the means
+# of two #474 runs). Read this before arming anything:
+#
+#   1G_c4        +0.088   ok at 0.065, margin +0.023 - and exactly what
+#                         B-proportionality predicted
+#   25bp_1G_c4   +0.052   BELOW the 0.065 width: this cell CANNOT detect lever A.
+#                         Do not band it. Its window between a 0.045 noise bar and
+#                         a 0.052 signal is ~0.007, narrower than its dispersion
+#                         will be on a real sample.
+#   25bp_1G_c2   +0.059   same problem
+#   1G_c2        +0.067   margin +0.002, too thin to rely on
+#   1G_c4_fastqc +0.116 | the strongest movers now, because lever A scales with B
+#   2G_c4        +0.117 | and theirs are larger. Best band candidates, but each
+#   multipair_c4 +0.134 | needs a double-digit post-refit sample first.
+#
+# Why the 25 bp cells move least is unexplained: B depends on budget and cores,
+# not read length, so 1G_c4 and 25bp_1G_c4 have identical bins, and sigma is
+# larger at 25 bp - the extra bin should cost more there, not less.
+#
 # cell<TAB>baseline_peak_over_prediction
-1G_c4	0.788
-25bp_1G_c4	0.914
+1G_c4	0.636
+25bp_1G_c4	0.683
 #
-# Re-tuned 2026-08-18 from 27 observations per cell (31 job logs, excluding the
-# two runs carrying Validation 8`s deliberate regression). Baselines are means,
-# half-up to 3 dp: 1G_c4 21.2840/27 = 0.78830; 25bp_1G_c4 24.6720/27 = 0.91378.
+# How the superseded pre-refit centres were derived, kept as the method to repeat
+# once a post-refit sample exists: re-tuned 2026-08-18 from 27 observations per
+# cell (31 job logs, excluding the two runs carrying Validation 8`s deliberate
+# regression), as means half-up to 3 dp — 1G_c4 21.2840/27 = 0.78830;
+# 25bp_1G_c4 24.6720/27 = 0.91378.
 #
-#   cell            n   mean    min     max     range   at +0.09
-#   1G_c4           27  0.7883  0.770   0.825   0.055   3.3x half-range; lever A fires by 0.036
-#   25bp_1G_c4      27  0.9138  0.898   0.941   0.043   4.2x half-range; lever A fires by 0.038
+#   cell            n   mean    min     max     range   at the current +0.065
+#   1G_c4           27  0.7883  0.770   0.825   0.055   pre-refit; at +0.065 post-refit: 3.4x half-range, lever A fires by 0.023
+#   25bp_1G_c4      27  0.9138  0.898   0.941   0.043   pre-refit; at +0.065 post-refit: 4.3x half-range, lever A fires by 0.024
 #
 # Measured but NOT banded, with the reason:
 #
-#   multipair_c4    27  0.7987  0.771   0.852   0.081   1.2x at +0.09; needs +0.121 for 3x
+#   multipair_c4    27  0.7987  0.771   0.852   0.081   pre-refit; post-refit half-range 0.028, so 1.1x at +0.065
 #     Widest range of the six. Its 0.852 maximum was observed while the other
 #     cells moved +0.012 and -0.019 — spread, not drift. Covering it at 3x would
 #     need a width close to the regression the band exists to catch, so it is
 #     recorded instead. A depth revert moves every cell, so either banded cell
 #     catches it.
 #
-#   1G_c4_fastqc    27  0.7069  0.688   0.768   0.080   1.2x at +0.09
+#   1G_c4_fastqc    27  0.7069  0.688   0.768   0.080   pre-refit; post-refit half-range 0.028, so 1.2x at +0.065
 #     Also too wide. Stays gated on the printed prediction, at 0.768 of 1.000.
 #     FastQC cost scales with --cores and the allocator holds the pool pages
 #     across the trim->FastQC boundary, so this cell is timing-sensitive in a way
@@ -56,19 +116,21 @@
 #     little. Note it reads *higher* than 1G_c4, not lower — absolute peak more
 #     than doubles with the pool (1589 vs 731 MiB), so non-saturation caps how far
 #     it can rise without depressing it below the smaller-budget cells.
-#     Lever A moves it ~+0.09 to +0.13, since B is 42.0 MiB here against 18.1 at
+#     Lever A moves it ~+0.06 to +0.09 post-refit (+0.09 to +0.13 before), since B is larger here than at
 #     1G/c4, so it is a usable drift cell once it has a double-digit sample.
 #     See #458.
 #
-#   1G_c2           25  0.8789  0.860   0.894   0.034   2.9x at +0.09 — just under the bar
-#   25bp_1G_c2      25  1.0301  1.007   1.050   0.043   4.2x at +0.09 — eligible next pass
-#     25bp_1G_c2 is #457: over the printed prediction, inside the budget, on
-#     Linux. Its value will move when sigma is refitted, needing a re-baseline,
-#     which is why it is not banded while that work is pending.
+#   1G_c2           25  0.8789  0.860   0.894   0.034   pre-refit; post-refit half-range 0.012, so ~5.5x at +0.065 — now clears the noise bar
+#   25bp_1G_c2      25  1.0301  1.007   1.050   0.043   pre-refit; post-refit half-range 0.015, so ~4.3x at +0.065
+#     25bp_1G_c2 was #457: over the printed prediction, inside the budget, on
+#     Linux. The refit lands the promise gate on it, so it is now gated at
+#     `peak <= prediction`; the drift band still needs a post-refit double-digit
+#     sample before it can be banded.
 #
 # Diagnosing a red: if one cell rises alone, it is spread — re-run once, and if it
-# clears, leave the band alone. A depth revert moves every cell together by 12
-# points or more (measured), which is the signature to act on.
+# clears, leave the band alone. A depth revert moves every cell together — by 12
+# points or more before the #457 refit, and ~8.4 after it, since the delta scales
+# with B — which is the signature to act on.
 #
 # When src/ moves, judge whether the change can reach the clump path before
 # pooling new observations with these; the proxy

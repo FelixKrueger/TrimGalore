@@ -170,6 +170,43 @@ fn planned_hardtrim_outputs(
         .collect()
 }
 
+/// Shortest read length the sizing coefficients were calibrated at, as bytes
+/// per record: 25 bp with a 41-byte header. Below it the reservation is an
+/// extrapolation rather than a bound.
+/// Shortest read length the sizing coefficients were calibrated at. Header bytes
+/// raise the per-record size and so make a run safer, which is why the floor is
+/// a read length rather than a record size.
+const CLUMPIFY_CALIBRATED_FLOOR_BP: usize = 25;
+
+/// First record's read length, or `None` if the input cannot be peeked.
+/// Advisory only — the per-input sanity check reports real I/O errors later.
+fn peek_read_length(path: &std::path::Path) -> Option<usize> {
+    // Tags cannot change a read length, so none need preserving here.
+    let mut src = open_sync_reader(path, &[]).ok()?;
+    Some(src.next_record().ok()??.seq.len())
+}
+
+/// Warn when any input's reads are shorter than the calibrated floor. Checks
+/// every input, so a multi-pair run cannot hide a short pair behind a long first
+/// one. Emitted after the layout banner, so "the printed prediction" it mentions
+/// has already been printed.
+fn warn_below_clumpify_floor(cli: &Cli) {
+    let Some(shortest) = cli.input.iter().filter_map(|p| peek_read_length(p)).min() else {
+        return;
+    };
+    if shortest >= CLUMPIFY_CALIBRATED_FLOOR_BP {
+        return;
+    }
+    eprintln!(
+        "WARNING: the shortest input read is {shortest} bp, below the \
+         {CLUMPIFY_CALIBRATED_FLOOR_BP} bp the --memory reservation was calibrated at,"
+    );
+    eprintln!(
+        "         so peak memory may exceed the predicted peak for this run. Raise \
+         --memory if the run is near its limit."
+    );
+}
+
 /// Resolve `--memory` into a `(n_bins, bin_byte_budget)` layout when
 /// `--clumpify` is set, and emit a one-line startup notice with the
 /// resolved values. Returns `None` if clumpify is off — or if the budget
@@ -219,6 +256,7 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
         memory_bytes / (1024 * 1024),
         encoding,
     );
+    warn_below_clumpify_floor(cli);
     // Clumping only pays off through a compressor, so say when there is none.
     if !gzipped {
         eprintln!(
@@ -601,6 +639,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if cli.clump_only {
+        warn_below_clumpify_floor(&cli);
         // --clump_only: lossless reorder-only specialty mode. Feature #353.
         // v1: FASTQ in/out. v2: uBAM in/out via --output-format ubam.
         let memory_bytes =

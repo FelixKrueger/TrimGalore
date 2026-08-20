@@ -5,6 +5,17 @@
 
 #### Changes
 
+- **`--clumpify` keeps peak memory inside the budget it prints on short reads too**
+  ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)). Part of the per-record cost is the
+  allocator's, so the bin-pool coefficients now bound it at 25 bp rather than modelling it: bins are
+  ~30% smaller at every budget, and `.fq.gz` output differs from earlier releases on identical input
+  (same records, different gzip member boundaries — the third such change this cycle, after
+  [#442](https://github.com/FelixKrueger/TrimGalore/issues/442) and
+  [#446](https://github.com/FelixKrueger/TrimGalore/issues/446)). The minimum budget rises with it, so
+  `--fastqc` above `--cores 23` now falls back to plain trimming at the default `--memory 1G`; see
+  [the memory section](https://trimgalore.com/performance/clumpy/#memory) for the new floors and the
+  `--memory` values that restore the old bin size.
+
 - **The threading docs no longer imply plain-path memory is too small to budget for**
   ([nf-core/rnaseq#1903](https://github.com/nf-core/rnaseq/issues/1903)). The figures are heap, and a
   cgroup scheduler also charges page cache, so the page now says to allocate with headroom.
@@ -73,10 +84,8 @@
   `--fastqc` runs now get smaller bins, and `.fq.gz` output differs from earlier releases on
   identical input (same records, different gzip member boundaries). The startup banner now
   names the budget alongside the prediction (`predicted peak ≈ 930 of 1024 MiB budget`) so the
-  ~9% headroom is visible. Very short reads are not yet covered: the per-bin coefficient is
-  fitted per byte rather than per record, so a 25 bp library packs more records into the same
-  bin bytes and can exceed the budget at `--cores 2`
-  ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)).
+  ~9% headroom is visible. Short reads are covered by
+  [#457](https://github.com/FelixKrueger/TrimGalore/issues/457) below.
 
 - **An output file is now published only if every byte it owes was written, including the
   gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the

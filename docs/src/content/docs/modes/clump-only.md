@@ -82,7 +82,7 @@ Composes with:
 
 ## Memory
 
-`--memory` sizes the per-bin sort buffers, using the same formula as [`--clumpify`](/performance/clumpy/#memory) with `workers = 1`, since this mode is single-threaded. At `--cores 1`–`4` the floor is 277 MiB, rising to 454 MiB at `--cores 32`; requesting `--fastqc` adds 24 MiB per thread, capped at 16 threads.
+`--memory` sizes the per-bin sort buffers, using the same formula as [`--clumpify`](/performance/clumpy/#memory) with `workers = 1`, since this mode is single-threaded. At `--cores 1`–`4` the floor is 290 MiB, rising to 544 MiB at `--cores 32`; requesting `--fastqc` adds 24 MiB per thread, capped at 16 threads.
 
 **Below the floor, `--clump_only` fails rather than degrading.** This differs from `--clumpify`, which warns and falls back to plain trimming. The reason is that reordering is the entire job here: falling back would spend the full read-and-write cost to produce a file identical to the input, and exit successfully, so a pipeline checking only the exit code could not tell that the archival recompression it asked for had not happened.
 
@@ -91,8 +91,8 @@ The error names the budget to retry with:
 ```
 Error: --memory budget too small for --cores 16: after reserving 608 MiB for static
 overhead (allocator, gzip state, IO buffers, FastQC) and 9% margin, the derived bin
-budget is 309806 bytes — below the 1048576-byte per-bin floor. Increase --memory
-(try ≥ 775 MiB) or decrease --cores.
+budget is 215908 bytes — below the 1048576-byte per-bin floor. Increase --memory
+(try ≥ 821 MiB) or decrease --cores.
 ```
 
 Lowering `--cores` is the cheap fix here — it costs no speed, only coarser read grouping. At `--cores 1`–`4` there is nothing left to lower, so raising `--memory` is the only remedy.

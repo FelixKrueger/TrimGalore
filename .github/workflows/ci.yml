@@ -425,10 +425,10 @@ jobs:
             local want
             want=$(awk -v c="$label" '$1==c {print $2}' "$base" 2>/dev/null || true)
             if [ -n "$want" ] && [ "$bootstrap" = 0 ]; then
-              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r > w + 0.09)}' \
-                && { echo "::error::$label: peak/pred $ratio is >0.09 above baseline $want"; fail=1; }
-              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r < w - 0.10)}' \
-                && { echo "::error::$label: peak/pred $ratio is >0.10 below baseline $want - fixture may have stopped filling the pool"; fail=1; }
+              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r > w + 0.065)}' \
+                && { echo "::error::$label: peak/pred $ratio is >0.065 above baseline $want"; fail=1; }
+              awk -v r="$ratio" -v w="$want" 'BEGIN{exit !(r < w - 0.072)}' \
+                && { echo "::error::$label: peak/pred $ratio is >0.072 below baseline $want - fixture may have stopped filling the pool"; fail=1; }
             fi
             rm -f "$out"/*.fq.gz
           }
@@ -438,15 +438,13 @@ jobs:
 
           measure 1G_c4        1 --clumpify --paired --cores 4 --memory 1G "$F51R1" "$F51R2"
           measure 1G_c4_fastqc 1 --clumpify --paired --fastqc --cores 4 --memory 1G "$F51R1" "$F51R2"
-          # 25 bp is above the prediction today: the per-bin coefficient is
-          # fitted per byte, not per record (#457). Recorded, not gated on the
-          # promise, until that refit lands.
-          measure 25bp_1G_c4   0 --clumpify --paired --cores 4 --memory 1G "$F25R1" "$F25R2"
+          measure 25bp_1G_c4   1 --clumpify --paired --cores 4 --memory 1G "$F25R1" "$F25R2"
           measure multipair_c4 0 --clumpify --paired --cores 4 --memory 1G \
             "$F51R1" "$F51R2" "${RUNNER_TEMP}/dup_R1.fastq.gz" "${RUNNER_TEMP}/dup_R2.fastq.gz"
-          # --cores 2 is too tight to gate; both cells record their ratio only.
+          # 1G_c2 stays recorded-only: its 0.034 range is the tightest of the six, so
+          # banding it adds no detection the two banded cells do not already give.
           measure 1G_c2        0 --clumpify --paired --cores 2 --memory 1G "$F51R1" "$F51R2"
-          measure 25bp_1G_c2   0 --clumpify --paired --cores 2 --memory 1G "$F25R1" "$F25R2"
+          measure 25bp_1G_c2   1 --clumpify --paired --cores 2 --memory 1G "$F25R1" "$F25R2"
           # A 2 GiB pool needs ~2.3x this fixture to saturate, so it cannot near its peak.
           measure 2G_c4        0 --clumpify --paired --cores 4 --memory 2G "$F51R1" "$F51R2"
 
