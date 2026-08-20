@@ -28,26 +28,46 @@
 # dispersion LOW by construction — they cannot land far apart as often as they
 # can land close — so a threshold set from a handful of reps is set too tight.
 #
-# BOOTSTRAP - the two rows below are PRE-REFIT (#457) and must not be trusted.
-# The refit changed sigma_16 23 -> 33 and k_16 64 -> 92, so every centre moves by
-# roughly -0.17 to -0.21. Record the ratios from this PR's own Linux run, replace
-# both rows, and delete this line. Predicted, for a sanity check only, NOT to be
-# committed as a baseline: 1G_c4 ~0.62, 25bp_1G_c4 ~0.71.
+# BOOTSTRAP - the centres below are POST-REFIT and measured, but n = 1 each, so
+# the band is not enforced yet.
 #
-# Deleting the BOOTSTRAP line needs BOTH sides of the width rule above, which is
-# two measurements and not one:
-#   1. new centres and half-ranges, from a double-digit sample per cell; and
+# Measured on run 32341837369 (PR #474, commit 467865a), the first Linux run after
+# the #457 refit took sigma_16 23 -> 33 and k_16 64 -> 92. They replace pre-refit
+# centres of 0.788 and 0.914; the whole set moved by -0.15 to -0.28.
+#
+# Deleting the BOOTSTRAP line needs BOTH sides of the width rule above, and only
+# the centre half is in hand:
+#   1. half-ranges from a double-digit sample per cell. These centres are single
+#      observations, and the rule above is explicit that few draws estimate
+#      dispersion low; the current +0.065 width was derived by scaling the
+#      pre-refit half-ranges by 1/1.435, which is an inference, not a measurement.
 #   2. the post-refit lever-A delta, by reverting `channel_depths(true).work` to 2
 #      once and recording the rise. The 0.126-0.151 figures came from doing exactly
 #      that; B-proportionality gives the delta's direction, not its size.
 #
-# cell<TAB>baseline_peak_over_prediction
-1G_c4	0.788
-25bp_1G_c4	0.914
+# The failure mode changed when these centres did: while they were pre-refit,
+# deleting this line redded the band on the next run and said so. Centred on
+# reality it would now pass on n = 1 instead, so this comment is the only thing
+# standing between a premature deletion and a band nobody has validated.
 #
-# Re-tuned 2026-08-18 from 27 observations per cell (31 job logs, excluding the
-# two runs carrying Validation 8`s deliberate regression). Baselines are means,
-# half-up to 3 dp: 1G_c4 21.2840/27 = 0.78830; 25bp_1G_c4 24.6720/27 = 0.91378.
+# Arming on one observation against an inferred width is what this file's own
+# history warns about: +0.09 exists because a tighter band false-fired on an
+# unrelated PR. The promise gate (peak <= printed prediction) is enforcing on
+# 1G_c4, 1G_c4_fastqc, 25bp_1G_c4 and 25bp_1G_c2 meanwhile, so no cell is
+# unguarded while the band is off.
+#
+# For the record, the other five cells on the same run: 1G_c4_fastqc 0.541,
+# multipair_c4 0.608, 1G_c2 0.648, 25bp_1G_c2 0.748, 2G_c4 0.608.
+#
+# cell<TAB>baseline_peak_over_prediction
+1G_c4	0.636
+25bp_1G_c4	0.683
+#
+# How the superseded pre-refit centres were derived, kept as the method to repeat
+# once a post-refit sample exists: re-tuned 2026-08-18 from 27 observations per
+# cell (31 job logs, excluding the two runs carrying Validation 8`s deliberate
+# regression), as means half-up to 3 dp — 1G_c4 21.2840/27 = 0.78830;
+# 25bp_1G_c4 24.6720/27 = 0.91378.
 #
 #   cell            n   mean    min     max     range   at the current +0.065
 #   1G_c4           27  0.7883  0.770   0.825   0.055   pre-refit; at +0.065 post-refit: 3.4x half-range, lever A fires by 0.023
