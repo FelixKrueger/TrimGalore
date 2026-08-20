@@ -59,6 +59,25 @@
 # For the record, the other five cells on the same run: 1G_c4_fastqc 0.541,
 # multipair_c4 0.608, 1G_c2 0.648, 25bp_1G_c2 0.748, 2G_c4 0.608.
 #
+# Lever A measured post-refit on run 32344279194 (work 1 -> 2, against the means
+# of two #474 runs). Read this before arming anything:
+#
+#   1G_c4        +0.088   ok at 0.065, margin +0.023 - and exactly what
+#                         B-proportionality predicted
+#   25bp_1G_c4   +0.052   BELOW the 0.065 width: this cell CANNOT detect lever A.
+#                         Do not band it. Its window between a 0.045 noise bar and
+#                         a 0.052 signal is ~0.007, narrower than its dispersion
+#                         will be on a real sample.
+#   25bp_1G_c2   +0.059   same problem
+#   1G_c2        +0.067   margin +0.002, too thin to rely on
+#   1G_c4_fastqc +0.116 | the strongest movers now, because lever A scales with B
+#   2G_c4        +0.117 | and theirs are larger. Best band candidates, but each
+#   multipair_c4 +0.134 | needs a double-digit post-refit sample first.
+#
+# Why the 25 bp cells move least is unexplained: B depends on budget and cores,
+# not read length, so 1G_c4 and 25bp_1G_c4 have identical bins, and sigma is
+# larger at 25 bp - the extra bin should cost more there, not less.
+#
 # cell<TAB>baseline_peak_over_prediction
 1G_c4	0.636
 25bp_1G_c4	0.683
