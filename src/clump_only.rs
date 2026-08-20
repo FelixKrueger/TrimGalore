@@ -91,6 +91,8 @@ struct SingleBin {
     keys: Vec<MinimizerKey>,
     raw_bytes: usize,
     budget: usize,
+    /// Mean bytes per reserved slot over the last flushed cycle; 0 initially.
+    prev_mean_bytes: usize,
 }
 
 impl SingleBin {
@@ -104,7 +106,15 @@ impl SingleBin {
     fn push(&mut self, r: FastqRecord, key: MinimizerKey) {
         let bytes_this = estimated_record_bytes(&r);
         if self.keys.capacity() == 0 {
-            let predicted = self.budget.div_ceil(bytes_this.max(1)).max(1);
+            // See `parallel::PairedBin::push`: one short record after a flush
+            // would over-reserve the whole cycle.
+            let est = if self.prev_mean_bytes > 0 {
+                self.prev_mean_bytes
+            } else {
+                bytes_this
+            };
+            let predicted = self.budget.div_ceil(est.max(1)).max(1);
+            let predicted = predicted + predicted / 16 + 1;
             self.records.reserve_exact(predicted);
             self.keys.reserve_exact(predicted);
         }
@@ -118,6 +128,9 @@ impl SingleBin {
     }
 
     fn take(&mut self) -> (Vec<FastqRecord>, Vec<MinimizerKey>) {
+        if !self.keys.is_empty() {
+            self.prev_mean_bytes = self.raw_bytes / self.keys.len();
+        }
         let records = std::mem::take(&mut self.records);
         let keys = std::mem::take(&mut self.keys);
         self.raw_bytes = 0;
@@ -134,6 +147,8 @@ struct PairedBin {
     keys: Vec<MinimizerKey>,
     raw_bytes: usize,
     budget: usize,
+    /// Mean bytes per reserved slot over the last flushed cycle; 0 initially.
+    prev_mean_bytes: usize,
 }
 
 impl PairedBin {
@@ -147,7 +162,13 @@ impl PairedBin {
     fn push(&mut self, r1: FastqRecord, r2: FastqRecord, key: MinimizerKey) {
         let bytes_this = estimated_record_bytes(&r1) + estimated_record_bytes(&r2);
         if self.keys.capacity() == 0 {
-            let predicted = self.budget.div_ceil(bytes_this.max(1)).max(1);
+            let est = if self.prev_mean_bytes > 0 {
+                self.prev_mean_bytes
+            } else {
+                bytes_this
+            };
+            let predicted = self.budget.div_ceil(est.max(1)).max(1);
+            let predicted = predicted + predicted / 16 + 1;
             self.r1.reserve_exact(predicted);
             self.r2.reserve_exact(predicted);
             self.keys.reserve_exact(predicted);
@@ -163,6 +184,9 @@ impl PairedBin {
     }
 
     fn take(&mut self) -> (Vec<FastqRecord>, Vec<FastqRecord>, Vec<MinimizerKey>) {
+        if !self.keys.is_empty() {
+            self.prev_mean_bytes = self.raw_bytes / self.keys.len();
+        }
         let r1 = std::mem::take(&mut self.r1);
         let r2 = std::mem::take(&mut self.r2);
         let keys = std::mem::take(&mut self.keys);
@@ -1159,6 +1183,44 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::path::PathBuf;
+
+    fn sized_rec(seq_len: usize) -> FastqRecord {
+        FastqRecord {
+            id: "@r".to_string(),
+            seq: "A".repeat(seq_len),
+            qual: "I".repeat(seq_len),
+        }
+    }
+
+    /// These bins duplicate `parallel.rs`'s reservation rule, so they need the
+    /// same guard: a short record after a flush must not size the whole cycle.
+    #[test]
+    fn single_bin_reservation_follows_the_previous_cycle() {
+        let budget = 10_000;
+        let mut bin = SingleBin::with_budget(budget);
+        for i in 0..48 {
+            bin.push(sized_rec(100), i);
+        }
+        let mean = bin.raw_bytes / bin.keys.len();
+        bin.take();
+        bin.push(sized_rec(10), 0);
+        assert!(bin.keys.capacity() < budget.div_ceil(27));
+        assert!(bin.keys.capacity() >= budget.div_ceil(mean));
+    }
+
+    #[test]
+    fn paired_bin_reservation_follows_the_previous_cycle() {
+        let budget = 10_000;
+        let mut bin = PairedBin::with_budget(budget);
+        for i in 0..24 {
+            bin.push(sized_rec(100), sized_rec(100), i);
+        }
+        let mean = bin.raw_bytes / bin.keys.len();
+        bin.take();
+        bin.push(sized_rec(10), sized_rec(10), 0);
+        assert!(bin.keys.capacity() < budget.div_ceil(54));
+        assert!(bin.keys.capacity() >= budget.div_ceil(mean));
+    }
 
     /// Build a synthetic FASTQ file at `path` (gzip if extension ends `.gz`)
     /// from the given records.

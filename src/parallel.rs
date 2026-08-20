@@ -881,6 +881,8 @@ struct PairedBin {
     keys: Vec<MinimizerKey>,
     raw_bytes: usize,
     budget: usize,
+    /// Mean bytes per reserved slot over the last flushed cycle; 0 initially.
+    prev_mean_bytes: usize,
 }
 
 impl PairedBin {
@@ -894,15 +896,25 @@ impl PairedBin {
     /// Push one R1/R2 pair into the bin.
     ///
     /// On the first push since the bin was last flushed (`take`d), we extrapolate
-    /// expected record count from this record's text size and the bin's budget,
-    /// then `reserve_exact` to avoid the doubling cascade. With 32 bins all growing
+    /// expected pair count from the previous cycle's mean pair size and the bin's
+    /// budget, then `reserve_exact` to avoid the doubling cascade. With 32 bins all growing
     /// at once on a memory-tight host, the transient old+new spine overlap during
     /// `Vec` doublings was inflating peak memory by ~40% (measured: 8 GiB
     /// configured budget → 11.5 GiB peak footprint on 16 GiB Mac).
     fn push(&mut self, r1: FastqRecord, r2: FastqRecord, key: MinimizerKey) {
         let bytes_this = estimated_record_bytes(&r1) + estimated_record_bytes(&r2);
         if self.keys.capacity() == 0 {
-            let predicted = self.budget.div_ceil(bytes_this).max(1);
+            // Sizing from one record over-reserves the whole cycle when that
+            // record is short, so prefer the previous cycle's mean.
+            let est = if self.prev_mean_bytes > 0 {
+                self.prev_mean_bytes
+            } else {
+                bytes_this
+            };
+            let predicted = self.budget.div_ceil(est.max(1)).max(1);
+            // A cycle whose records drift smaller overflows an exact
+            // reservation, and `Vec` then doubles; 6% headroom is the cheaper side.
+            let predicted = predicted + predicted / 16 + 1;
             self.r1.reserve_exact(predicted);
             self.r2.reserve_exact(predicted);
             self.keys.reserve_exact(predicted);
@@ -918,6 +930,9 @@ impl PairedBin {
     }
 
     fn take(&mut self) -> (Vec<FastqRecord>, Vec<FastqRecord>, Vec<MinimizerKey>) {
+        if !self.keys.is_empty() {
+            self.prev_mean_bytes = self.raw_bytes / self.keys.len();
+        }
         let r1 = std::mem::take(&mut self.r1);
         let r2 = std::mem::take(&mut self.r2);
         let keys = std::mem::take(&mut self.keys);
@@ -1271,6 +1286,8 @@ struct SingleBin {
     keys: Vec<MinimizerKey>,
     raw_bytes: usize,
     budget: usize,
+    /// Mean bytes per reserved slot over the last flushed cycle; 0 initially.
+    prev_mean_bytes: usize,
 }
 
 impl SingleBin {
@@ -1286,7 +1303,13 @@ impl SingleBin {
     fn push(&mut self, record: FastqRecord, key: MinimizerKey) {
         let bytes_this = estimated_record_bytes(&record);
         if self.keys.capacity() == 0 {
-            let predicted = self.budget.div_ceil(bytes_this).max(1);
+            let est = if self.prev_mean_bytes > 0 {
+                self.prev_mean_bytes
+            } else {
+                bytes_this
+            };
+            let predicted = self.budget.div_ceil(est.max(1)).max(1);
+            let predicted = predicted + predicted / 16 + 1;
             self.records.reserve_exact(predicted);
             self.keys.reserve_exact(predicted);
         }
@@ -1300,6 +1323,9 @@ impl SingleBin {
     }
 
     fn take(&mut self) -> (Vec<FastqRecord>, Vec<MinimizerKey>) {
+        if !self.keys.is_empty() {
+            self.prev_mean_bytes = self.raw_bytes / self.keys.len();
+        }
         let records = std::mem::take(&mut self.records);
         let keys = std::mem::take(&mut self.keys);
         self.raw_bytes = 0;
@@ -1319,6 +1345,70 @@ mod tests {
     /// `RecordSource` refactor. Cleaner than rewriting every call site.
     fn open_fq(path: &std::path::Path) -> Box<dyn RecordSource> {
         Box::new(FastqReader::open_threaded(path).expect("test fixture must open"))
+    }
+
+    fn rec(seq_len: usize) -> FastqRecord {
+        FastqRecord {
+            id: "@r".to_string(),
+            seq: "A".repeat(seq_len),
+            qual: "I".repeat(seq_len),
+        }
+    }
+
+    /// A short record arriving first after a flush must not size the whole cycle.
+    #[test]
+    fn bin_reservation_follows_the_previous_cycle_not_one_short_record() {
+        let budget = 10_000;
+        let mut bin = PairedBin::with_budget(budget);
+        // One cycle of 100 bp records: 207 B each, 414 B per pair.
+        for i in 0..24 {
+            bin.push(rec(100), rec(100), i);
+        }
+        let mean = bin.raw_bytes / bin.keys.len();
+        assert_eq!(mean, 414, "fixture arithmetic changed");
+        bin.take();
+
+        // A 10 bp pair is 54 B. Sizing from it would reserve budget/54 = 186
+        // slots; sizing from the previous cycle reserves budget/414 = 25.
+        bin.push(rec(10), rec(10), 0);
+        let from_short = budget.div_ceil(54);
+        let from_mean = budget.div_ceil(mean);
+        assert_eq!(from_short, 186, "fixture arithmetic changed");
+        assert!(
+            bin.keys.capacity() < from_short,
+            "reserved {} slots from a single short record, expected ~{from_mean}",
+            bin.keys.capacity()
+        );
+        // `reserve_exact` is documented as free to over-allocate, so bound the
+        // reservation rather than pinning it.
+        assert!(bin.keys.capacity() >= from_mean);
+        assert!(bin.keys.capacity() <= from_mean + from_mean / 16 + 1);
+    }
+
+    /// `SingleBin` carries the same rule, and had no test of its own.
+    #[test]
+    fn single_bin_reservation_follows_the_previous_cycle() {
+        let budget = 10_000;
+        let mut bin = SingleBin::with_budget(budget);
+        for i in 0..48 {
+            bin.push(rec(100), i);
+        }
+        let mean = bin.raw_bytes / bin.keys.len();
+        assert_eq!(mean, 207, "fixture arithmetic changed");
+        bin.take();
+        bin.push(rec(10), 0);
+        assert!(bin.keys.capacity() < budget.div_ceil(27));
+        assert!(bin.keys.capacity() >= budget.div_ceil(mean));
+    }
+
+    /// The first cycle has no history, so it still sizes from the first record.
+    #[test]
+    fn bin_reservation_falls_back_to_the_first_record_before_any_cycle() {
+        let mut bin = PairedBin::with_budget(10_000);
+        bin.push(rec(100), rec(100), 0);
+        let exact = 10_000usize.div_ceil(414);
+        assert!(bin.keys.capacity() >= exact);
+        assert!(bin.keys.capacity() <= exact + exact / 16 + 1);
     }
 
     fn fresh_tmpdir(slug: &str) -> PathBuf {

@@ -88,35 +88,52 @@ The minimizer computation uses 2-bit packed integer ops (one O(1) bitwise step p
 
 `--memory` (default `1G`) is a Trim Galore-wide memory budget.
 
-The clumpify dispatcher sizes the per-bin sort runs against it, using coefficients fitted to measured peak RSS on both macOS/arm64 and Linux/x86_64:
+The clumpify dispatcher sizes the per-bin sort runs against it. The coefficients bound measured peak RSS at the shortest calibrated read length rather than modelling it, because part of the per-record cost is the allocator's and no per-record constant is exact at every read length:
 
 $$
 \begin{aligned}
 n_{\text{bins}}          &= \max(16,\; 4 \times \text{cores}) \\[0.8em]
 \text{static}            &= 224\,\text{MiB} \;+\; 24\,\text{MiB} \times \min(\text{FastQC threads},\, 16) \\[0.8em]
 \text{usable}            &= \text{memory} \times \tfrac{10}{11} - \text{static} \\[0.8em]
-\text{bin\_byte\_budget} &= \frac{16 \times \text{usable}}{23 \times n_{\text{bins}} + 64 \times \text{workers}}
+\text{bin\_byte\_budget} &= \frac{16 \times \text{usable}}{33 \times n_{\text{bins}} + 92 \times \text{workers}}
 \end{aligned}
 $$
 
 Three terms need naming. **static** is the resident cost outside the bin pool — allocator, gzip state and I/O buffers — and the FastQC term is charged only when a report is requested, capped at 16 threads because scaling above that is unmeasured. The **10/11** factor holds back ~9% of the budget as headroom for run-to-run variation, which is why the predicted peak the binary prints is always a little under the `--memory` you gave it. **workers** is the number of threads that can hold a batch in flight: `--cores` on the trimming path, and 1 under [`--clump_only`](/modes/clump-only/), which is single-threaded.
 
-So with `--cores 8 --memory 1G` you get **32 bins × 9 MiB**; with `--cores 8 --memory 4G` you get 32 bins × 44 MiB. The binary prints those resolved values at startup.
+So with `--cores 8 --memory 1G` you get **32 bins × 6 MiB**; with `--cores 8 --memory 4G` you get 32 bins × 31 MiB. The binary prints those resolved values at startup.
 
 In theory, bigger budget → bigger per-gzip-member sort runs → better compression. In practice, increasing memory doesn't seem to make very much difference in our tests.
 
 :::caution[Savings figures predate the current sizing]
-The savings in the tables above were measured before the memory model was refitted in v2.4 ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)), which reduced bin sizes by 24–31% at budgets of 2 GiB and above. Figures at the default `--memory 1G` are unaffected; the RRBS row's `--memory 4G+` entry is the one most likely to have moved and is pending re-measurement.
+The savings in the tables above were measured before the memory model was refitted. The refit for [#457](https://github.com/FelixKrueger/TrimGalore/issues/457) reduces bin sizes by ~30% at **every** budget, including the default `--memory 1G`, so all of these figures are due for re-measurement. Whether smaller bins cost real savings has not been measured on a library with duplicates.
 :::
+
+#### Read length, and getting the bin size back
+
+The coefficients are set by the shortest read length they were calibrated at, 25 bp. Long reads therefore reserve more than they need, because the same per-record charge is spread over more bytes per record. Measured at 25 bp, a run peaks at 0.81–0.92 of its printed prediction; at 150 bp the model puts it near 0.61, which is an extrapolation rather than a measurement.
+
+Raise `--memory` to recover the bin size. The static reservation is a fixed part of the budget, so this is not a flat multiplier: **1G → 1363M** restores the previous bin size at `--cores 2` or `4`, and **2G → 2834M** at `--cores 8`.
+
+Reads shorter than 25 bp sit below the calibrated floor, and Trim Galore warns rather than silently extrapolating. Every input is checked, so a multi-pair run cannot hide a short pair behind a long first one:
+
+```
+WARNING: the shortest input read is 19 bp, below the 25 bp the --memory reservation was calibrated at,
+         so peak memory may exceed the predicted peak for this run. Raise --memory if the run is near its limit.
+```
+
+Header length is not part of the test: a longer header raises the per-record size and so makes a run safer, not riskier.
 
 #### Below-floor behaviour
 
-`--clumpify` needs a minimum budget that rises with `--cores`, because both the bin pool and the per-worker reservation scale with it. Over `--cores` 2–32 the floor runs from **281 MiB** to **590 MiB** without `--fastqc`, and from **334 MiB** to **1012 MiB** with it. Above `--cores 32` it keeps climbing — at `--cores 64` it is 933 MiB, or 1356 MiB with `--fastqc`, which is above the 1 GiB default.
+`--clumpify` needs a minimum budget that rises with `--cores`, because both the bin pool and the per-worker reservation scale with it. Over `--cores` 2–32 the floor runs from **296 MiB** to **740 MiB** without `--fastqc`, and from **349 MiB** to **1162 MiB** with it. Above `--cores 32` it keeps climbing — at `--cores 64` it is 1232 MiB, or 1655 MiB with `--fastqc`, both above the 1 GiB default.
+
+Because the floor rose, some configurations that clumped at the default `--memory 1G` no longer do. The one most likely to be hit is `--fastqc` at `--cores 24`–`33`, which used to clump at the default and now falls back to plain trimming; raise `--memory` to keep it. Without `--fastqc` the default carries `--cores` up to 50.
 
 If `--memory` is below the floor, Trim Galore prints a warning and falls back to plain mode:
 
 ```
-WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 311 MiB).
+WARNING: --memory 100M is too small for --clumpify at --cores 6 (need ≥ 339 MiB).
          Falling back to plain mode (no read reordering). Increase --memory or
          drop --clumpify to silence this warning.
 ```

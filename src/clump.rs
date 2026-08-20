@@ -170,13 +170,13 @@ impl ClumpLayout {
 }
 
 /// `16 × (σ·n_bins + k·cores)` — the resident multiple of one bin budget, with
-/// σ = 23/16 for the bin pool and k = 4 per worker.
+/// σ = 33/16 for the bin pool and k = 92/16 per worker.
 fn dyn_denominator(n_bins: usize, cores: usize) -> u64 {
-    23 * n_bins as u64 + 64 * cores as u64
+    33 * n_bins as u64 + 92 * cores as u64
 }
 
-/// Per-worker channel depths. `k` above charges for `work + 1 in hand +
-/// result_per_core`, so their sum is the constant and neither may move alone.
+/// Per-worker channel depths. `k` above charges for these slots plus the
+/// allocator's per-record cost, so a deeper queue raises peak beyond `k`.
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelDepths {
     pub work: usize,
@@ -260,7 +260,7 @@ const STATIC_FASTQC_PER_THREAD_BYTES: u64 = 24 * 1024 * 1024;
 const FASTQC_CHARGED_THREAD_CAP: usize = 16;
 
 /// The budget is sized to `MARGIN_NUM / MARGIN_DEN` of `--memory`, leaving ~9%
-/// for run-to-run variation. Largest observed within-cell spread is 96 MiB.
+/// for run-to-run variation. Largest observed within-cell spread is 64 MiB.
 const MARGIN_NUM: u64 = 10;
 const MARGIN_DEN: u64 = 11;
 
@@ -270,21 +270,22 @@ const MARGIN_DEN: u64 = 11;
 /// The goal is **peak RSS ≤ memory_budget**. Resident memory is a fixed term
 /// plus a multiple of one bin budget `B`:
 ///
-/// 1. Reader's resident bins: `σ × n_bins × B`, text plus `Vec<FastqRecord>`
-///    spine, σ = 23/16.
+/// 1. Reader's resident bins: `σ × n_bins × B`, text plus the record spine and
+///    the allocator's per-record cost, σ = 33/16.
 /// 2. Per worker: `k × B` for the queued batch, the batch in hand, and the
-///    compressed output waiting on the result channel, k = 4.
+///    compressed output waiting on the result channel, k = 92/16.
 ///
 ///   n_bins          = max(16, 4 × bin_cores)
 ///   usable          = memory_budget × 10/11 − static reservation
-///   bin_byte_budget = 16 × usable / (23 × n_bins + 64 × workers)
+///   bin_byte_budget = 16 × usable / (33 × n_bins + 92 × workers)
 ///
-/// σ and k are fitted from a 10 M-pair paired-end matrix over `cores ∈ {2,3,4}`
-/// with `n_bins` pinned at 16, taking the worst of two reps per cell; `cores ∈
-/// {8,16}` were held out and predicted within 5%. Measured values are σ = 1.29
-/// (Linux) / 1.41 (macOS) and k = 3.71 / 3.99; the constants take the worse of
-/// each. The 10/11 factor is margin: the largest within-cell spread was 96 MiB.
-/// See `plans/08162026_clumpify-memory-accounting/phase2/CALIBRATION.md`.
+/// σ and k bound the measured breach at the shortest calibrated read length
+/// rather than modelling it: part of the per-record cost is the allocator's, and
+/// no per-record constant is exact at more than one read length. The floor is
+/// `r = 96.642` B, from a byte-equalised paired-end matrix over read lengths
+/// {25,36,51,100,150} × `cores ∈ {2,4}` plus held-out `cores ∈ {8,16}` cells,
+/// summarised by the worst rep per cell. Inputs below the floor are warned about,
+/// not covered. See `plans/08162026_clumpify-memory-accounting/phase4/PLAN.md`.
 ///
 /// If the derived budget falls below `MIN_BIN_BYTES`, bails — better to fail
 /// loudly than silently produce a degraded output.
@@ -349,6 +350,14 @@ pub fn parse_memory_size(s: &str) -> Result<u64> {
 }
 
 // ─── Bin buffers + sort ───────────────────────────────────────────────────
+
+/// A paired slot reserves two records and one key; the model's per-record term
+/// is built on this, so the struct and the constant may not drift apart.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+    2 * std::mem::size_of::<FastqRecord>() + std::mem::size_of::<MinimizerKey>() == 148,
+    "paired slot is no longer 148 B; the clumpify per-record term is derived from it"
+);
 
 /// Estimate the raw FASTQ-text bytes a record will occupy on disk.
 /// Used by the dispatcher for per-bin byte-budget accounting.
@@ -554,29 +563,29 @@ mod tests {
     #[test]
     fn resolve_layout_default() {
         // 4 GiB + 2 cores: usable = 4 GiB×10/11 − 224 MiB, n_bins=16,
-        // denom = 23×16 + 64×2 = 496, so B = 16 × usable / 496 ≈ 113 MiB.
+        // denom = 33×16 + 92×2 = 712, so B = 16 × usable / 712 ≈ 79 MiB.
         let layout = resolve_layout(4 * 1024 * 1024 * 1024, &ins(2, false)).unwrap();
         assert_eq!(layout.n_bins, 16);
-        assert!(layout.bin_byte_budget >= 112 * 1024 * 1024);
-        assert!(layout.bin_byte_budget < 114 * 1024 * 1024);
+        assert!(layout.bin_byte_budget >= 78 * 1024 * 1024);
+        assert!(layout.bin_byte_budget < 80 * 1024 * 1024);
     }
 
     #[test]
     fn resolve_layout_scales_with_cores() {
-        // 4 GiB + 8 cores: n_bins=32, denom = 23×32 + 64×8 = 1248, B ≈ 45 MiB.
+        // 4 GiB + 8 cores: n_bins=32, denom = 33×32 + 92×8 = 1792, B ≈ 31 MiB.
         let layout = resolve_layout(4 * 1024 * 1024 * 1024, &ins(8, false)).unwrap();
         assert_eq!(layout.n_bins, 32);
-        assert!(layout.bin_byte_budget >= 44 * 1024 * 1024);
-        assert!(layout.bin_byte_budget < 46 * 1024 * 1024);
+        assert!(layout.bin_byte_budget >= 31 * 1024 * 1024);
+        assert!(layout.bin_byte_budget < 33 * 1024 * 1024);
     }
 
     #[test]
     fn resolve_layout_pins_the_default_cell() {
         // 1 GiB + 4 cores is the cell #439 is about, so the sizing arithmetic may
-        // not move it silently: 16 × (1 GiB×10/11 − 224 MiB) / 624.
+        // not move it silently: 16 × (1 GiB×10/11 − 224 MiB) / 896.
         let layout = resolve_layout(1024 * 1024 * 1024, &ins(4, false)).unwrap();
         assert_eq!(layout.n_bins, 16);
-        assert_eq!(layout.bin_byte_budget, 19_006_356);
+        assert_eq!(layout.bin_byte_budget, 13_236_569);
     }
 
     #[test]
@@ -588,7 +597,7 @@ mod tests {
         // observes FASTQC_CHARGED_THREAD_CAP.
         let gib = 1024 * 1024 * 1024u64;
         let cases: [(u64, LayoutInputs, usize); 6] = [
-            (gib, LayoutInputs::uniform(4, None), 19_006_356),
+            (gib, LayoutInputs::uniform(4, None), 13_236_569),
             (
                 gib,
                 LayoutInputs {
@@ -596,7 +605,7 @@ mod tests {
                     workers: 1,
                     fastqc_threads: None,
                 },
-                27_453_626,
+                19_128_978,
             ),
             (
                 gib,
@@ -605,7 +614,7 @@ mod tests {
                     workers: 4,
                     fastqc_threads: Some(16),
                 },
-                8_681_915,
+                6_046_334,
             ),
             (
                 gib,
@@ -614,10 +623,10 @@ mod tests {
                     workers: 4,
                     fastqc_threads: Some(17),
                 },
-                8_681_915,
+                6_046_334,
             ),
-            (gib, LayoutInputs::uniform(2, None), 23_911_222),
-            (4 * gib, LayoutInputs::uniform(32, None), 11_761_649),
+            (gib, LayoutInputs::uniform(2, None), 16_657_256),
+            (4 * gib, LayoutInputs::uniform(32, None), 8_191_148),
         ];
         for (budget, inputs, expected) in cases {
             let layout = resolve_layout(budget, &inputs).unwrap();
@@ -634,21 +643,20 @@ mod tests {
         // both sides move together. This pins the constant and the figure the
         // docs publish for --cores 2 in one assertion.
         let floor = clumpify_min_memory_bytes(&ins(2, false));
-        assert_eq!(floor.div_ceil(1024 * 1024), 281);
+        assert_eq!(floor.div_ceil(1024 * 1024), 296);
     }
 
     #[test]
-    fn channel_depths_sum_to_the_per_worker_coefficient() {
-        // k = 4 in dyn_denominator charges for the queued batch, the batch in
-        // hand, and the result slots. Raising either depth invalidates the fit.
+    fn channel_depths_are_pinned_to_the_calibrated_values() {
+        // k was measured at these depths, and charges the allocator's per-record
+        // cost on top of them, so a deeper queue raises peak above the charge.
         let clumpy = channel_depths(true);
-        assert_eq!(clumpy.work, 1);
-        assert_eq!(clumpy.result_per_core, 2);
         assert_eq!(
-            clumpy.work + 1 + clumpy.result_per_core,
-            4,
-            "channel depths must sum to k = 4 (64/16 in dyn_denominator); see \
-             plans/08162026_clumpify-memory-accounting/phase2/CALIBRATION.md"
+            (clumpy.work, clumpy.result_per_core),
+            (1, 2),
+            "k = 92/16 was calibrated at work=1, result_per_core=2; changing \
+             either invalidates it — see \
+             plans/08162026_clumpify-memory-accounting/phase4/PLAN.md"
         );
         assert_eq!(channel_depths(false).work, 2);
     }
@@ -667,7 +675,7 @@ mod tests {
             plain.bin_byte_budget
         );
         // The difference is the per-core reservation spread over the denominator.
-        let expected = (24u64 * 4 * 1024 * 1024 * 16 / 624) as usize;
+        let expected = (24u64 * 4 * 1024 * 1024 * 16 / 896) as usize;
         let delta = plain.bin_byte_budget - with_qc.bin_byte_budget;
         assert!(
             delta.abs_diff(expected) <= 1024,
