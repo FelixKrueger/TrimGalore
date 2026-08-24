@@ -647,51 +647,17 @@ impl Sink {
                 encoder.try_finish()?;
             }
             Sink::ParGz(mut w) => {
-                // Every fallible step is inside the closure so that ONE error
-                // path covers all of them. `?` straight out of this arm would
-                // drop `w` on the way, and dropping a `ParCompress` that has
-                // not been finished is the panic described below — which the
-                // flushes can reach just as easily as `finish` can.
-                let outcome = (|| -> Result<()> {
-                    // Same markers as the serial arm, same reason — see
-                    // `PRE_434_GZ_SYNC_FLUSHES`. `ParCompress::flush` is
-                    // `flush_last(false)`.
-                    for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
-                        w.flush()?;
-                    }
-                    w.finish()?;
-                    Ok(())
-                })();
-                match outcome {
-                    Ok(()) => {}
-                    Err(e) => {
-                        // `ParCompress::finish` propagates a failed
-                        // `flush_last` with `?` BEFORE it takes its channels
-                        // and join handle, so all three are still `Some` here.
-                        // `ParCompress::drop` reads that as "never finished",
-                        // calls `finish()` again and `unwrap()`s the same
-                        // error (`gzp-2.0.2/src/par/compress.rs:398`) — turning
-                        // a reportable I/O failure into a panic on the way out
-                        // of this function. #434 is specifically about a failed
-                        // teardown being *reported* rather than swallowed, so
-                        // leaving that in place would half-undo it for
-                        // `--cores N`.
-                        //
-                        // Disarming means not running that `Drop`. What leaks
-                        // is a `Sender` pair and a `JoinHandle`; the compressor
-                        // threads then park on a channel that is never closed.
-                        // That is bounded by the process, which is on its way
-                        // to exiting with this error — every
-                        // `FastqWriter::finish` caller propagates it with `?`.
-                        // A panic in place of an error message is the worse
-                        // trade.
-                        //
-                        // The real fix belongs upstream in `gzp`: take the
-                        // fields before the `?`. Remove this when that lands.
-                        std::mem::forget(w);
-                        return Err(e);
-                    }
+                // A `ParCompress` dropped after a failed teardown does not
+                // retry it: gzp >= 2.0.3 takes the channels and the join
+                // handle in `recover_send_error` before joining.
+                //
+                // Same markers as the serial arm, same reason — see
+                // `PRE_434_GZ_SYNC_FLUSHES`. `ParCompress::flush` is
+                // `flush_last(false)`.
+                for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
+                    w.flush()?;
                 }
+                w.finish()?;
             }
         }
         Ok(())
@@ -905,14 +871,9 @@ mod tests {
         // THE `--cores N` ARM, WHICH HAD NO TEST OF ITS OWN AND IS THE ONE THE
         // REVIEW OF #436 CAUGHT TWICE.
         //
-        // `ParCompress::finish` propagates a failed `flush_last` with `?`
-        // before taking its channels and join handle, so `ParCompress::drop`
-        // sees them still `Some`, calls `finish()` a second time and
-        // `unwrap()`s the same error at `gzp-2.0.2/src/par/compress.rs:398`.
-        // Without the `mem::forget` in `Sink::finish` this test does not fail
-        // — it PANICS, which is exactly the outcome #434 set out to remove.
         // Running to completion is the real assertion here; `is_err()` is the
-        // weaker half.
+        // weaker half. A `Drop` that retried a failed teardown would panic
+        // instead, which is why Cargo.toml floors gzp at 2.0.3.
         //
         // THE WINDOW IS NARROW AND THE OBVIOUS TEST MISSES IT. `ParCompress::
         // write`, on a send failure, takes the join handle itself so it can
