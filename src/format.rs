@@ -139,8 +139,10 @@ pub fn reject_bam_format_mismatch_in_pair(
     let is_bam = |f: &InputFormat| matches!(f, InputFormat::UnalignedBam);
 
     for (pair_idx, (paths, fmts)) in inputs
-        .chunks_exact(2)
-        .zip(formats.chunks_exact(2))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(formats.as_chunks::<2>().0)
         .enumerate()
     {
         let n_bam = fmts.iter().filter(|f| is_bam(f)).count();
