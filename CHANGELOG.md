@@ -5,6 +5,14 @@
 
 #### Changes
 
+- **The `--cores N` gzip teardown no longer leaks its compressor to avoid a panic**
+  ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). Reporting a failed teardown on the
+  parallel path relied on a local `std::mem::forget`, which disarmed a double-teardown panic in
+  `gzp` at the cost of leaking a `Sender` pair and a `JoinHandle` and parking the compressor threads.
+  [gzp 2.0.3](https://github.com/sstadick/gzp/issues/68) fixes that upstream, so the workaround is
+  gone and the error propagates normally; the minimum `gzp` is now 2.0.3, because on 2.0.2 the
+  regression test panics rather than fails.
+
 - **`--clumpify` keeps peak memory inside the budget it prints on short reads too**
   ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)). Part of the per-record cost is the
   allocator's, so the bin-pool coefficients now bound it at 25 bp rather than modelling it: bins are
