@@ -5,6 +5,20 @@
 
 #### Changes
 
+- **Poly-G is removed before poly-A, so a tail sitting behind a G-run is trimmed**
+  ([#504](https://github.com/FelixKrueger/TrimGalore/issues/504)). The poly-A scan is anchored at the
+  3' end, and a G-run in front of the tail blocked it; affected reads shift a few bases from the
+  poly-G count to the poly-A count in the trimming report. See
+  [the poly-X docs](https://trimgalore.com/modes/poly/#stage-order) for the order and its two edge
+  cases.
+
+- **The poly-A docs now state what `--poly_a` does and does not remove**
+  ([#504](https://github.com/FelixKrueger/TrimGalore/issues/504)). An A-run with sequence behind it is
+  left in place by design, because the genome carries genuine runs of ten or more A's; 3' counting
+  assays that want the run and everything after it should pass `-a "A{20}"`, as Perl v0.6.x's
+  `--polyA` did. Raised by @marenmsk in
+  [#504](https://github.com/FelixKrueger/TrimGalore/issues/504).
+
 - **`--clumpify` keeps peak memory inside the budget it prints on short reads too**
   ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)). Part of the per-record cost is the
   allocator's, so the bin-pool coefficients now bound it at 25 bp rather than modelling it: bins are
