@@ -25,7 +25,7 @@ Trim Galore v2 is a Rust rewrite of the Perl wrapper, built as a drop-in replace
 | BGI/DNBSEQ adapter | `--bgiseq` only | Auto-detected too |
 | Multi-adapter syntax | Embedded-string only | Repeatable `-a` / `-a2`, plus embedded and FASTA |
 | Poly-G handling | None | Auto-detected for 2-colour instruments |
-| Poly-A trimming | None | Built-in `--poly_a` |
+| Poly-A trimming | `--polyA`, a separate second pass | Built-in `--poly_a` stage |
 | `--implicon` UMI length | Hardcoded 8 bp | Configurable (default 8) |
 | JSON trimming report | None | Included alongside text report |
 | `--version` provenance | Just version | Version + git hash + target + build timestamp |
@@ -48,9 +48,21 @@ A small pre-parse hook recognises Perl-era flag spellings and rewrites them to t
 - Colorspace input. Rejected with a clear error message, matching v0.6.x behaviour. Colorspace data has not been generated in years.
 - The per-flag `Cutadapt version` and `Python version` lines in the parameter summary. Cutadapt and Python are not subprocesses in v2, so those lines are dropped. The MultiQC parser already handles their absence.
 
-## Note on `-a 'A{N}'` for poly-A trimming
+## Poly-A trimming: `--polyA` in v0.6.x vs `--poly_a` in v2
 
-For poly-A trimming, prefer the dedicated `--poly_a` flag — it has proper paired-end semantics (3' end on R1, 5' end on R2) and is the supported v2 path. The `-a 'A{N}'` form (a v0.6.x workaround that pre-dates `--poly_a`) still works and the brace expansion still produces `AAAA…` byte-for-byte, but the alignment DP may produce slightly different matches than Perl v0.6.x on highly-repetitive adapter patterns: every position in a poly-A read has potential matches, so the choice of "where the adapter starts" reduces to a tie-break that Cutadapt and the Rust port resolve differently. Both are valid global-best alignments under their respective tie-break rules — neither is wrong by spec — but the byte-identity guarantee in the table above does not extend to single-base repeating adapters.
+`--poly_a` is not a renamed `--polyA`. The two differ in what they do and in how they are invoked, so expect different output rather than identical output.
+
+**In v0.6.x**, `--polyA` was an exclusive mode that ran a second Cutadapt pass with a poly-A homopolymer as the adapter. Three consequences:
+
+- Its Cutadapt call carried no quality cutoff, so it expected input that had already been adapter- and quality-trimmed. The documented workflow was two runs: trim adapters and qualities first, then `--polyA`. Length filtering still applied.
+- The adapter was `A{20}`, with `T{150}` as `-a2` on Read 2. Auto-detection decided only the orientation — whether a sample was poly-A or poly-T — by counting reads containing a 10-mer of each; the chosen direction was then expanded to the fixed 20 and 150 bp sequences.
+- It rewrote read IDs. Whitespace became underscores on every read, and reads that lost bases also gained a `32:A:` prefix and a `_PolyA:32` suffix recording how many. v2 does neither, so a pipeline that greps read IDs for `PolyA:`, or that relies on the underscores, finds nothing.
+
+**In v2**, `--poly_a` is a stage inside the single pass, applied after adapter removal and poly-G trimming, and it uses a 3'-anchored homopolymer scan rather than an adapter alignment. A 3' adapter match removes everything downstream of the match, which is why the v0.6.x mode also cleared any bases sitting behind the tail; the v2 scan does not, which is why poly-G is removed first. See [Poly-G and Poly-A trimming](/modes/poly/) for the stage order.
+
+### `-a 'A{N}'` still works
+
+The `-a 'A{N}'` form parses and the brace expansion produces `AAAA…` byte-for-byte, so it is the way to get the v0.6.x behaviour back — see [removing A-runs and everything after them](/modes/poly/#removing-a-runs-and-everything-after-them), which also covers why `A{20}` is the right length to pass. The alignment DP may produce slightly different matches than Perl v0.6.x on highly-repetitive adapter patterns: every position in a poly-A read has potential matches, so the choice of "where the adapter starts" reduces to a tie-break that Cutadapt and the Rust port resolve differently. Both are valid global-best alignments under their respective tie-break rules — neither is wrong by spec — but the byte-identity guarantee in the table above does not extend to single-base repeating adapters.
 
 ## Migration checklist
 

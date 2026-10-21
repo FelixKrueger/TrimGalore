@@ -498,8 +498,23 @@ mod tests {
     }
 
     #[test]
-    fn test_poly_g_after_poly_a_removal() {
-        // After poly-A has removed trailing A's, the remaining sequence ends in G's
+    fn test_poly_a_short_reads() {
+        // Reads of 3 to 10 bases reach the poly stages: length filtering runs
+        // after trimming.
+        for n in 3..=10 {
+            let all_a = vec![b'A'; n];
+            let all_t = vec![b'T'; n];
+            assert_eq!(poly_a_trim_index(&all_a, false), 0, "{n} A's, 3' scan");
+            assert_eq!(poly_a_trim_index(&all_t, true), n, "{n} T's, 5' scan");
+
+            let no_tail = b"CGTCGTCGTC"[..n].to_vec();
+            assert_eq!(poly_a_trim_index(&no_tail, false), n, "{n} bp, no tail");
+            assert_eq!(poly_a_trim_index(&no_tail, true), 0, "{n} bp, no head");
+        }
+    }
+
+    #[test]
+    fn test_poly_g_tail() {
         let seq = b"ACGTACGTGGGGG";
         let pos = homopolymer_trim_index(seq, b'G', false);
         assert_eq!(pos, 8); // trims 5 Gs

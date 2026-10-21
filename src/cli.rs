@@ -363,8 +363,8 @@ pub struct Cli {
     pub cores: usize,
 
     /// Trim poly-A tails from the 3' end of Read 1 (and single-end reads),
-    /// and poly-T heads from the 5' end of Read 2. Runs after adapter trimming,
-    /// so poly-A tails hidden behind adapters are also removed.
+    /// and poly-T heads from the 5' end of Read 2. Runs after adapter and
+    /// poly-G trimming, so tails behind either are also removed.
     #[clap(long = "poly_a", alias = "poly-a", alias = "polyA")]
     pub poly_a: bool,
 

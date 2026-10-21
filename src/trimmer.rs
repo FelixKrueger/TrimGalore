@@ -82,6 +82,8 @@ pub struct TrimResult {
 /// 1. Quality trim (3' BWA algorithm)
 /// 2. Adapter trim (semi-global alignment)
 ///    2.5. RRBS trim (MspI 2bp artifact removal, if --rrbs)
+///    2.7. Poly-G trim (if --poly_g)
+///    2.8. Poly-A/poly-T trim (if --poly_a)
 /// 3. Trim Ns (if --trim-n)
 /// 4. 5'/3' fixed clipping
 ///
@@ -191,7 +193,29 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
         }
     }
 
-    // 2.7. Poly-A / Poly-T trimming (after adapter + RRBS, before N-trimming)
+    // 2.7. Poly-G trimming (2-colour chemistry artifact removal).
+    //
+    // Runs ahead of poly-A: a tail behind a terminal G-run is invisible to a 3' scan.
+    //
+    // Unlike poly-A (template-side: mRNA poly-A tail on the forward
+    // strand → R1 sees 3' poly-A, R2 sees 5' poly-T), the 2-colour
+    // poly-G artifact is sequencer-induced: the instrument calls "no
+    // signal" as a high-quality G when it overruns the template, which
+    // happens at the 3' end of BOTH reads regardless of strand. So
+    // poly-G must be trimmed at the 3' end on R1 AND R2 — NOT at the
+    // 5' end of R2 (which would address poly-C, the wrong location for
+    // this artifact). See issue #321.
+    let mut poly_g_trimmed: usize = 0;
+    if config.poly_g && !record.is_empty() {
+        let seq_len_before = record.seq.len();
+        let idx = quality::homopolymer_trim_index(record.seq.as_bytes(), b'G', false);
+        if idx < seq_len_before {
+            record.truncate(idx);
+            poly_g_trimmed = seq_len_before - idx;
+        }
+    }
+
+    // 2.8. Poly-A / Poly-T trimming (after adapter + RRBS + poly-G, before N-trimming)
     // R1/SE: trim poly-A from 3' end. R2: trim poly-T from 5' end.
     let mut poly_a_trimmed: usize = 0;
     if config.poly_a && !record.is_empty() {
@@ -210,26 +234,6 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
                 record.truncate(idx);
                 poly_a_trimmed = seq_len_before - idx;
             }
-        }
-    }
-
-    // 2.8. Poly-G trimming (2-colour chemistry artifact removal).
-    //
-    // Unlike poly-A (template-side: mRNA poly-A tail on the forward
-    // strand → R1 sees 3' poly-A, R2 sees 5' poly-T), the 2-colour
-    // poly-G artifact is sequencer-induced: the instrument calls "no
-    // signal" as a high-quality G when it overruns the template, which
-    // happens at the 3' end of BOTH reads regardless of strand. So
-    // poly-G must be trimmed at the 3' end on R1 AND R2 — NOT at the
-    // 5' end of R2 (which would address poly-C, the wrong location for
-    // this artifact). See issue #321.
-    let mut poly_g_trimmed: usize = 0;
-    if config.poly_g && !record.is_empty() {
-        let seq_len_before = record.seq.len();
-        let idx = quality::homopolymer_trim_index(record.seq.as_bytes(), b'G', false);
-        if idx < seq_len_before {
-            record.truncate(idx);
-            poly_g_trimmed = seq_len_before - idx;
         }
     }
 
@@ -1168,5 +1172,102 @@ mod tests {
         );
         assert_eq!(record.seq.len(), 28, "no length change expected");
         assert!(record.seq.starts_with('C'));
+    }
+
+    // ── Poly-G/poly-A stage order (issue #504 regression guards) ───────────
+
+    /// 60 bp of insert, used by the stage-order tests below.
+    const INSERT_60: &str = "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG";
+
+    fn poly_ag_config() -> TrimConfig {
+        let mut c = poly_g_config();
+        c.poly_a = true;
+        c
+    }
+
+    #[test]
+    fn test_poly_a_tail_behind_poly_g_is_trimmed() {
+        // Poly-G is removed first, so the tail reaches the 3' end where the
+        // poly-A scan can see it.
+        for (a, g) in [(40, 15), (20, 20), (60, 20)] {
+            let read_seq = format!("{}{}{}", INSERT_60, "A".repeat(a), "G".repeat(g));
+            let mut record = make_record(&read_seq);
+            let result = trim_read(&mut record, &poly_ag_config(), false);
+
+            assert_eq!(
+                record.seq,
+                INSERT_60,
+                "A{a}+G{g}: expected the insert alone, got {} bp",
+                record.seq.len()
+            );
+            assert_eq!(result.poly_g_trimmed, g, "A{a}+G{g}: poly-G bases");
+            assert_eq!(result.poly_a_trimmed, a, "A{a}+G{g}: poly-A bases");
+        }
+    }
+
+    #[test]
+    fn test_poly_a_tail_flush_with_3prime_end_is_trimmed() {
+        let read_seq = format!("{}{}", INSERT_60, "A".repeat(40));
+        let mut record = make_record(&read_seq);
+        let result = trim_read(&mut record, &poly_ag_config(), false);
+
+        assert_eq!(record.seq, INSERT_60);
+        assert_eq!(result.poly_a_trimmed, 40);
+        assert_eq!(result.poly_g_trimmed, 0);
+    }
+
+    #[test]
+    fn test_poly_g_behind_poly_a_survives() {
+        // The mirror arrangement: poly-G is blocked by the tail ahead of it, so
+        // the G-run stays. Dark-cycle G-runs are terminal, so this is not a real
+        // 2-colour read; pinned so the trade stays visible.
+        let read_seq = format!("{}{}{}", INSERT_60, "G".repeat(15), "A".repeat(40));
+        let mut record = make_record(&read_seq);
+        let result = trim_read(&mut record, &poly_ag_config(), false);
+
+        assert_eq!(record.seq.len(), 75);
+        assert_eq!(result.poly_a_trimmed, 40);
+        assert_eq!(result.poly_g_trimmed, 0);
+        assert!(record.seq.ends_with("GGGGG"));
+    }
+
+    #[test]
+    fn test_no_poly_g_leaves_tails_behind_a_g_run() {
+        // --no_poly_g is an explicit opt-out: the G-run stays, and it still
+        // blocks the poly-A scan.
+        let read_seq = format!("{}{}{}", INSERT_60, "A".repeat(20), "G".repeat(20));
+        let mut config = poly_ag_config();
+        config.poly_g = false;
+        let mut record = make_record(&read_seq);
+        let result = trim_read(&mut record, &config, false);
+
+        assert_eq!(record.seq.len(), 100, "nothing is trimmed");
+        assert_eq!(result.poly_a_trimmed, 0);
+        assert_eq!(result.poly_g_trimmed, 0);
+    }
+
+    #[test]
+    fn test_stage_order_does_not_touch_reads_without_tails() {
+        // Two-sided guard: a read with neither tail must come through whole.
+        let mut record = make_record(INSERT_60);
+        let result = trim_read(&mut record, &poly_ag_config(), false);
+
+        assert_eq!(record.seq, INSERT_60);
+        assert_eq!(result.poly_a_trimmed, 0);
+        assert_eq!(result.poly_g_trimmed, 0);
+    }
+
+    #[test]
+    fn test_poly_a_r2_head_is_unaffected_by_the_stage_order() {
+        // R2 takes poly-T off the 5' end and poly-G off the 3', so the two
+        // stages never compete.
+        let read_seq = format!("{}{}{}", "T".repeat(40), INSERT_60, "G".repeat(15));
+        let mut record = make_record(&read_seq);
+        let result = trim_read(&mut record, &poly_ag_config(), true); // is_r2 = true
+
+        // The insert's own trailing G is contiguous with the run and goes with it.
+        assert_eq!(record.seq, INSERT_60[..59]);
+        assert_eq!(result.poly_a_trimmed, 40);
+        assert_eq!(result.poly_g_trimmed, 16);
     }
 }
