@@ -5,20 +5,20 @@ description: The ordinary single-end and paired-end runs, what happens without a
 tags: [usage, single-end, paired-end, adapters]
 page_id: trim-reads
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 26ec1cf
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/adapter.rs
-    commit: d2ea293
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/trimmer.rs
-    commit: bf0be75
+    commit: 6303152
 ---
 
 ## Summary

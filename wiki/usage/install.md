@@ -7,13 +7,13 @@ page_id: install
 subject_status: current
 updated: 2026-10-13
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: Cargo.toml
     commit: 2ab0918
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: Dockerfile
     commit: 8de2bb2
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/fastqc.rs
     commit: 242546a
 ---

@@ -5,20 +5,20 @@ description: Running unaligned BAM input, writing uBAM output, carrying aux tags
 tags: [ubam, bam, aux-tags, interleaved]
 page_id: ubam
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/bam.rs
-    commit: 115d84f
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 26ec1cf
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/format.rs
-    commit: a71d9ff
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
+    commit: 6303152
 ---
 
 ## Summary

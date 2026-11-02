@@ -5,11 +5,11 @@ description: The v0.6.x flags Trim Galore still parses, and why each one no long
 tags: [cli, legacy, deprecated]
 page_id: legacy-flags
 subject_status: legacy
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
+    commit: 6303152
 ---
 
 ## Summary
