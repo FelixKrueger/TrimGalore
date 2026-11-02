@@ -5,26 +5,26 @@ description: What Trim Galore refuses, what it only warns about, and the remedia
 tags: [errors, refusals, recovery]
 page_id: troubleshooting
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/fastq.rs
-    commit: 7ffe86f
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/format.rs
-    commit: a71d9ff
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/bam.rs
-    commit: 115d84f
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/io.rs
-    commit: c7e147d
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 26ec1cf
+    commit: 6303152
 ---
 
 ## Summary

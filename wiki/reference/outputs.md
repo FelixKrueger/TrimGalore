@@ -7,10 +7,10 @@ page_id: outputs
 subject_status: current
 updated: 2026-10-13
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/io.rs
     commit: c7e147d
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/report.rs
     commit: 51fa55e
 ---

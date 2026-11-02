@@ -5,17 +5,17 @@ description: Every flag Trim Galore accepts, grouped by what it affects, with de
 tags: [cli, flags, defaults]
 page_id: cli-flags
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/library.rs
-    commit: 51fa55e
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/adapter.rs
-    commit: d2ea293
+    commit: 6303152
 ---
 
 ## Summary

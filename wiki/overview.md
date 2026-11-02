@@ -5,26 +5,26 @@ description: The purpose, who runs it, and when it is and is not the right tool.
 tags: [overview, ngs, trimming]
 page_id: overview
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/format.rs
-    commit: a71d9ff
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/fastq.rs
-    commit: 7ffe86f
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/bam.rs
-    commit: 115d84f
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/trimmer.rs
-    commit: bf0be75
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 26ec1cf
+    commit: 6303152
 ---
 
 ## Summary

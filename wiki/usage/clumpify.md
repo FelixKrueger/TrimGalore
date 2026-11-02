@@ -7,13 +7,13 @@ page_id: clumpify
 subject_status: current
 updated: 2026-10-13
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/clump.rs
     commit: 26ec1cf
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/clump_only.rs
     commit: 26ec1cf
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/main.rs
     commit: 26ec1cf
 ---

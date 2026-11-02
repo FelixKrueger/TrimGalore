@@ -1,6 +1,6 @@
 # Wiki schema
 
-Template version: 0.9 (2026-10-12).
+Template version: 0.10 (2026-10-23).
 
 ## Local rules
 

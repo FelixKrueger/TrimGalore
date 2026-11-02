@@ -5,17 +5,17 @@ description: Running MspI-digested RRBS data, what --rrbs changes, and the non-d
 tags: [rrbs, msp1, bisulfite, methylation]
 page_id: rrbs
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-02
 sources:
-  - repo: TrimGalore
+  - repo: FelixKrueger/TrimGalore
     path: src/trimmer.rs
-    commit: bf0be75
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 26ec1cf
-  - repo: TrimGalore
+    commit: 6303152
+  - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: bf28cbd
+    commit: 6303152
 ---
 
 ## Summary
