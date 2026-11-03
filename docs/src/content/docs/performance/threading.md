@@ -62,7 +62,7 @@ The c1 → c2 step is by far the largest (+55 MB) — that's the four infrastruc
 
 For context, mainstream multi-threaded FASTQ trimmers typically use a lot more RAM: Cutadapt 100–300 MB, fastp 100+ MB, BBDuk (JVM) 1–4 GB. On short reads Trim Galore v2 stays under 100 MB across all reasonable core counts: at `--cores 8`, a 1M-read 50-bp fixture sits at ~28 MB and an 84M-read 65 bp fixture at ~92 MB. Those are heap figures at the read lengths named, not a scheduler budget — a cgroup also charges the page cache for the FASTQ read and the `.fq.gz` written, so allocate from your own read length with headroom on top.
 
-**The next release uses roughly twice this on the plain path.** Between v2.3.0 and current development, paired peak RSS on the fixture above moves from 60 to 98 MiB at `--cores 4`, and from 74 to 146 MiB at `--cores 8`. Most of that is `mimalloc` replacing the platform allocator, which buys ~30% wall-clock at `--cores 8` in exchange for retaining more pages. Budget from the larger figure.
+**v2.4.0 uses roughly twice this on the plain path.** Paired peak RSS on the fixture above is 98 MiB at `--cores 4` and 146 MiB at `--cores 8`, against 60 and 74 MiB in v2.3.0. Most of that is `mimalloc` replacing the platform allocator, which buys ~30% wall-clock at `--cores 8` in exchange for retaining more pages. Budget from the larger figure.
 
 **Peak RSS scales with read length**, because the batch sizes are counts of records rather than of bytes, so a batch holds as many bytes as its reads happen to be. Measured in plain mode at `--cores 4` on 400 MB of input: ~75 MiB at 150 bp, ~245 MiB at 1 kb, ~800 MiB at 10 kb.
 

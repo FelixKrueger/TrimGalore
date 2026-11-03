@@ -60,8 +60,8 @@ FastQC is built in via the bundled [`fastqc-rust`](https://crates.io/crates/fast
 
 | Tag | Updates |
 | --- | --- |
-| `:latest` | latest stable release (currently v2.3.0) |
-| `:v2.3.0` | pinned to a specific release |
+| `:latest` | latest stable release (currently v2.4.0) |
+| `:v2.4.0` | pinned to a specific release |
 | `:beta` | latest prerelease — only set during an active beta cycle |
 | `:dev` | every push to the `dev` development branch |
 
@@ -82,7 +82,7 @@ trim_galore --version
 Should print:
 
 ```
-trim_galore 2.3.0
+trim_galore 2.4.0
 <git-hash> — <os>/<arch> — built <ISO-8601-UTC>
 ```
 

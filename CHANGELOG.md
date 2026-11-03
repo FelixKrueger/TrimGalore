@@ -3,6 +3,8 @@
 
 ### Unreleased
 
+### Version 2.4.0 (Release on 3 November 2026)
+
 #### Changes
 
 - **Poly-G is removed before poly-A, so a tail sitting behind a G-run is trimmed**
