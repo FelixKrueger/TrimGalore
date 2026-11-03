@@ -553,43 +553,7 @@ impl BamWriter {
     /// PLAN §3.6 — only A / Z / i / f scalar types are accepted; B / H
     /// arrays or malformed shape errors.
     pub fn write_record(&mut self, record: &FastqRecord, paired_side: Option<u8>) -> Result<()> {
-        let (name, data) = parse_name_and_data(&record.id)
-            .with_context(|| format!("malformed FastqRecord.id: {:?}", record.id))?;
-        let flags = match paired_side {
-            None => Flags::UNMAPPED,
-            Some(1) => {
-                Flags::SEGMENTED | Flags::UNMAPPED | Flags::MATE_UNMAPPED | Flags::FIRST_SEGMENT
-            }
-            Some(2) => {
-                Flags::SEGMENTED | Flags::UNMAPPED | Flags::MATE_UNMAPPED | Flags::LAST_SEGMENT
-            }
-            Some(other) => bail!(
-                "BamWriter::write_record: paired_side must be 1 or 2, got {}",
-                other
-            ),
-        };
-        // Sequence — validate per PLAN §3.3 step 3 (ACGTN-only, reject `=`,
-        // coerce IUPAC degenerate to N). Mirrors the read-side
-        // `bam_record_to_fastq` logic for symmetry. Code-review B-M1 fix.
-        let normalized_seq = validate_and_normalize_seq_for_write(record.seq.as_bytes())
-            .with_context(|| format!("while writing BAM record {:?}", record.id))?;
-        // FastqRecord.qual is Sanger ASCII (+33); BAM stores raw Phred bytes.
-        // `saturating_sub` is defensive — under normal flow every byte is
-        // ≥33 (FastqReader rejects sub-33 input; BamReader synthesises '!'
-        // for missing qual, never sub-33).
-        let raw_qual: Vec<u8> = record.qual.bytes().map(|b| b.saturating_sub(33)).collect();
-        debug_assert_eq!(
-            raw_qual.len(),
-            normalized_seq.len(),
-            "FastqRecord seq/qual length mismatch reached BamWriter"
-        );
-        let rec = RecordBuf::builder()
-            .set_name(name)
-            .set_flags(flags)
-            .set_sequence(Sequence::from(normalized_seq))
-            .set_quality_scores(QualityScores::from(raw_qual))
-            .set_data(data)
-            .build();
+        let rec = build_record_buf(record, paired_side)?;
         self.inner
             .write_alignment_record(&self.header, &rec)
             .context("failed to write BAM record")?;
@@ -601,6 +565,126 @@ impl BamWriter {
     pub fn finish(mut self) -> Result<()> {
         self.inner
             .try_finish()
+            .context("failed to finalise uBAM output (BGZF EOF marker)")?;
+        Ok(())
+    }
+}
+
+/// Build the BAM record for one `FastqRecord` (shared by the serial writer and the parallel
+/// encoder). See `BamWriter::write_record` for the flag and tag rules.
+fn build_record_buf(record: &FastqRecord, paired_side: Option<u8>) -> Result<RecordBuf> {
+    let (name, data) = parse_name_and_data(&record.id)
+        .with_context(|| format!("malformed FastqRecord.id: {:?}", record.id))?;
+    let flags = match paired_side {
+        None => Flags::UNMAPPED,
+        Some(1) => Flags::SEGMENTED | Flags::UNMAPPED | Flags::MATE_UNMAPPED | Flags::FIRST_SEGMENT,
+        Some(2) => Flags::SEGMENTED | Flags::UNMAPPED | Flags::MATE_UNMAPPED | Flags::LAST_SEGMENT,
+        Some(other) => bail!(
+            "BamWriter::write_record: paired_side must be 1 or 2, got {}",
+            other
+        ),
+    };
+    // Sequence — validate per PLAN §3.3 step 3 (ACGTN-only, reject `=`,
+    // coerce IUPAC degenerate to N). Mirrors the read-side
+    // `bam_record_to_fastq` logic for symmetry. Code-review B-M1 fix.
+    let normalized_seq = validate_and_normalize_seq_for_write(record.seq.as_bytes())
+        .with_context(|| format!("while writing BAM record {:?}", record.id))?;
+    // FastqRecord.qual is Sanger ASCII (+33); BAM stores raw Phred bytes.
+    // `saturating_sub` is defensive — under normal flow every byte is
+    // ≥33 (FastqReader rejects sub-33 input; BamReader synthesises '!'
+    // for missing qual, never sub-33).
+    let raw_qual: Vec<u8> = record.qual.bytes().map(|b| b.saturating_sub(33)).collect();
+    debug_assert_eq!(
+        raw_qual.len(),
+        normalized_seq.len(),
+        "FastqRecord seq/qual length mismatch reached BamWriter"
+    );
+    Ok(RecordBuf::builder()
+        .set_name(name)
+        .set_flags(flags)
+        .set_sequence(Sequence::from(normalized_seq))
+        .set_quality_scores(QualityScores::from(raw_qual))
+        .set_data(data)
+        .build())
+}
+
+/// Encodes the records of one batch into uncompressed BAM bytes, so that a worker thread can
+/// do the record building and encoding and leave only the BGZF framing to the sink.
+pub struct BatchEncoder {
+    inner: bam::io::Writer<Vec<u8>>,
+}
+
+impl BatchEncoder {
+    pub fn with_capacity(bytes: usize) -> Self {
+        Self {
+            inner: bam::io::Writer::from(Vec::with_capacity(bytes)),
+        }
+    }
+
+    /// Append one record (`paired_side` as in `BamWriter::write_record`).
+    pub fn push(
+        &mut self,
+        header: &Header,
+        record: &FastqRecord,
+        paired_side: Option<u8>,
+    ) -> Result<()> {
+        let rec = build_record_buf(record, paired_side)?;
+        self.inner
+            .write_alignment_record(header, &rec)
+            .context("failed to encode BAM record")?;
+        Ok(())
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.inner.into_inner()
+    }
+}
+
+/// uBAM sink for the multithreaded path: batches of already-encoded BAM records are written in
+/// order and compressed to BGZF by a pool of threads (`noodles` multithreaded writer).
+pub struct ParallelBamSink {
+    inner: bgzf::MultithreadedWriter<BufWriter<File>>,
+    header: Header,
+}
+
+impl ParallelBamSink {
+    /// Same header rules as [`BamWriter::create`]; `workers` is the number of compression threads.
+    pub fn create<P: AsRef<Path>>(
+        path: P,
+        source_header: Option<&Header>,
+        command_line: &str,
+        workers: usize,
+    ) -> Result<Self> {
+        let path = path.as_ref();
+        let header = build_output_header(source_header, command_line)?;
+        let file = File::create(path)
+            .with_context(|| format!("Failed to create uBAM output: {}", path.display()))?;
+        let workers = std::num::NonZeroUsize::new(workers.max(1)).expect("at least one");
+        let mut inner = bgzf::multithreaded_writer::Builder::default()
+            .set_worker_count(workers)
+            .build_from_writer(BufWriter::new(file));
+        // the header, written through a plain (uncompressed) BAM writer into the BGZF stream
+        let mut head = bam::io::Writer::from(Vec::new());
+        head.write_header(&header)
+            .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
+        std::io::Write::write_all(&mut inner, &head.into_inner())
+            .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
+        Ok(Self { inner, header })
+    }
+
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// Append encoded BAM records (the bytes of a [`BatchEncoder`]).
+    pub fn write_encoded(&mut self, bytes: &[u8]) -> Result<()> {
+        std::io::Write::write_all(&mut self.inner, bytes).context("failed to write BAM records")
+    }
+
+    /// Flush, stop the compression threads and write the BGZF EOF block.
+    pub fn finish(mut self) -> Result<()> {
+        self.inner
+            .finish()
             .context("failed to finalise uBAM output (BGZF EOF marker)")?;
         Ok(())
     }

@@ -308,9 +308,9 @@ fn ubam_out_hardtrim5_writes_bam() {
 }
 
 #[test]
-fn ubam_out_cores_gt_1_warns_and_proceeds() {
-    // PLAN §9 row: `--cores N>1` + uBAM-out must warn ("ignored") and
-    // STILL PRODUCE a valid output BAM. Code-review AGREE-2 row.
+fn ubam_out_cores_gt_1_produces_output() {
+    // `--cores N>1` + uBAM-out runs on the worker pool (it used to warn that
+    // --cores was ignored) and produces the output BAM.
     let dir = fresh_tmpdir("tg_int_ubam_out_cores");
     let output = Command::new(binary())
         .args(["--cores", "4", "--output-format", "ubam"])
@@ -321,13 +321,13 @@ fn ubam_out_cores_gt_1_warns_and_proceeds() {
         .expect("trim_galore failed to run");
     assert!(
         output.status.success(),
-        "--cores 4 + uBAM should succeed (with warning); stderr={}",
+        "--cores 4 + uBAM should succeed; stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("ignored"),
-        "expected '--cores ignored' note in stderr, got: {}",
+        !stderr.contains("ignored"),
+        "--cores must not be reported as ignored, got: {}",
         stderr
     );
     assert!(
