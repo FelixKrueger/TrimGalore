@@ -14,9 +14,9 @@ pub enum OutputFormat {
     /// FASTQ output, mirroring input compression (default).
     #[default]
     Fastq,
-    /// Unaligned BAM output. Always single-threaded; --clumpify,
-    /// --passthrough, --clock, --implicon, --demux, --retain_unpaired and
-    /// --dont_gzip are rejected at validation.
+    /// Unaligned BAM output; uses --cores. --clumpify, --passthrough, --clock,
+    /// --implicon, --demux, --retain_unpaired and --dont_gzip are rejected at
+    /// validation.
     #[clap(name = "ubam")]
     UBam,
 }
@@ -266,8 +266,8 @@ pub struct Cli {
     /// Output container format. Default `fastq` keeps existing behaviour
     /// (input-compression-mirroring FASTQ); `ubam` emits unaligned BAM with
     /// aux tags propagated from uBAM inputs (when `--preserve-tags` is set).
-    /// uBAM output is always single-threaded; some flag combinations are
-    /// rejected (see `--help` and the startup diagnostics for details).
+    /// uBAM output uses --cores; some flag combinations are rejected (see
+    /// `--help` and the startup diagnostics for details).
     /// From FASTQ input, record bodies are preserved but not byte-identically:
     /// header text after the first space is dropped (BAM read names cannot
     /// contain whitespace), bases are uppercased, and IUPAC codes become `N`.
