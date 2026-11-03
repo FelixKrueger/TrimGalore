@@ -41,17 +41,20 @@ fn sanity_check_any(path: &std::path::Path) -> Result<()> {
 
 /// Open a threaded reader for `path`, dispatching by detected format.
 /// `preserve_tags` is honoured for BAM input; silently ignored for FASTQ.
+/// `workers` is the number of threads that convert the records of a BAM input.
 fn open_threaded_reader(
     path: &std::path::Path,
     preserve_tags: &[String],
+    workers: usize,
 ) -> Result<Box<dyn RecordSource>> {
     match detect_input_format(path)? {
         InputFormat::FastqPlain | InputFormat::FastqGz => {
             Ok(Box::new(FastqReader::open_threaded(path)?))
         }
-        InputFormat::UnalignedBam => Ok(Box::new(BamReader::open_threaded_with_tags(
+        InputFormat::UnalignedBam => Ok(Box::new(BamReader::open_threaded_pooled(
             path,
             preserve_tags,
+            workers,
         )?)),
     }
 }
@@ -711,7 +714,7 @@ fn run_single_file(
     let stats = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpify` always routes here (validation enforces cores >= 2).
-        let reader = open_threaded_reader(input, &cli.preserve_tags)?;
+        let reader = open_threaded_reader(input, &cli.preserve_tags, cli.cores)?;
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_single_end_parallel(
             reader,
@@ -937,8 +940,8 @@ fn run_paired(
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpify` always routes here (validation enforces cores >= 2).
-        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags)?;
-        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags)?;
+        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags, cli.cores)?;
+        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags, cli.cores)?;
         let reader_passthrough: Option<Box<dyn RecordSource>> = match passthrough_input {
             Some(p) => Some(Box::new(FastqReader::open_threaded(p)?)),
             None => None,
@@ -1227,7 +1230,8 @@ fn run_paired_ubam_single_file(
     };
 
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
-        let (r1, r2) = BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
+        let (r1, r2) =
+            BamReader::open_paired_interleaved_pooled(input, &cli.preserve_tags, cli.cores)?;
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_paired_end_parallel(
             Box::new(r1),
@@ -1514,7 +1518,7 @@ fn run_ubam_output_single(
     }
 
     let stats = if cli.cores > 1 {
-        let reader = open_threaded_reader(input, &cli.preserve_tags)?;
+        let reader = open_threaded_reader(input, &cli.preserve_tags, cli.cores)?;
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             source_header.as_ref(),
@@ -1657,8 +1661,8 @@ fn run_ubam_output_paired_two_files(
     };
 
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
-        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags)?;
-        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags)?;
+        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags, cli.cores)?;
+        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags, cli.cores)?;
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             source_header.as_ref(),
@@ -1793,9 +1797,10 @@ fn run_ubam_output_paired_single_file(
     eprintln!("  Output: {}", output_path.display());
 
     let source_header = trim_galore::bam::peek_header(input)?;
-    let (mut r1, mut r2) = BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
-        // N workers trim and encode, N threads compress to BGZF
+        // N threads convert the input records, N workers trim and encode, N threads compress
+        let (r1, r2) =
+            BamReader::open_paired_interleaved_pooled(input, &cli.preserve_tags, cli.cores)?;
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             Some(&source_header),
@@ -1812,6 +1817,8 @@ fn run_ubam_output_paired_single_file(
         sink.finish()?;
         out
     } else {
+        let (mut r1, mut r2) =
+            BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
         let mut writer = trim_galore::bam::BamWriter::create(
             &output_path,
             Some(&source_header),
