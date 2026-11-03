@@ -409,19 +409,23 @@ pub fn open_sync_reader(
 
 /// Open a threaded (background-decompression) reader for `path`, dispatching
 /// by detected format. `preserve_tags` is honoured for BAM input; silently
-/// ignored for FASTQ.
+/// ignored for FASTQ. `workers` is the number of threads that convert the
+/// records of a BAM input (one reads, `workers` convert); with 1 the plain
+/// threaded reader is used. FASTQ input ignores it.
 pub fn open_threaded_reader(
     path: &Path,
     preserve_tags: &[String],
+    workers: usize,
 ) -> Result<Box<dyn crate::fastq::RecordSource>> {
     match detect_input_format(path)? {
         // Detected format wins over the filename; see `open_sync_reader`.
         fmt @ (InputFormat::FastqPlain | InputFormat::FastqGz) => Ok(Box::new(
             crate::fastq::FastqReader::open_threaded_with(path, fmt == InputFormat::FastqGz)?,
         )),
-        InputFormat::UnalignedBam => Ok(Box::new(crate::bam::BamReader::open_threaded_with_tags(
+        InputFormat::UnalignedBam => Ok(Box::new(crate::bam::BamReader::open_threaded_pooled(
             path,
             preserve_tags,
+            workers,
         )?)),
     }
 }
@@ -467,7 +471,7 @@ mod tests {
             enc.finish()?;
         }
 
-        let mut reader = open_threaded_reader(&p, &[])?;
+        let mut reader = open_threaded_reader(&p, &[], 1)?;
         assert_eq!(reader.next_record()?.expect("one record").id, "@r1");
         assert!(reader.next_record()?.is_none());
         Ok(())
