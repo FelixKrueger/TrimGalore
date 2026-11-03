@@ -936,24 +936,39 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
 
     // Tag preservation — append `\tTAG:TYPE:VALUE` in user-specified order.
     // Missing tags from a specific record are silently skipped (per-record).
+    //
+    // One pass over the record's aux fields (looking each tag up separately
+    // re-scans the fields once per requested tag, which made this the
+    // dominant cost of reading a uBAM). The first occurrence of a tag wins,
+    // as with `Data::get`.
     if !tags.is_empty() {
-        let data = rec.data();
-        for tag_name in tags {
-            let bytes = tag_name.as_bytes();
-            debug_assert_eq!(
-                bytes.len(),
-                2,
-                "CLI parser must enforce 2-char SAM tag names"
-            );
-            let tag = Tag::new(bytes[0], bytes[1]);
-            if let Some(value_result) = data.get(&tag) {
-                let value = value_result.with_context(|| {
-                    format!("failed to read tag '{}' from BAM record", tag_name)
-                })?;
+        let want: Vec<[u8; 2]> = tags
+            .iter()
+            .map(|t| {
+                let b = t.as_bytes();
+                debug_assert_eq!(b.len(), 2, "CLI parser must enforce 2-char SAM tag names");
+                [b[0], b[1]]
+            })
+            .collect();
+        let mut text = String::new();
+        let mut spans: Vec<Option<(usize, usize)>> = vec![None; tags.len()];
+        for field in rec.data().iter() {
+            let (tag, value) = field.context("failed to read an aux field from BAM record")?;
+            let tag_bytes: &[u8; 2] = tag.as_ref();
+            for (i, w) in want.iter().enumerate() {
+                if w == tag_bytes && spans[i].is_none() {
+                    let start = text.len();
+                    append_tag_type_and_value(&mut text, &value)?;
+                    spans[i] = Some((start, text.len()));
+                }
+            }
+        }
+        for (name, span) in tags.iter().zip(&spans) {
+            if let Some((start, end)) = *span {
                 id.push('\t');
-                id.push_str(tag_name);
+                id.push_str(name);
                 id.push(':');
-                append_tag_type_and_value(&mut id, &value)?;
+                id.push_str(&text[start..end]);
             }
         }
     }
