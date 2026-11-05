@@ -33,15 +33,12 @@ anyhow = "1"
 memchr = "2"
 log = "0.4"
 env_logger = "0.11"
-# Bundled FastQC integration. Exact-pin: brand-new crate (v1.0.0 published
-# 2026-04-26) — treat upstream bumps as deliberate-test events. See
-# /Users/fkrueger/.claude/plans/bundled-fastqc-rust.md for the design notes.
-# v1.0.1 (2026-04-26) fixes percentage-precision in >>Overrepresented sequences
-# (ewels/FastQC-Rust#2); restored byte-identity to Java FastQC 0.12.1 for that
-# section.
+# Bundled FastQC integration, tracking Java FastQC 0.13.0. Exact-pinned: the
+# report is a tested output surface, so bumps are deliberate-test events.
+# See /Users/fkrueger/.claude/plans/bundled-fastqc-rust.md for the design notes.
 fastqc-rust = "=1.1.1"
 # uBAM input support (#316). Exact-pinned to the version already pulled
-# transitively via fastqc-rust 1.0.1 — using the `noodles` umbrella crate with
+# transitively via fastqc-rust 1.1.1 — using the `noodles` umbrella crate with
 # features=["bam"] reuses that tree rather than forcing a parallel-version
 # compile. Treat upstream bumps as deliberate-test events.
 # See plans/06252026_ubam-input-support/PLAN.md §5 step 1.

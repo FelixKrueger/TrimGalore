@@ -28,8 +28,8 @@
 //! "-o DIR"` relocates both artefacts into `DIR`, which must already exist.
 //!
 //! Those two suffixes are the whole set: `--extract` is not in the curated `--fastqc_args`
-//! subset, so no `_fastqc/` directory appears, and `--svg` sets a rendering flag without
-//! writing an `.svg` file.
+//! subset, so no `_fastqc/` directory appears, and neither `--png` nor the no-op `--svg`
+//! writes an image file beside the primary artefacts.
 //!
 //! `--hardtrim5/3`, `--clock`, `--implicon` and paired FASTQ output from a single
 //! interleaved uBAM reach no `fastqc::run` call site, so `Cli::validate` refuses a FastQC

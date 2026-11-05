@@ -2,11 +2,10 @@
 //!
 //! Replaces the v0.6.x-style shell-out to an external `fastqc` binary
 //! with an in-process call. Targets byte-equivalent output to Java
-//! FastQC 0.12.1 — the same version we previously bundled in the Docker
-//! image — see <https://github.com/ewels/FastQC-Rust> for the upstream
-//! crate. The bundled approach removes Java + the FastQC tarball as
-//! runtime dependencies, completing the "single static binary, zero
-//! deps" story for the v2.x rewrite.
+//! FastQC 0.13.0 — see <https://github.com/ewels/FastQC-Rust> for the
+//! upstream crate. The bundled approach removes Java + the FastQC
+//! tarball as runtime dependencies, completing the "single static
+//! binary, zero deps" story for the v2.x rewrite.
 //!
 //! Public entry point: [`run`]. Callers in `src/main.rs` invoke it with a
 //! trimmed output path — FASTQ on the default path, BAM on the
@@ -85,8 +84,8 @@ pub fn run(
 /// every new upstream flag to require a trim-galore release.
 ///
 /// Flags handled:
-///   `--nogroup`, `--expgroup`, `--quiet`, `--svg`, `--nano`,
-///   `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`.
+///   `--nogroup`, `--expgroup`, `--quiet`, `--png`, `--svg` (no-op),
+///   `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`.
 fn apply_fastqc_args(config: &mut FastQCConfig, raw: &str) {
     let tokens: Vec<&str> = raw.split_whitespace().collect();
     let mut i = 0;

@@ -64,7 +64,7 @@ Single binary (`src/main.rs` is the only `[[bin]]`); the rest is a library crate
 
 ## Bundled FastQC dependency
 
-`fastqc-rust` is exact-pinned (`=1.0.1`). The pin is deliberate: the crate is brand-new (v1.0.0 published 2026-04-26) and any bump should be taken as a deliberate-test event with output-byte-identity re-verified against Java FastQC 0.12.1. The CI `validation` job has a smoke test that asserts (a) `fastqc` is **not** on `$PATH` (so a green run proves the bundled library did the work) and (b) the produced `.zip` contains `summary.txt`, `fastqc_data.txt`, `Images/`, `Icons/`.
+`fastqc-rust` is exact-pinned (`=1.1.1`, tracking Java FastQC 0.13.0). The pin is deliberate: the bundled report is a tested output surface, so any bump is a deliberate-test event whose output should be re-verified against the Java FastQC release it tracks. The CI `validation` job has a smoke test that asserts (a) `fastqc` is **not** on `$PATH` (so a green run proves the bundled library did the work) and (b) the produced `.zip` contains `summary.txt`, `fastqc_data.txt`, `Images/`, `Icons/` — it does **not** check report content.
 
 ## Conventions worth knowing
 

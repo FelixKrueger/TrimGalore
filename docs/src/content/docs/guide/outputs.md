@@ -146,10 +146,10 @@ Two combinations are refused. `--clump_only` rejects `--rename` at any output fo
 
 ## FastQC
 
-`--fastqc` runs the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library on the trimmed output files after pair validation, producing FastQC 0.12.1-compatible HTML + ZIP reports alongside the trimmed output. Works on both FASTQ output (default) and uBAM output (`--output-format ubam`) — `fastqc-rust` reads `.bam` natively, so no intermediate conversion. No Java or external `fastqc` install needed.
+`--fastqc` runs the bundled [`fastqc-rust`](https://crates.io/crates/fastqc-rust) library on the trimmed output files after pair validation, producing FastQC 0.13.0-compatible HTML + ZIP reports alongside the trimmed output. Works on both FASTQ output (default) and uBAM output (`--output-format ubam`) — `fastqc-rust` reads `.bam` natively, so no intermediate conversion. No Java or external `fastqc` install needed.
 
 Two situations write no report and reject the flag rather than ignoring it: the four specialty modes (`--hardtrim5`, `--hardtrim3`, `--clock`, `--implicon`), and `--paired` given a single interleaved uBAM with FASTQ output. For that last one, `--output-format ubam` does produce a report.
 
 For paired-end runs, FastQC is invoked once per trimmed primary output — so PE FASTQ produces two reports (one per mate), while PE uBAM produces a **single** report per pair (uBAM PE output is one interleaved BAM, and the report covers both mates pooled). `--retain_unpaired`'s `*_unpaired_{1,2}` files get no report, and `--passthrough` adds a third report for its carrier output.
 
-`--fastqc_args "..."` passes a subset of FastQC flags through. Currently supported: `--nogroup`, `--expgroup`, `--quiet`, `--svg`, `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`. Other flags emit a warning and are ignored.
+`--fastqc_args "..."` passes a subset of FastQC flags through. Currently supported: `--nogroup`, `--expgroup`, `--quiet`, `--png`, `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`. `--svg` is accepted as a no-op, since SVG graphs are the default. Other flags emit a warning and are ignored.

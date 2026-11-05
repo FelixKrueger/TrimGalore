@@ -47,13 +47,11 @@ updates:
     # need scoped human review). Dependabot has already tried 0.88 → 0.109 in
     # PR #326 (5 CI failures, closed with rationale) — silence future attempts.
     #
-    # fastqc-rust is exact-pinned (`=1.0.1`) because the bundled report must stay
-    # byte-identical to Java FastQC 0.12.1, which the validation job checks. The
-    # grouping above defeated that: PR #500 batched `=1.0.1` → `=1.1.0` into the
-    # weekly patch/minor PR, where it broke the build (`FastQCConfig` dropped
-    # `svg_output`, `threads` became `Option<usize>`) and would have retargeted
-    # the report at Java 0.13.0. That bump is a deliberate-test event with its own
-    # output re-verification, not a batched line item.
+    # fastqc-rust is exact-pinned (`=1.1.1`) because the bundled report is a tested
+    # output surface and a bump retargets it at a new Java FastQC release. The
+    # grouping above defeated that: PR #500 batched a bump into the weekly
+    # patch/minor PR, where it broke the build. Such a bump is a deliberate-test
+    # event with its own output re-verification, not a batched line item.
     #
     # mimalloc is exact-pinned (`=0.1.52`) for the same reason the Cargo.toml
     # comment gives: allocator changes move peak RSS, which the clumpify-memory
