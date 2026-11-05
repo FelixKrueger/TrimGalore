@@ -2,11 +2,10 @@
 //!
 //! Replaces the v0.6.x-style shell-out to an external `fastqc` binary
 //! with an in-process call. Targets byte-equivalent output to Java
-//! FastQC 0.12.1 — the same version we previously bundled in the Docker
-//! image — see <https://github.com/ewels/FastQC-Rust> for the upstream
-//! crate. The bundled approach removes Java + the FastQC tarball as
-//! runtime dependencies, completing the "single static binary, zero
-//! deps" story for the v2.x rewrite.
+//! FastQC 0.13.0 — see <https://github.com/ewels/FastQC-Rust> for the
+//! upstream crate. The bundled approach removes Java + the FastQC
+//! tarball as runtime dependencies, completing the "single static
+//! binary, zero deps" story for the v2.x rewrite.
 //!
 //! Public entry point: [`run`]. Callers in `src/main.rs` invoke it with a
 //! trimmed output path — FASTQ on the default path, BAM on the
@@ -34,6 +33,8 @@ use fastqc_rust::{config::FastQCConfig, runner};
 ///                 directory (fastqc-rust's default).
 /// `cores`       — threading budget for `fastqc-rust`'s internal rayon
 ///                 pool. Always at least 1.
+/// `phred64`     — declares Phred+64 input for the FASTQ output path. BAM
+///                 declares its own encoding, so pass `false` there.
 /// Threads `run` will give FastQC: `--fastqc_args -t N` overrides `cores`.
 /// The memory model charges this, not `--cores`.
 pub fn resolved_threads(fastqc_args: Option<&str>, cores: usize) -> usize {
@@ -56,10 +57,12 @@ pub fn run(
     fastqc_args: Option<&str>,
     output_dir: Option<&Path>,
     cores: usize,
+    phred64: bool,
 ) -> Result<()> {
     let mut config = FastQCConfig {
         output_dir: output_dir.map(|p| p.to_path_buf()),
-        threads: cores.max(1),
+        threads: Some(cores.max(1)),
+        phred64,
         // trim-galore prints "Running FastQC on …" itself; suppress
         // fastqc-rust's per-file progress chatter to avoid
         // double-logging.
@@ -72,8 +75,18 @@ pub fn run(
     }
 
     eprintln!("\nRunning FastQC on {}", output_path.display());
-    runner::run(&config, &[output_path.to_path_buf()])
-        .map_err(|code| anyhow::anyhow!("FastQC analysis failed (exit code {})", code))
+    runner::run(&config, &[output_path.to_path_buf()]).map_err(|code| {
+        if config.phred64 {
+            anyhow::anyhow!(
+                "FastQC analysis failed (exit code {code}). --phred64 declares the \
+                 input as Phred+64, and FastQC rejects a file holding any quality \
+                 character below ASCII 64 rather than reporting scores 31 too high. \
+                 Drop --phred64 if the data is really Phred+33."
+            )
+        } else {
+            anyhow::anyhow!("FastQC analysis failed (exit code {})", code)
+        }
+    })
 }
 
 /// Translate a subset of Java FastQC CLI flags into [`FastQCConfig`]
@@ -85,8 +98,8 @@ pub fn run(
 /// every new upstream flag to require a trim-galore release.
 ///
 /// Flags handled:
-///   `--nogroup`, `--expgroup`, `--quiet`, `--svg`, `--nano`,
-///   `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`.
+///   `--nogroup`, `--expgroup`, `--quiet`, `--png`, `--svg` (no-op),
+///   `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`.
 fn apply_fastqc_args(config: &mut FastQCConfig, raw: &str) {
     let tokens: Vec<&str> = raw.split_whitespace().collect();
     let mut i = 0;
@@ -95,13 +108,16 @@ fn apply_fastqc_args(config: &mut FastQCConfig, raw: &str) {
             "--nogroup" => config.nogroup = true,
             "--expgroup" => config.expgroup = true,
             "--quiet" => config.quiet = true,
-            "--svg" => config.svg_output = true,
+            // SVG graphs are the default; `--svg` is kept as a no-op so the
+            // flag that used to select them is not an error.
+            "--svg" => {}
+            "--png" => config.png_output = true,
             "--nano" => config.nano = true,
             "--nofilter" => config.nofilter = true,
             "--casava" => config.casava = true,
             "-t" | "--threads" => {
-                if let Some(v) = tokens.get(i + 1).and_then(|t| t.parse().ok()) {
-                    config.threads = v;
+                if let Some(v) = tokens.get(i + 1).and_then(|t| t.parse::<usize>().ok()) {
+                    config.threads = Some(v);
                     i += 1;
                 }
             }
@@ -141,13 +157,13 @@ mod tests {
     #[test]
     fn test_apply_fastqc_args_threads() {
         let config = parse("-t 4");
-        assert_eq!(config.threads, 4);
+        assert_eq!(config.threads, Some(4));
     }
 
     #[test]
     fn test_apply_fastqc_args_threads_long_form() {
         let config = parse("--threads 8");
-        assert_eq!(config.threads, 8);
+        assert_eq!(config.threads, Some(8));
     }
 
     #[test]
@@ -163,8 +179,9 @@ mod tests {
     fn test_apply_fastqc_args_combined() {
         let config = parse("--nogroup --svg -t 2");
         assert!(config.nogroup);
-        assert!(config.svg_output);
-        assert_eq!(config.threads, 2);
+        // SVG is the default, so --svg sets nothing.
+        assert!(!config.png_output);
+        assert_eq!(config.threads, Some(2));
     }
 
     #[test]

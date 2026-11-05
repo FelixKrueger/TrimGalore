@@ -32,7 +32,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 - **Clumpify compression (v2.2+)** — opt-in `--clumpify` reorders reads by canonical 16-mer minimizer so similar reads share gzip dictionary windows; combined with `--compression 1–9` it shrinks output 15–55% on fragment-clustered data (ATAC, Ribo, RRBS, RNA-seq, MiSeq amplicons). Coverage-diverse data (WGBS PE, scRNA-seq R2) regress — see [Clumpy compression](https://www.trimgalore.com/performance/clumpy/) for the per-data-type guidance
 - **Lossless reorder-only mode** — opt-in `--clump_only` applies the same clumping reorder as a standalone run-and-exit mode, without any trimming, filtering, or adapter detection. Output records are byte-identical to input records (header + sequence + quality); only file-level order changes. Supports both FASTQ and unaligned BAM (uBAM) in/out via `--output-format ubam`; aux tags round-trip losslessly via `--preserve-tags`. Suits archival recompression pipelines (including 10X-style single-cell uBAM with `CB`/`UB` tags) that need the size reduction but require record-level fidelity. See [Clump-only](https://www.trimgalore.com/modes/clump-only/) for details
 - **Multiome / scATAC passthrough** — opt-in `--passthrough <FILE>` carries a third FASTQ (typically the I1/I2 cell-barcode read) untrimmed but in lockstep with R1/R2; records dropped by length/quality/N filters cascade to the passthrough output. Designed for 10X Multiome ATAC-seq libraries with modified ATAC adapters that Cellranger Arc can't detect — trim R1/R2 against your own `-a`/`-a2` while keeping the barcode read aligned in a single invocation. Per-record three-way header sync check catches mid-file truncation / desync loudly.
-- **FastQC integration** — optional post-trimming quality reports built in via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library; produces FastQC 0.12.1-compatible HTML + ZIP outputs without requiring Java or an external `fastqc` on `$PATH`
+- **FastQC integration** — optional post-trimming quality reports built in via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library; produces FastQC 0.13.0-compatible HTML + ZIP outputs without requiring Java or an external `fastqc` on `$PATH`
 - **MultiQC compatible** — trimming reports parse cleanly in MultiQC dashboards (text + JSON)
 - **Demultiplexing** — 3' inline barcode demultiplexing
 
@@ -87,7 +87,7 @@ Multi-arch images (amd64 + arm64) are available from GitHub Container Registry:
 docker run --rm -v "$PWD":/data -w /data ghcr.io/felixkrueger/trimgalore:latest trim_galore input.fastq.gz
 ```
 
-FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.3.0`), `:v2.3.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
+FastQC is built into the binary itself via the bundled fastqc-rust library — no external `fastqc` or Java runtime needed in the image. Tags published: `:latest` (latest stable, currently `v2.4.0`), `:v2.4.0` (pinned to a specific release), `:beta` (latest prerelease — only set during an active beta cycle), and `:dev` (every push to the `dev` branch). See the [docs site install page](https://www.trimgalore.com/install/) for the full table.
 
 ### Prebuilt binaries
 

@@ -3,7 +3,27 @@
 
 ### Unreleased
 
+### Version 2.4.0 (Release on 3 November 2026)
+
 #### Changes
+
+- **The bundled FastQC engine moves to Java FastQC 0.13.0, clearing 19 security advisories**
+  ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). `fastqc-rust` is now pinned to
+  1.1.1, which drops `zstd` and `libz-sys` from the dependency graph and moves `zip` to 9.3.0.
+  Reports gain `Mean Length` and `Median Length` and lose `Sequences flagged as poor quality`;
+  MultiQC parses both shapes without warnings and every statistic it reports is unchanged.
+
+- **`--fastqc_args --png` selects PNG charts; `--svg` is now a no-op**
+  ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). SVG is the default in FastQC
+  0.13.0, so `--svg` is accepted and ignored rather than rejected. Both image sets are written to
+  the `.zip` either way; the flag only picks which the HTML embeds.
+
+- **`--phred64` is declared to the bundled FastQC engine, and mislabelled input is refused**
+  ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). FastQC 0.13.0 reads Phred+33
+  unless told otherwise, where 0.12.1 inferred the encoding from the data, and Trim Galore writes
+  FASTQ quality verbatim. A Phred+33 file mistakenly run with `--phred64` and `--fastqc` now fails
+  at the FastQC step rather than producing a report; the startup NOTE naming the flag fires on
+  every output path.
 
 - **Poly-G is removed before poly-A, so a tail sitting behind a G-run is trimmed**
   ([#504](https://github.com/FelixKrueger/TrimGalore/issues/504)). The poly-A scan is anchored at the

@@ -1,6 +1,6 @@
 [package]
 name = "trim-galore"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Fast adapter and quality trimming for NGS data"
@@ -33,15 +33,12 @@ anyhow = "1"
 memchr = "2"
 log = "0.4"
 env_logger = "0.11"
-# Bundled FastQC integration. Exact-pin: brand-new crate (v1.0.0 published
-# 2026-04-26) — treat upstream bumps as deliberate-test events. See
-# /Users/fkrueger/.claude/plans/bundled-fastqc-rust.md for the design notes.
-# v1.0.1 (2026-04-26) fixes percentage-precision in >>Overrepresented sequences
-# (ewels/FastQC-Rust#2); restored byte-identity to Java FastQC 0.12.1 for that
-# section.
-fastqc-rust = "=1.0.1"
+# Bundled FastQC integration, tracking Java FastQC 0.13.0. Exact-pinned: the
+# report is a tested output surface, so bumps are deliberate-test events.
+# See /Users/fkrueger/.claude/plans/bundled-fastqc-rust.md for the design notes.
+fastqc-rust = "=1.1.1"
 # uBAM input support (#316). Exact-pinned to the version already pulled
-# transitively via fastqc-rust 1.0.1 — using the `noodles` umbrella crate with
+# transitively via fastqc-rust 1.1.1 — using the `noodles` umbrella crate with
 # features=["bam"] reuses that tree rather than forcing a parallel-version
 # compile. Treat upstream bumps as deliberate-test events.
 # See plans/06252026_ubam-input-support/PLAN.md §5 step 1.
@@ -56,6 +53,10 @@ tempfile = "3"
 # dev-dep so test code can construct `bstr::BStr` for noodles-aux-Value
 # variants that take `&'a BStr` (e.g. `Value::Hex`).
 bstr = "1"
+# Already in the dep graph (transitive via fastqc-rust); promoted to a direct
+# dev-dep so test code can read fastqc_data.txt out of the report archive.
+# Features mirror fastqc-rust's own spec, so the resolved tree is unchanged.
+zip = { version = "9", default-features = false, features = ["deflate", "time"] }
 
 [profile.release]
 opt-level = 3
