@@ -117,7 +117,7 @@ trim_galore --paired interleaved.bam
 # `-T`-compatible, tab-separated). Ignored for FASTQ input.
 trim_galore --preserve-tags CB,UB sample.bam
 
-# uBAM output — emit unaligned BAM instead of FASTQ. Single-threaded; the
+# uBAM output — emit unaligned BAM instead of FASTQ. Uses --cores; the
 # input `@HD`/`@PG` chain is propagated and a trim_galore `@PG` line is
 # appended. Paired output is ONE interleaved BAM (`<stem>_val.bam`) with
 # FREAD1/FREAD2 flag bits per record (samtools/Picard/fgbio convention).

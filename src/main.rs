@@ -41,17 +41,20 @@ fn sanity_check_any(path: &std::path::Path) -> Result<()> {
 
 /// Open a threaded reader for `path`, dispatching by detected format.
 /// `preserve_tags` is honoured for BAM input; silently ignored for FASTQ.
+/// `workers` is the number of threads that convert the records of a BAM input.
 fn open_threaded_reader(
     path: &std::path::Path,
     preserve_tags: &[String],
+    workers: usize,
 ) -> Result<Box<dyn RecordSource>> {
     match detect_input_format(path)? {
         InputFormat::FastqPlain | InputFormat::FastqGz => {
             Ok(Box::new(FastqReader::open_threaded(path)?))
         }
-        InputFormat::UnalignedBam => Ok(Box::new(BamReader::open_threaded_with_tags(
+        InputFormat::UnalignedBam => Ok(Box::new(BamReader::open_threaded_pooled(
             path,
             preserve_tags,
+            workers,
         )?)),
     }
 }
@@ -195,24 +198,14 @@ fn main() -> Result<()> {
     // (hardtrim) and normal-trim BAM paths see them. Code-review round-2
     // B-NIT-2 consolidation: previously these lived in run_ubam_output and
     // never fired on the hardtrim BAM paths (which return earlier).
-    if matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam) {
-        if cli.cores > 1 {
-            eprintln!(
-                "NOTE: --output-format ubam uses single-threaded compression in v1; \
-                 --cores {} is ignored. For high-throughput uBAM output, run \
-                 multiple invocations in parallel.",
-                cli.cores
-            );
-        }
-        if any_bam {
-            // PLAN §3.3 step 4 — uBAM-in → uBAM-out cannot carry the BAM
-            // missing-qual sentinel (0xFF) through the FASTQ intermediate.
-            eprintln!(
-                "NOTE: uBAM-in → uBAM-out: missing-qual sentinel (BAM 0xFF) does \
-                 NOT round-trip — records with no original qual will emit Phred 0 \
-                 ('!' × seq_len) on output instead of the 0xFF sentinel."
-            );
-        }
+    if matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam) && any_bam {
+        // PLAN §3.3 step 4 — uBAM-in → uBAM-out cannot carry the BAM
+        // missing-qual sentinel (0xFF) through the FASTQ intermediate.
+        eprintln!(
+            "NOTE: uBAM-in → uBAM-out: missing-qual sentinel (BAM 0xFF) does \
+             NOT round-trip — records with no original qual will emit Phred 0 \
+             ('!' × seq_len) on output instead of the 0xFF sentinel."
+        );
     }
 
     // Specialty modes — bypass normal trimming pipeline entirely
@@ -721,7 +714,7 @@ fn run_single_file(
     let stats = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpify` always routes here (validation enforces cores >= 2).
-        let reader = open_threaded_reader(input, &cli.preserve_tags)?;
+        let reader = open_threaded_reader(input, &cli.preserve_tags, cli.cores)?;
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_single_end_parallel(
             reader,
@@ -947,8 +940,8 @@ fn run_paired(
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
         // Worker-pool parallel path: N workers each handle trim + compress.
         // `--clumpify` always routes here (validation enforces cores >= 2).
-        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags)?;
-        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags)?;
+        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags, cli.cores)?;
+        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags, cli.cores)?;
         let reader_passthrough: Option<Box<dyn RecordSource>> = match passthrough_input {
             Some(p) => Some(Box::new(FastqReader::open_threaded(p)?)),
             None => None,
@@ -1237,7 +1230,8 @@ fn run_paired_ubam_single_file(
     };
 
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 || cli.clumpify {
-        let (r1, r2) = BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
+        let (r1, r2) =
+            BamReader::open_paired_interleaved_pooled(input, &cli.preserve_tags, cli.cores)?;
         let clump_layout = resolve_clump_layout(cli)?;
         parallel::run_paired_end_parallel(
             Box::new(r1),
@@ -1523,15 +1517,29 @@ fn run_ubam_output_single(
         eprintln!("NOTE: input is FASTQ; output uBAM records will have no aux fields.");
     }
 
-    let mut reader = open_sync_reader(input, &cli.preserve_tags)?;
-    let mut writer = trim_galore::bam::BamWriter::create(
-        &output_path,
-        source_header.as_ref(),
-        &cli.preserve_tags,
-        command_line,
-    )?;
-    let stats = trimmer::run_single_end_to_bam(reader.as_mut(), &mut writer, config)?;
-    writer.finish()?;
+    let stats = if cli.cores > 1 {
+        let reader = open_threaded_reader(input, &cli.preserve_tags, cli.cores)?;
+        let mut sink = trim_galore::bam::ParallelBamSink::create(
+            &output_path,
+            source_header.as_ref(),
+            command_line,
+            cli.cores,
+        )?;
+        let out = parallel::run_single_end_parallel_to_bam(reader, &mut sink, config, cli.cores)?;
+        sink.finish()?;
+        out
+    } else {
+        let mut reader = open_sync_reader(input, &cli.preserve_tags)?;
+        let mut writer = trim_galore::bam::BamWriter::create(
+            &output_path,
+            source_header.as_ref(),
+            &cli.preserve_tags,
+            command_line,
+        )?;
+        let out = trimmer::run_single_end_to_bam(reader.as_mut(), &mut writer, config)?;
+        writer.finish()?;
+        out
+    };
 
     // Summary (shape mirrors `run_single_file`).
     eprintln!("\n=== Summary ===\n");
@@ -1652,21 +1660,38 @@ fn run_ubam_output_paired_two_files(
         InputFormat::FastqPlain | InputFormat::FastqGz => None,
     };
 
-    let mut reader_r1 = open_sync_reader(input_r1, &cli.preserve_tags)?;
-    let mut reader_r2 = open_sync_reader(input_r2, &cli.preserve_tags)?;
-    let mut writer = trim_galore::bam::BamWriter::create(
-        &output_path,
-        source_header.as_ref(),
-        &cli.preserve_tags,
-        command_line,
-    )?;
-    let (stats_r1, stats_r2, pair_stats) = trimmer::run_paired_end_to_bam(
-        reader_r1.as_mut(),
-        reader_r2.as_mut(),
-        &mut writer,
-        config,
-    )?;
-    writer.finish()?;
+    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
+        let reader_r1 = open_threaded_reader(input_r1, &cli.preserve_tags, cli.cores)?;
+        let reader_r2 = open_threaded_reader(input_r2, &cli.preserve_tags, cli.cores)?;
+        let mut sink = trim_galore::bam::ParallelBamSink::create(
+            &output_path,
+            source_header.as_ref(),
+            command_line,
+            cli.cores,
+        )?;
+        let out = parallel::run_paired_end_parallel_to_bam(
+            reader_r1, reader_r2, &mut sink, config, cli.cores,
+        )?;
+        sink.finish()?;
+        out
+    } else {
+        let mut reader_r1 = open_sync_reader(input_r1, &cli.preserve_tags)?;
+        let mut reader_r2 = open_sync_reader(input_r2, &cli.preserve_tags)?;
+        let mut writer = trim_galore::bam::BamWriter::create(
+            &output_path,
+            source_header.as_ref(),
+            &cli.preserve_tags,
+            command_line,
+        )?;
+        let out = trimmer::run_paired_end_to_bam(
+            reader_r1.as_mut(),
+            reader_r2.as_mut(),
+            &mut writer,
+            config,
+        )?;
+        writer.finish()?;
+        out
+    };
 
     // Summaries.
     eprintln!("\n=== Summary (Read 1) ===\n");
@@ -1772,16 +1797,38 @@ fn run_ubam_output_paired_single_file(
     eprintln!("  Output: {}", output_path.display());
 
     let source_header = trim_galore::bam::peek_header(input)?;
-    let (mut r1, mut r2) = BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
-    let mut writer = trim_galore::bam::BamWriter::create(
-        &output_path,
-        Some(&source_header),
-        &cli.preserve_tags,
-        command_line,
-    )?;
-    let (stats_r1, stats_r2, pair_stats) =
-        trimmer::run_paired_end_to_bam(&mut r1, &mut r2, &mut writer, config)?;
-    writer.finish()?;
+    let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
+        // N threads convert the input records, N workers trim and encode, N threads compress
+        let (r1, r2) =
+            BamReader::open_paired_interleaved_pooled(input, &cli.preserve_tags, cli.cores)?;
+        let mut sink = trim_galore::bam::ParallelBamSink::create(
+            &output_path,
+            Some(&source_header),
+            command_line,
+            cli.cores,
+        )?;
+        let out = parallel::run_paired_end_parallel_to_bam(
+            Box::new(r1),
+            Box::new(r2),
+            &mut sink,
+            config,
+            cli.cores,
+        )?;
+        sink.finish()?;
+        out
+    } else {
+        let (mut r1, mut r2) =
+            BamReader::open_paired_interleaved_with_tags(input, &cli.preserve_tags)?;
+        let mut writer = trim_galore::bam::BamWriter::create(
+            &output_path,
+            Some(&source_header),
+            &cli.preserve_tags,
+            command_line,
+        )?;
+        let out = trimmer::run_paired_end_to_bam(&mut r1, &mut r2, &mut writer, config)?;
+        writer.finish()?;
+        out
+    };
 
     // Summaries (mirror `run_paired_ubam_single_file`).
     eprintln!("\n=== Summary (Read 1) ===\n");

@@ -14,8 +14,8 @@ pub enum OutputFormat {
     /// FASTQ output, mirroring input compression (default).
     #[default]
     Fastq,
-    /// Unaligned BAM output. Always single-threaded in v1; --clumpify,
-    /// --passthrough, --clock, --implicon, --demux are rejected at validation.
+    /// Unaligned BAM output; uses --cores. --clumpify, --passthrough, --clock,
+    /// --implicon, --demux are rejected at validation.
     #[clap(name = "ubam")]
     UBam,
 }
@@ -209,8 +209,8 @@ pub struct Cli {
     /// Output container format. Default `fastq` keeps existing behaviour
     /// (input-compression-mirroring FASTQ); `ubam` emits unaligned BAM with
     /// aux tags propagated from uBAM inputs (when `--preserve-tags` is set).
-    /// uBAM output is always single-threaded in v1; see the rejection rules
-    /// in `Cli::validate` for incompatible combinations.
+    /// uBAM output uses --cores; see the rejection rules in `Cli::validate`
+    /// for incompatible combinations.
     /// See `plans/06252026_pluggable-io-formats/phase1-trimgalore-formats/PLAN.md`.
     #[clap(long = "output-format", value_enum, default_value_t = OutputFormat::Fastq)]
     pub output_format: OutputFormat,
