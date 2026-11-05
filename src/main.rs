@@ -329,9 +329,9 @@ fn main() -> Result<()> {
     // quality arithmetic) it would silently zero the output quality once the
     // writer honours the offset.
     //
-    // Rejected uniformly rather than per-mode. `--hardtrim5/3` and
-    // `--clump_only` currently accept the flag as an inert no-op, so this does
-    // remove working invocations — but a mode-dependent rule ("rejected unless
+    // Rejected uniformly rather than per-mode. `--hardtrim5/3` accepts the flag
+    // as an inert no-op, and `--clump_only` does unless `--fastqc` is also given,
+    // so this does remove working invocations — but a mode-dependent rule ("rejected unless
     // you're in hardtrim, or clump-only-to-FASTQ, …") is worse to document,
     // worse to test, and one refactor away from being wrong.
     //
@@ -484,6 +484,20 @@ fn main() -> Result<()> {
     // (hardtrim) and normal-trim BAM paths see them. Code-review round-2
     // B-NIT-2 consolidation: previously these lived in run_ubam_output and
     // never fired on the hardtrim BAM paths (which return earlier).
+    // `--phred64` describes the input, so it is reported on every output path.
+    if cli.phred64 {
+        eprintln!(
+            "NOTE: --phred64 declares the input as Phred+64 (ASCII+64) — verify that \
+             it really is. Wherever quality scores are read (quality trimming, and \
+             BAM QUAL on uBAM output), Phred+33 data taken as Phred+64 loses 31 from \
+             every score, floored at 0: typical Q2–Q41 becomes Q0–Q10, which reads \
+             as plausible poor-quality data rather than obviously empty. Modes that \
+             do no quality arithmetic, such as --hardtrim5/3 and --clump_only writing \
+             FASTQ, pass the scores through untouched. With --fastqc the FastQC step \
+             refuses a file holding any quality character below ASCII 64."
+        );
+    }
+
     if matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam) {
         if cli.cores > 1 {
             eprintln!(
@@ -504,19 +518,12 @@ fn main() -> Result<()> {
             );
         }
         if cli.phred64 {
-            // Issue #358 O-3 — make the encoding assumption visible. Without
-            // this, a Phred+33 file mistakenly run with --phred64 produces an
-            // all-Phred-0 BAM that is indistinguishable downstream from
-            // legitimate Q0 data. Also disambiguates the trimming report,
-            // which prints "Quality encoding type selected: ASCII+64" (a
-            // statement about the INPUT) next to a BAM holding raw scores.
+            // Issue #358 O-3 — the trimming report prints "Quality encoding type
+            // selected: ASCII+64", which is a statement about the INPUT, next to a
+            // BAM holding raw scores.
             eprintln!(
-                "NOTE: input is Phred+64 (ASCII+64); output BAM QUAL stores true \
-                 Phred scores (0–93) per the SAM spec, not ASCII. Verify the input \
-                 really is Phred+64 — running Phred+33 data with --phred64 reduces \
-                 every score by 31 (floored at 0), turning typical Q2–Q41 into \
-                 Q0–Q10. The result reads as plausible poor-quality data rather \
-                 than obviously empty, so it is easy to miss downstream."
+                "NOTE: output BAM QUAL stores true Phred scores (0–93) per the SAM \
+                 spec, not ASCII."
             );
         }
     }

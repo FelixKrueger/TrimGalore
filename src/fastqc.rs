@@ -75,8 +75,18 @@ pub fn run(
     }
 
     eprintln!("\nRunning FastQC on {}", output_path.display());
-    runner::run(&config, &[output_path.to_path_buf()])
-        .map_err(|code| anyhow::anyhow!("FastQC analysis failed (exit code {})", code))
+    runner::run(&config, &[output_path.to_path_buf()]).map_err(|code| {
+        if config.phred64 {
+            anyhow::anyhow!(
+                "FastQC analysis failed (exit code {code}). --phred64 declares the \
+                 input as Phred+64, and FastQC rejects a file holding any quality \
+                 character below ASCII 64 rather than reporting scores 31 too high. \
+                 Drop --phred64 if the data is really Phred+33."
+            )
+        } else {
+            anyhow::anyhow!("FastQC analysis failed (exit code {})", code)
+        }
+    })
 }
 
 /// Translate a subset of Java FastQC CLI flags into [`FastQCConfig`]

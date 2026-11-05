@@ -348,7 +348,8 @@ pub struct Cli {
     /// Additional arguments to pass to FastQC. Implies --fastqc.
     /// Common flags are translated to the bundled engine: --nogroup, --expgroup,
     /// --quiet, --png, --nano, --nofilter, --casava, -t/--threads, -o/--outdir.
-    /// --svg is accepted as a no-op; SVG graphs are the default.
+    /// --png embeds PNG charts in the HTML instead of SVG; both image sets are
+    /// written to the .zip either way. --svg is accepted as a no-op.
     /// Unrecognised flags emit a warning and are ignored.
     #[clap(long = "fastqc_args", allow_hyphen_values = true)]
     pub fastqc_args: Option<String>,

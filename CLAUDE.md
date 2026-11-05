@@ -55,7 +55,7 @@ Single binary (`src/main.rs` is the only `[[bin]]`); the rest is a library crate
 - `io.rs` — output naming: `*_trimmed.fq(.gz)` (SE), `*_val_{1,2}.fq(.gz)` (PE), `*_unpaired_{1,2}.fq(.gz)`, `*_trimming_report.txt` + `*_trimming_report.json`.
 - `demux.rs` — 3' inline barcode demultiplexing (single-end only, matching the original).
 - `specialty.rs` — `--hardtrim5/3`, `--clock` (Epigenetic Clock UMI), `--implicon` (UMI from R2). Each mode owns its output naming.
-- `fastqc.rs` — bundled FastQC integration via the `fastqc-rust` crate (exact-pinned to `=1.0.1`; treat upstream bumps as deliberate test events). `--fastqc_args` accepts a curated subset of flags; unknown flags warn-and-ignore for forward compatibility.
+- `fastqc.rs` — bundled FastQC integration via the `fastqc-rust` crate (exact-pinned to `=1.1.1`; treat upstream bumps as deliberate test events). `--fastqc_args` accepts a curated subset of flags; unknown flags warn-and-ignore for forward compatibility.
 - `report.rs` — generates the MultiQC-compatible text + JSON trimming reports.
 
 ### Adapter shorthand

@@ -152,4 +152,4 @@ Two situations write no report and reject the flag rather than ignoring it: the 
 
 For paired-end runs, FastQC is invoked once per trimmed primary output — so PE FASTQ produces two reports (one per mate), while PE uBAM produces a **single** report per pair (uBAM PE output is one interleaved BAM, and the report covers both mates pooled). `--retain_unpaired`'s `*_unpaired_{1,2}` files get no report, and `--passthrough` adds a third report for its carrier output.
 
-`--fastqc_args "..."` passes a subset of FastQC flags through. Currently supported: `--nogroup`, `--expgroup`, `--quiet`, `--png`, `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`. `--svg` is accepted as a no-op, since SVG graphs are the default. Other flags emit a warning and are ignored.
+`--fastqc_args "..."` passes a subset of FastQC flags through. Currently supported: `--nogroup`, `--expgroup`, `--quiet`, `--png`, `--nano`, `--nofilter`, `--casava`, `-t`/`--threads`, `-o`/`--outdir`. `--png` embeds PNG charts in the HTML report instead of SVG; both image sets are written to the `.zip` either way. `--svg` is accepted as a no-op. Other flags emit a warning and are ignored.
