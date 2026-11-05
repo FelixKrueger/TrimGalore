@@ -59,7 +59,7 @@ pub fn run(
 ) -> Result<()> {
     let mut config = FastQCConfig {
         output_dir: output_dir.map(|p| p.to_path_buf()),
-        threads: cores.max(1),
+        threads: Some(cores.max(1)),
         // trim-galore prints "Running FastQC on …" itself; suppress
         // fastqc-rust's per-file progress chatter to avoid
         // double-logging.
@@ -95,13 +95,16 @@ fn apply_fastqc_args(config: &mut FastQCConfig, raw: &str) {
             "--nogroup" => config.nogroup = true,
             "--expgroup" => config.expgroup = true,
             "--quiet" => config.quiet = true,
-            "--svg" => config.svg_output = true,
+            // SVG graphs are the default; `--svg` is kept as a no-op so the
+            // flag that used to select them is not an error.
+            "--svg" => {}
+            "--png" => config.png_output = true,
             "--nano" => config.nano = true,
             "--nofilter" => config.nofilter = true,
             "--casava" => config.casava = true,
             "-t" | "--threads" => {
-                if let Some(v) = tokens.get(i + 1).and_then(|t| t.parse().ok()) {
-                    config.threads = v;
+                if let Some(v) = tokens.get(i + 1).and_then(|t| t.parse::<usize>().ok()) {
+                    config.threads = Some(v);
                     i += 1;
                 }
             }
@@ -141,13 +144,13 @@ mod tests {
     #[test]
     fn test_apply_fastqc_args_threads() {
         let config = parse("-t 4");
-        assert_eq!(config.threads, 4);
+        assert_eq!(config.threads, Some(4));
     }
 
     #[test]
     fn test_apply_fastqc_args_threads_long_form() {
         let config = parse("--threads 8");
-        assert_eq!(config.threads, 8);
+        assert_eq!(config.threads, Some(8));
     }
 
     #[test]
@@ -163,8 +166,9 @@ mod tests {
     fn test_apply_fastqc_args_combined() {
         let config = parse("--nogroup --svg -t 2");
         assert!(config.nogroup);
-        assert!(config.svg_output);
-        assert_eq!(config.threads, 2);
+        // SVG is the default, so --svg sets nothing.
+        assert!(!config.png_output);
+        assert_eq!(config.threads, Some(2));
     }
 
     #[test]
