@@ -697,6 +697,7 @@ fn main() -> Result<()> {
                                 cli.compression,
                                 cli.fastqc_requested(),
                                 cli.fastqc_args.as_deref(),
+                                cli.phred64,
                                 cli.no_report_file,
                             )
                             .map(|_| ())
@@ -732,6 +733,7 @@ fn main() -> Result<()> {
                             cli.compression,
                             cli.fastqc_requested(),
                             cli.fastqc_args.as_deref(),
+                            cli.phred64,
                             cli.no_report_file,
                         )?;
                     }
@@ -1566,6 +1568,7 @@ fn run_single_file(
             cli.fastqc_args.as_deref(),
             output_dir,
             cli.cores,
+            cli.phred64,
         )?;
     }
 
@@ -1883,12 +1886,14 @@ fn run_paired(
             cli.fastqc_args.as_deref(),
             output_dir,
             cli.cores,
+            cli.phred64,
         )?;
         fastqc::run(
             &output_r2,
             cli.fastqc_args.as_deref(),
             output_dir,
             cli.cores,
+            cli.phred64,
         )?;
         // --passthrough: also FastQC the carrier output. Note: cell-barcode
         // reads (16-28 bp of uniformly-structured sequence) will produce a
@@ -1896,7 +1901,13 @@ fn run_paired(
         // not a defect. The `--passthrough` help text documents this. (Plan
         // v2 Step 10.)
         if let Some(ref pt_out) = passthrough_output {
-            fastqc::run(pt_out, cli.fastqc_args.as_deref(), output_dir, cli.cores)?;
+            fastqc::run(
+                pt_out,
+                cli.fastqc_args.as_deref(),
+                output_dir,
+                cli.cores,
+                cli.phred64,
+            )?;
         }
     }
 
@@ -2355,6 +2366,7 @@ fn run_ubam_output_single(
             cli.fastqc_args.as_deref(),
             output_dir,
             cli.cores,
+            false,
         )?;
     }
 
@@ -2513,6 +2525,7 @@ fn run_ubam_output_paired_two_files(
             cli.fastqc_args.as_deref(),
             output_dir,
             cli.cores,
+            false,
         )?;
     }
 
@@ -2632,6 +2645,7 @@ fn run_ubam_output_paired_single_file(
             cli.fastqc_args.as_deref(),
             output_dir,
             cli.cores,
+            false,
         )?;
     }
 

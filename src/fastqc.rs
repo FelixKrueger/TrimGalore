@@ -33,6 +33,8 @@ use fastqc_rust::{config::FastQCConfig, runner};
 ///                 directory (fastqc-rust's default).
 /// `cores`       — threading budget for `fastqc-rust`'s internal rayon
 ///                 pool. Always at least 1.
+/// `phred64`     — declares Phred+64 input for the FASTQ output path. BAM
+///                 declares its own encoding, so pass `false` there.
 /// Threads `run` will give FastQC: `--fastqc_args -t N` overrides `cores`.
 /// The memory model charges this, not `--cores`.
 pub fn resolved_threads(fastqc_args: Option<&str>, cores: usize) -> usize {
@@ -55,10 +57,12 @@ pub fn run(
     fastqc_args: Option<&str>,
     output_dir: Option<&Path>,
     cores: usize,
+    phred64: bool,
 ) -> Result<()> {
     let mut config = FastQCConfig {
         output_dir: output_dir.map(|p| p.to_path_buf()),
         threads: Some(cores.max(1)),
+        phred64,
         // trim-galore prints "Running FastQC on …" itself; suppress
         // fastqc-rust's per-file progress chatter to avoid
         // double-logging.

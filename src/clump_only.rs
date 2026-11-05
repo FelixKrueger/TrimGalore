@@ -292,6 +292,7 @@ pub fn clump_only_single(
     compression: u32,
     fastqc_requested: bool,
     fastqc_args: Option<&str>,
+    phred64: bool,
     no_report_file: bool,
 ) -> Result<ClumpOnlyStats> {
     // uBAM input on the FASTQ-output path would drop aux tags and produce
@@ -417,7 +418,7 @@ pub fn clump_only_single(
     // Optional FastQC — new plumbing (specialty modes previously returned
     // before the fastqc::run call in main.rs).
     if fastqc_requested {
-        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
+        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1), phred64)?;
     }
 
     Ok(stats)
@@ -440,6 +441,7 @@ pub fn clump_only_paired(
     compression: u32,
     fastqc_requested: bool,
     fastqc_args: Option<&str>,
+    phred64: bool,
     no_report_file: bool,
 ) -> Result<ClumpOnlyStats> {
     // uBAM input on the FASTQ-output PE path: same rejection as SE, for
@@ -607,8 +609,8 @@ pub fn clump_only_paired(
     }
 
     if fastqc_requested {
-        fastqc::run(&out_r1_path, fastqc_args, output_dir, cores.max(1))?;
-        fastqc::run(&out_r2_path, fastqc_args, output_dir, cores.max(1))?;
+        fastqc::run(&out_r1_path, fastqc_args, output_dir, cores.max(1), phred64)?;
+        fastqc::run(&out_r2_path, fastqc_args, output_dir, cores.max(1), phred64)?;
     }
 
     Ok(stats)
@@ -909,9 +911,10 @@ pub fn clump_only_single_to_bam(
     }
 
     if fastqc_requested {
-        // fastqc-rust reads BAM natively (verified against fastqc-rust-1.0.1
+        // fastqc-rust reads BAM natively (verified against fastqc-rust-1.1.1
         // src/runner.rs — accepts .bam/.ubam extensions + --format bam).
-        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
+        // BAM QUAL is raw Phred, so no ASCII offset is declared.
+        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1), false)?;
     }
 
     Ok(stats)
@@ -1170,7 +1173,8 @@ pub fn clump_only_paired_to_bam_one_pair(
     }
 
     if fastqc_requested {
-        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1))?;
+        // BAM QUAL is raw Phred, so no ASCII offset is declared.
+        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1), false)?;
     }
 
     Ok(stats)
@@ -1325,6 +1329,7 @@ mod tests {
             false,
             None,
             false,
+            false,
         )?;
 
         let output_path = naming::clumped_output_name(&input, Some(&dir), None, true);
@@ -1363,6 +1368,7 @@ mod tests {
             6,
             false,
             None,
+            false,
             false,
         )?;
 
@@ -1415,6 +1421,7 @@ mod tests {
             false,
             None,
             false,
+            false,
         )?;
         clump_only_single(
             &input,
@@ -1426,6 +1433,7 @@ mod tests {
             6,
             false,
             None,
+            false,
             false,
         )?;
 
@@ -1468,6 +1476,7 @@ mod tests {
             false,
             None,
             false,
+            false,
         )?;
         let outputs = read_all(&naming::clumped_output_name(&input, Some(&dir), None, true))?;
         assert_eq!(inputs.len(), outputs.len(), "no length filter applied");
@@ -1501,6 +1510,7 @@ mod tests {
             false,
             None,
             false,
+            false,
         )?;
         let outputs = read_all(&naming::clumped_output_name(&input, Some(&dir), None, true))?;
         // Every output record still carries the adapter.
@@ -1526,6 +1536,7 @@ mod tests {
             6,
             false,
             None,
+            false,
             false,
         )?;
         assert_eq!(stats.total_records, 0);
@@ -1555,6 +1566,7 @@ mod tests {
             false,
             None,
             false,
+            false,
         )?;
         let outputs = read_all(&naming::clumped_output_name(&input, Some(&dir), None, true))?;
         assert_eq!(outputs.len(), 1);
@@ -1583,6 +1595,7 @@ mod tests {
             6,
             false,
             None,
+            false,
             false,
         )?;
         let out = naming::clumped_output_name(&input, Some(&dir), None, false);
@@ -1614,6 +1627,7 @@ mod tests {
             6,
             false,
             None,
+            false,
             false,
         )?;
 
@@ -1749,6 +1763,7 @@ mod tests {
             false,
             None,
             false,
+            false,
         )?;
 
         // Read back the raw bytes of the decompressed output and check
@@ -1793,6 +1808,7 @@ mod tests {
             6,
             false,
             None,
+            false,
             false,
         )?;
 

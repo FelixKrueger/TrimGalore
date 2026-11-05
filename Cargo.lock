@@ -1729,6 +1729,7 @@ dependencies = [
  "noodles",
  "serde_json",
  "tempfile",
+ "zip",
 ]
 
 [[package]]
