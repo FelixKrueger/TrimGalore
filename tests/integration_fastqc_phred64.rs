@@ -355,3 +355,36 @@ fn preflight_accepts_genuine_phred64_input() {
         "Illumina 1.5"
     );
 }
+
+#[test]
+fn preflight_names_solexa_as_well_as_phred33() {
+    let dir = tempdir().unwrap();
+    // ASCII 59 (';') is a legitimate Solexa / Illumina 1.0 byte for a negative
+    // score, so the refusal must not assert the input is Phred+33.
+    let input = dir.path().join("solexa.fastq");
+    std::fs::write(&input, "@s1\nACGTACGTAC\n+\n;;;;;;;;;;\n").unwrap();
+
+    let out = run_raw(
+        dir.path(),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        !out.status.success(),
+        "should refuse ASCII 59 under --phred64"
+    );
+    assert!(stderr.contains("ASCII 59"), "got:\n{stderr}");
+    assert!(
+        stderr.contains("Solexa"),
+        "the refusal must offer Solexa as a cause, not only Phred+33, got:\n{stderr}"
+    );
+}

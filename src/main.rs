@@ -389,10 +389,12 @@ fn main() -> Result<()> {
             {
                 anyhow::bail!(
                     "--phred64 declares Phred+64 input, but {} contains quality \
-                     character '{}' (ASCII {}) within the first {} reads. A Phred+64 \
-                     file cannot hold anything below ASCII 64, so this input is most \
-                     likely Phred+33 — running it with --phred64 would reduce every \
-                     score by 31. Drop --phred64 if that is the case.",
+                     character '{}' (ASCII {}) within the first {} reads, and Illumina \
+                     1.3+ Phred+64 starts at ASCII 64 (Q0). Either the input is Phred+33, \
+                     in which case --phred64 would reduce every score by 31 and it should \
+                     be dropped; or it is Solexa / Illumina 1.0, which allows ASCII 59-63 \
+                     for negative scores and which Trim Galore does not support — those \
+                     scores floor to Q0. FastQC rejects such a file either way.",
                     input.display(),
                     lowest as char,
                     lowest,
