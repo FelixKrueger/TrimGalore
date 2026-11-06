@@ -264,9 +264,10 @@ fn run_raw(dir: &Path, args: &[&str]) -> std::process::Output {
 fn preflight_refuses_mislabelled_input_before_writing_anything() {
     let dir = tempdir().unwrap();
     let input = write_phred33_fixture(dir.path(), "p33.fastq");
+    let out_dir = dir.path().join("not-yet");
 
     let out = run_raw(
-        dir.path(),
+        &out_dir,
         &[
             "--phred64",
             "--fastqc",
@@ -289,15 +290,14 @@ fn preflight_refuses_mislabelled_input_before_writing_anything() {
         "the refusal must name the offending character, got:\n{stderr}"
     );
 
-    // Nothing may be written: the point of the pre-flight is that FastQC's own
-    // refusal arrives only after the trimmed output and the reports exist.
-    let written: Vec<_> = std::fs::read_dir(dir.path())
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n != "p33.fastq")
-        .collect();
-    assert!(written.is_empty(), "wrote {written:?} before refusing");
+    // The output directory must not even be created. A pre-existing one would
+    // let this assertion pass with the guard moved below `ensure_output_dir`,
+    // which is precisely the placement the test exists to pin.
+    assert!(
+        !out_dir.exists(),
+        "created {} before refusing",
+        out_dir.display()
+    );
 }
 
 #[test]
@@ -386,5 +386,161 @@ fn preflight_names_solexa_as_well_as_phred33() {
     assert!(
         stderr.contains("Solexa"),
         "the refusal must offer Solexa as a cause, not only Phred+33, got:\n{stderr}"
+    );
+}
+
+/// Phred+64 reads (`h` = ASCII 104) with an optional low tail on one of them.
+fn write_mixed_fixture(path: &Path, reads: usize, low_read: Option<usize>, low: char) {
+    let mut body = String::new();
+    for i in 0..reads {
+        let qual: String = if Some(i) == low_read {
+            format!("{}{}", "h".repeat(24), low.to_string().repeat(10))
+        } else {
+            "h".repeat(34)
+        };
+        body.push_str(&format!(
+            "@r{i}\nACGTACGTACGTACGTACGTACGTACGTACGTAC\n+\n{qual}\n"
+        ));
+    }
+    std::fs::write(path, body).expect("fixture write");
+}
+
+#[test]
+fn preflight_scans_every_input_not_just_the_first() {
+    let dir = tempdir().unwrap();
+    // R1 is clean, R2 carries the low character: scanning only R1 would accept.
+    let r1 = dir.path().join("m_R1.fastq");
+    let r2 = dir.path().join("m_R2.fastq");
+    write_mixed_fixture(&r1, 4, None, '#');
+    write_mixed_fixture(&r2, 4, Some(0), '#');
+
+    let out = run_raw(
+        &dir.path().join("out"),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            "--paired",
+            r1.to_str().unwrap(),
+            r2.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "R2's low character must refuse");
+    assert_preflight_refused(&stderr, &dir.path().join("out"));
+    assert!(
+        stderr.contains("m_R2.fastq"),
+        "must blame R2, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn preflight_scans_the_passthrough_carrier() {
+    let dir = tempdir().unwrap();
+    // Mates clean, carrier low: dropping the carrier from the scan would accept.
+    let r1 = dir.path().join("c_R1.fastq");
+    let r2 = dir.path().join("c_R2.fastq");
+    let i1 = dir.path().join("c_I1.fastq");
+    write_mixed_fixture(&r1, 4, None, '#');
+    write_mixed_fixture(&r2, 4, None, '#');
+    write_mixed_fixture(&i1, 4, Some(0), '#');
+
+    let out = run_raw(
+        &dir.path().join("out"),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            "--paired",
+            r1.to_str().unwrap(),
+            r2.to_str().unwrap(),
+            "--passthrough",
+            i1.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "the carrier's low character must refuse"
+    );
+    assert_preflight_refused(&stderr, &dir.path().join("out"));
+    assert!(
+        stderr.contains("c_I1.fastq"),
+        "must blame the carrier, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn preflight_keeps_the_running_minimum_not_the_last_record() {
+    let dir = tempdir().unwrap();
+    // Low character in the FIRST read, clean reads after it: keeping only the
+    // last record's minimum would accept.
+    let input = dir.path().join("early.fastq");
+    write_mixed_fixture(&input, 8, Some(0), '#');
+
+    let out = run_raw(
+        &dir.path().join("out"),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "an early low character must still refuse:\n{stderr}"
+    );
+    assert_preflight_refused(&stderr, &dir.path().join("out"));
+}
+
+#[test]
+fn preflight_accepts_ascii_64_which_is_phred64_q0() {
+    let dir = tempdir().unwrap();
+    // ASCII 64 ('@') is Q0 under Phred+64 — the lowest legal value, not a defect.
+    let input = dir.path().join("q0.fastq");
+    write_mixed_fixture(&input, 4, Some(0), '@');
+
+    let out = run_raw(
+        &dir.path().join("out"),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "ASCII 64 is Q0 and must be accepted:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The pre-flight refuses before any output exists, and says so in its own
+/// words. FastQC refuses the same inputs later, naming the same files, so a
+/// non-zero exit alone does not distinguish the two.
+fn assert_preflight_refused(stderr: &str, out_dir: &Path) {
+    assert!(
+        stderr.contains("--phred64 declares Phred+64 input"),
+        "not the pre-flight's refusal, got:\n{stderr}"
+    );
+    assert!(
+        !out_dir.exists(),
+        "{} was created, so the refusal came after work began",
+        out_dir.display()
     );
 }

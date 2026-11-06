@@ -25,8 +25,10 @@ use trim_galore::trimmer;
 
 /// Reads scanned by the `--phred64` pre-flight. A mislabelled Phred+33 file
 /// carries sub-ASCII-64 characters in its first few records, so a bounded scan
-/// catches it; a file whose only low character sits past this window still
-/// fails later, inside FastQC.
+/// catches it cheaply. The bound is a cost limit and nothing more: a file whose
+/// only low character sits past it is not caught here, and not reliably caught
+/// anywhere else either, because FastQC analyses the trimmed output and quality
+/// trimming removes the very characters that would have given it away.
 const PHRED64_PREFLIGHT_READS: usize = 10_000;
 
 /// Lowest ASCII quality character in the first `max_reads` records, or `None`
@@ -382,23 +384,34 @@ fn main() -> Result<()> {
     // quality character below ASCII 64, because Q0 is ASCII 64, so the input
     // settles it before any work happens.
     if cli.phred64 && cli.fastqc_requested() {
-        let carrier = cli.passthrough.iter().cloned();
-        for input in cli.input.iter().cloned().chain(carrier) {
-            if let Some(lowest) = lowest_quality_char(&input, PHRED64_PREFLIGHT_READS)?
+        for input in cli.input.iter().chain(cli.passthrough.iter()) {
+            // BAM quality is raw Phred, and `BamReader` synthesises ASCII on read,
+            // so a scan would report a byte the file does not contain. uBAM in
+            // `--input` is already refused above; a uBAM `--passthrough` carrier is
+            // refused below, by its own check.
+            if matches!(detect_input_format(input)?, InputFormat::UnalignedBam) {
+                continue;
+            }
+            if let Some(lowest) = lowest_quality_char(input, PHRED64_PREFLIGHT_READS)?
                 && lowest < 64
             {
+                let solexa = if (59..64).contains(&lowest) {
+                    " or Solexa / Illumina 1.0, which allows ASCII 59-63 for negative \
+                     scores and which Trim Galore does not support, flooring them to Q0"
+                } else {
+                    ""
+                };
                 anyhow::bail!(
                     "--phred64 declares Phred+64 input, but {} contains quality \
                      character '{}' (ASCII {}) within the first {} reads, and Illumina \
-                     1.3+ Phred+64 starts at ASCII 64 (Q0). Either the input is Phred+33, \
-                     in which case --phred64 would reduce every score by 31 and it should \
-                     be dropped; or it is Solexa / Illumina 1.0, which allows ASCII 59-63 \
-                     for negative scores and which Trim Galore does not support — those \
-                     scores floor to Q0. FastQC rejects such a file either way.",
+                     1.3+ Phred+64 starts at ASCII 64 (Q0). The input is therefore \
+                     Phred+33{} — read as Phred+64 every score would drop by 31. Drop \
+                     --phred64 if the data is Phred+33.",
                     input.display(),
-                    lowest as char,
+                    lowest.escape_ascii(),
                     lowest,
-                    PHRED64_PREFLIGHT_READS
+                    PHRED64_PREFLIGHT_READS,
+                    solexa
                 );
             }
         }
