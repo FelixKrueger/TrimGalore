@@ -18,6 +18,12 @@
   0.13.0, so `--svg` is accepted and ignored rather than rejected. Both image sets are written to
   the `.zip` either way; the flag only picks which the HTML embeds.
 
+- **`--phred64` is checked against the input before anything is written, when `--fastqc` is in play**
+  ([#532](https://github.com/FelixKrueger/TrimGalore/issues/532)). A Phred+64 file cannot hold a
+  quality character below ASCII 64, because Q0 is ASCII 64, so a mislabelled input is refused up
+  front instead of being trimmed, reported, and only then rejected by FastQC. The scan covers the
+  first 10,000 reads; `--phred64` without `--fastqc` is unaffected.
+
 - **`--phred64` is declared to the bundled FastQC engine, and mislabelled input is refused**
   ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). FastQC 0.13.0 reads Phred+33
   unless told otherwise, where 0.12.1 inferred the encoding from the data, and Trim Galore writes

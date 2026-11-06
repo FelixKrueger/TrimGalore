@@ -238,3 +238,120 @@ fn phred64_reaches_both_mates_under_clump_only() {
         assert_eq!(basic_stat(&zip, stem, "Encoding"), "Illumina 1.5", "{stem}");
     }
 }
+
+/// A Phred+33 file: quality '#' is ASCII 35, far below the Phred+64 floor.
+fn write_phred33_fixture(dir: &Path, name: &str) -> std::path::PathBuf {
+    let dst = dir.join(name);
+    let mut body = String::new();
+    for i in 0..4 {
+        body.push_str(&format!(
+            "@read{i}\nACGTACGTACGTACGTACGT\n+\n####################\n"
+        ));
+    }
+    std::fs::write(&dst, body).expect("fixture write");
+    dst
+}
+
+fn run_raw(dir: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_trim_galore"))
+        .args(args)
+        .args(["--output_dir", dir.to_str().unwrap()])
+        .output()
+        .expect("trim_galore runs")
+}
+
+#[test]
+fn preflight_refuses_mislabelled_input_before_writing_anything() {
+    let dir = tempdir().unwrap();
+    let input = write_phred33_fixture(dir.path(), "p33.fastq");
+
+    let out = run_raw(
+        dir.path(),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "should refuse, got:\n{stderr}");
+    assert!(
+        stderr.contains("--phred64 declares Phred+64 input"),
+        "the refusal must name the flag, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("ASCII 35"),
+        "the refusal must name the offending character, got:\n{stderr}"
+    );
+
+    // Nothing may be written: the point of the pre-flight is that FastQC's own
+    // refusal arrives only after the trimmed output and the reports exist.
+    let written: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "p33.fastq")
+        .collect();
+    assert!(written.is_empty(), "wrote {written:?} before refusing");
+}
+
+#[test]
+fn preflight_does_not_fire_without_fastqc() {
+    let dir = tempdir().unwrap();
+    let input = write_phred33_fixture(dir.path(), "p33_nofastqc.fastq");
+
+    // The check is deliberately scoped to --fastqc. Without it, --phred64 on
+    // Phred+33 data keeps its existing behaviour, NOTE and all.
+    let out = run_raw(
+        dir.path(),
+        &[
+            "--phred64",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "must not refuse without --fastqc:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.path().join("p33_nofastqc_trimmed.fq").exists());
+}
+
+#[test]
+fn preflight_accepts_genuine_phred64_input() {
+    let dir = tempdir().unwrap();
+    let input = fixture_copy(dir.path(), "good_p64.fastq");
+
+    // Lowest character is 'B' (ASCII 66), at or above the Phred+64 floor.
+    let out = run_raw(
+        dir.path(),
+        &[
+            "--phred64",
+            "--fastqc",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "genuine Phred+64 must pass the pre-flight:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let zip = dir.path().join("good_p64_trimmed_fastqc.zip");
+    assert_eq!(
+        basic_stat(&zip, "good_p64_trimmed", "Encoding"),
+        "Illumina 1.5"
+    );
+}

@@ -23,6 +23,30 @@ use trim_galore::report;
 use trim_galore::specialty;
 use trim_galore::trimmer;
 
+/// Reads scanned by the `--phred64` pre-flight. A mislabelled Phred+33 file
+/// carries sub-ASCII-64 characters in its first few records, so a bounded scan
+/// catches it; a file whose only low character sits past this window still
+/// fails later, inside FastQC.
+const PHRED64_PREFLIGHT_READS: usize = 10_000;
+
+/// Lowest ASCII quality character in the first `max_reads` records, or `None`
+/// when the file holds no quality bytes at all.
+fn lowest_quality_char(path: &Path, max_reads: usize) -> Result<Option<u8>> {
+    let mut reader = open_sync_reader(path, &[])?;
+    let mut lowest: Option<u8> = None;
+    let mut scanned = 0usize;
+    while let Some(record) = reader.next_record()? {
+        if let Some(low) = record.qual.as_bytes().iter().copied().min() {
+            lowest = Some(lowest.map_or(low, |seen: u8| seen.min(low)));
+        }
+        scanned += 1;
+        if scanned >= max_reads {
+            break;
+        }
+    }
+    Ok(lowest)
+}
+
 /// mimalloc replaces the platform allocator for the whole binary. Allocation
 /// behaviour is the only thing that changes: no output byte differs, so the
 /// Perl 0.6.11 validation matrix is unaffected.
@@ -350,6 +374,32 @@ fn main() -> Result<()> {
              in modes that do no quality trimming such as --clump_only, silently \
              degrades the output quality instead. Drop --phred64 for BAM input."
         );
+    }
+
+    // #532 — `--phred64` is a claim about the input that nothing verifies. With
+    // `--fastqc` the bundled engine contradicts a wrong one, but only after the
+    // trimmed output and the reports are on disk. A Phred+64 file cannot hold a
+    // quality character below ASCII 64, because Q0 is ASCII 64, so the input
+    // settles it before any work happens.
+    if cli.phred64 && cli.fastqc_requested() {
+        let carrier = cli.passthrough.iter().cloned();
+        for input in cli.input.iter().cloned().chain(carrier) {
+            if let Some(lowest) = lowest_quality_char(&input, PHRED64_PREFLIGHT_READS)?
+                && lowest < 64
+            {
+                anyhow::bail!(
+                    "--phred64 declares Phred+64 input, but {} contains quality \
+                     character '{}' (ASCII {}) within the first {} reads. A Phred+64 \
+                     file cannot hold anything below ASCII 64, so this input is most \
+                     likely Phred+33 — running it with --phred64 would reduce every \
+                     score by 31. Drop --phred64 if that is the case.",
+                    input.display(),
+                    lowest as char,
+                    lowest,
+                    PHRED64_PREFLIGHT_READS
+                );
+            }
+        }
     }
 
     // INVARIANT ESTABLISHED HERE, RELIED ON FAR BELOW: past this point,
