@@ -3227,7 +3227,8 @@ mod tests {
         let (s1, s2, sp) = {
             let mut r1 = FastqReader::open(&in1)?;
             let mut r2 = FastqReader::open(&in2)?;
-            let mut w = crate::bam::BamWriter::create(&serial_out, None, &[], cmd)?;
+            let mut w =
+                crate::bam::BamWriter::create(&serial_out, None, &[], cmd, config.phred_offset)?;
             let out = crate::trimmer::run_paired_end_to_bam(&mut r1, &mut r2, &mut w, &config)?;
             w.finish()?;
             out
@@ -3302,7 +3303,8 @@ mod tests {
         let serial_out = dir.join("serial.bam");
         let s_stats = {
             let mut r = FastqReader::open(&input)?;
-            let mut w = crate::bam::BamWriter::create(&serial_out, None, &[], cmd)?;
+            let mut w =
+                crate::bam::BamWriter::create(&serial_out, None, &[], cmd, config.phred_offset)?;
             let out = crate::trimmer::run_single_end_to_bam(&mut r, &mut w, &config)?;
             w.finish()?;
             out

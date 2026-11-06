@@ -1811,7 +1811,7 @@ mod tests {
 
     /// Writes `n` records (`pairs`: as mate-adjacent R1/R2 pairs) with tags to a uBAM.
     fn write_tagged_ubam(path: &Path, n: usize, pairs: bool) -> Result<()> {
-        let mut w = BamWriter::create(path, None, &[], "pooled reader test")?;
+        let mut w = BamWriter::create(path, None, &[], "pooled reader test", 33)?;
         for i in 0..n {
             let rec = |side: &str| FastqRecord {
                 id: format!("@read_{i}\tCB:Z:AAAA{}\tUB:Z:CC{}", i % 7, i % 5),
@@ -1869,7 +1869,7 @@ mod tests {
         // mates not adjacent: all R1 first, then all R2
         let grouped = dir.path().join("grouped.bam");
         {
-            let mut w = BamWriter::create(&grouped, None, &[], "grouped")?;
+            let mut w = BamWriter::create(&grouped, None, &[], "grouped", 33)?;
             let rec = |i: usize| FastqRecord {
                 id: format!("@read_{i}"),
                 seq: "ACGTACGTACGT".to_string(),
@@ -1891,7 +1891,7 @@ mod tests {
         // before it come out first
         let bad = dir.path().join("bad.bam");
         {
-            let mut w = BamWriter::create(&bad, None, &[], "bad")?;
+            let mut w = BamWriter::create(&bad, None, &[], "bad", 33)?;
             for i in 0..5_000usize {
                 let rec = FastqRecord {
                     id: format!("@read_{i}"),
@@ -2701,6 +2701,37 @@ mod tests {
             vec![40u8; 4],
             "Phred+33 input must still store raw Phred 40"
         );
+        Ok(())
+    }
+
+    /// Issue #358 for the multithreaded path: `BatchEncoder` must subtract the input's
+    /// offset too, and store the same QUAL bytes as the serial `BamWriter`.
+    #[test]
+    fn batch_encoder_subtracts_input_phred_offset() -> Result<()> {
+        fn stored_qual(qual: &str, input_phred_offset: u8, name: &str) -> Result<Vec<u8>> {
+            let dir = tempfile::tempdir()?;
+            let out = dir.path().join(format!("{name}.bam"));
+            let rec = FastqRecord {
+                id: format!("@{name}"),
+                seq: "ACGT".to_string(),
+                qual: qual.to_string(),
+            };
+            let mut sink = ParallelBamSink::create(&out, None, "trim_galore offset test", 2)?;
+            let mut enc = BatchEncoder::with_capacity(256, input_phred_offset);
+            enc.push(sink.header(), &rec, None)?;
+            sink.write_encoded(&enc.into_bytes())?;
+            sink.finish()?;
+
+            let file = File::open(&out)?;
+            let mut reader = bam::io::Reader::new(BufReader::new(file));
+            let _h = reader.read_header()?;
+            let mut bam_rec = bam::Record::default();
+            assert!(reader.read_record(&mut bam_rec)? > 0, "no record written");
+            Ok(bam_rec.quality_scores().as_ref().to_vec())
+        }
+
+        assert_eq!(stored_qual("hhhh", 64, "p64")?, vec![40u8; 4]);
+        assert_eq!(stored_qual("IIII", 33, "p33")?, vec![40u8; 4]);
         Ok(())
     }
 
