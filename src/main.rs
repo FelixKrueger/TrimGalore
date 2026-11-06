@@ -23,6 +23,32 @@ use trim_galore::report;
 use trim_galore::specialty;
 use trim_galore::trimmer;
 
+/// Reads scanned by the `--phred64` pre-flight. A mislabelled Phred+33 file
+/// carries sub-ASCII-64 characters in its first few records, so a bounded scan
+/// catches it cheaply. The bound is a cost limit and nothing more: a file whose
+/// only low character sits past it is not caught here, and not reliably caught
+/// anywhere else either, because FastQC analyses the trimmed output and quality
+/// trimming removes the very characters that would have given it away.
+const PHRED64_PREFLIGHT_READS: usize = 10_000;
+
+/// Lowest ASCII quality character in the first `max_reads` records, or `None`
+/// when the file holds no quality bytes at all.
+fn lowest_quality_char(path: &Path, max_reads: usize) -> Result<Option<u8>> {
+    let mut reader = open_sync_reader(path, &[])?;
+    let mut lowest: Option<u8> = None;
+    let mut scanned = 0usize;
+    while let Some(record) = reader.next_record()? {
+        if let Some(low) = record.qual.as_bytes().iter().copied().min() {
+            lowest = Some(lowest.map_or(low, |seen: u8| seen.min(low)));
+        }
+        scanned += 1;
+        if scanned >= max_reads {
+            break;
+        }
+    }
+    Ok(lowest)
+}
+
 /// mimalloc replaces the platform allocator for the whole binary. Allocation
 /// behaviour is the only thing that changes: no output byte differs, so the
 /// Perl 0.6.11 validation matrix is unaffected.
@@ -350,6 +376,45 @@ fn main() -> Result<()> {
              in modes that do no quality trimming such as --clump_only, silently \
              degrades the output quality instead. Drop --phred64 for BAM input."
         );
+    }
+
+    // #532 — `--phred64` is a claim about the input that nothing verifies. With
+    // `--fastqc` the bundled engine contradicts a wrong one, but only after the
+    // trimmed output and the reports are on disk. A Phred+64 file cannot hold a
+    // quality character below ASCII 64, because Q0 is ASCII 64, so the input
+    // settles it before any work happens.
+    if cli.phred64 && cli.fastqc_requested() {
+        for input in cli.input.iter().chain(cli.passthrough.iter()) {
+            // BAM quality is raw Phred, and `BamReader` synthesises ASCII on read,
+            // so a scan would report a byte the file does not contain. uBAM in
+            // `--input` is already refused above; a uBAM `--passthrough` carrier is
+            // refused below, by its own check.
+            if matches!(detect_input_format(input)?, InputFormat::UnalignedBam) {
+                continue;
+            }
+            if let Some(lowest) = lowest_quality_char(input, PHRED64_PREFLIGHT_READS)?
+                && lowest < 64
+            {
+                let solexa = if (59..64).contains(&lowest) {
+                    " or Solexa / Illumina 1.0, which allows ASCII 59-63 for negative \
+                     scores and which Trim Galore does not support, flooring them to Q0"
+                } else {
+                    ""
+                };
+                anyhow::bail!(
+                    "--phred64 declares Phred+64 input, but {} contains quality \
+                     character '{}' (ASCII {}) within the first {} reads, and Illumina \
+                     1.3+ Phred+64 starts at ASCII 64 (Q0). The input is therefore \
+                     Phred+33{} — read as Phred+64 every score would drop by 31. Drop \
+                     --phred64 if the data is Phred+33.",
+                    input.display(),
+                    lowest.escape_ascii(),
+                    lowest,
+                    PHRED64_PREFLIGHT_READS,
+                    solexa
+                );
+            }
+        }
     }
 
     // INVARIANT ESTABLISHED HERE, RELIED ON FAR BELOW: past this point,
