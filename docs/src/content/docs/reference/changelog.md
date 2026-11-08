@@ -9,8 +9,595 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
 
 ### Unreleased
 
+### Version 2.4.0 (Release on 8 November 2026)
+
 #### Changes
 
+- **The bundled FastQC engine moves to Java FastQC 0.13.0, clearing 19 security advisories**
+  ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). `fastqc-rust` is now pinned to
+  1.1.1, which drops `zstd` and `libz-sys` from the dependency graph and moves `zip` to 9.3.0.
+  Reports gain `Mean Length` and `Median Length` and lose `Sequences flagged as poor quality`;
+  MultiQC parses both shapes without warnings and every statistic it reports is unchanged.
+
+- **`--fastqc_args --png` selects PNG charts; `--svg` is now a no-op**
+  ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). SVG is the default in FastQC
+  0.13.0, so `--svg` is accepted and ignored rather than rejected. Both image sets are written to
+  the `.zip` either way; the flag only picks which the HTML embeds.
+
+- **`--phred64` is checked against the input before anything is written, when `--fastqc` is in play**
+  ([#532](https://github.com/FelixKrueger/TrimGalore/issues/532)). A Phred+64 file cannot hold a
+  quality character below ASCII 64, because Q0 is ASCII 64, so a mislabelled input is refused up
+  front rather than part-processed. The check reads the input, where FastQC saw only the trimmed
+  output, so it refuses some runs that previously completed — including ones whose low-quality
+  tail was trimmed away before FastQC could object. The scan covers the first 10,000 reads; on
+  FASTQ output, `--phred64` without `--fastqc` is unaffected.
+
+- **`--phred64` is also checked against the input whenever the output is uBAM**
+  ([#532](https://github.com/FelixKrueger/TrimGalore/issues/532)). On uBAM output the declared
+  offset feeds the BAM `QUAL` arithmetic, so an input holding any quality character below ASCII 64
+  is now refused before anything is written instead of being stored 31 points low with bases under
+  Q31 floored to zero; see `docs/guide/quality.md` for what the check can and cannot settle.
+
+- **`--phred64` is declared to the bundled FastQC engine, and mislabelled input is refused**
+  ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). FastQC 0.13.0 reads Phred+33
+  unless told otherwise, where 0.12.1 inferred the encoding from the data, and Trim Galore writes
+  FASTQ quality verbatim. A Phred+33 file mistakenly run with `--phred64` and `--fastqc` now fails
+  at the FastQC step rather than producing a report; the startup NOTE naming the flag fires on
+  every output path.
+
+- **Poly-G is removed before poly-A, so a tail sitting behind a G-run is trimmed**
+  ([#504](https://github.com/FelixKrueger/TrimGalore/issues/504)). The poly-A scan is anchored at the
+  3' end, and a G-run in front of the tail blocked it; affected reads shift a few bases from the
+  poly-G count to the poly-A count in the trimming report. See
+  [the poly-X docs](https://trimgalore.com/modes/poly/#stage-order) for the order and its two edge
+  cases.
+
+- **The poly-A docs now state what `--poly_a` does and does not remove**
+  ([#504](https://github.com/FelixKrueger/TrimGalore/issues/504)). An A-run with sequence behind it is
+  left in place by design, because the genome carries genuine runs of ten or more A's; 3' counting
+  assays that want the run and everything after it should pass `-a "A{20}"`, as Perl v0.6.x's
+  `--polyA` did. Raised by @marenmsk in
+  [#504](https://github.com/FelixKrueger/TrimGalore/issues/504).
+
+
+- **The `--cores N` gzip teardown no longer leaks its compressor to avoid a panic**
+  ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). Reporting a failed teardown on the
+  parallel path relied on a local `std::mem::forget`, which disarmed a double-teardown panic in
+  `gzp` at the cost of leaking a `Sender` pair and a `JoinHandle` and parking the compressor threads.
+  [gzp 2.0.3](https://github.com/sstadick/gzp/issues/68) fixes that upstream, so the workaround is
+  gone and the error propagates normally; the minimum `gzp` is now 2.0.3, because on 2.0.2 the
+  regression test panics rather than fails.
+
+- **`--clumpify` keeps peak memory inside the budget it prints on short reads too**
+  ([#457](https://github.com/FelixKrueger/TrimGalore/issues/457)). Part of the per-record cost is the
+  allocator's, so the bin-pool coefficients now bound it at 25 bp rather than modelling it: bins are
+  ~30% smaller at every budget, and `.fq.gz` output differs from earlier releases on identical input
+  (same records, different gzip member boundaries — the third such change this cycle, after
+  [#442](https://github.com/FelixKrueger/TrimGalore/issues/442) and
+  [#446](https://github.com/FelixKrueger/TrimGalore/issues/446)). The minimum budget rises with it, so
+  `--fastqc` above `--cores 23` now falls back to plain trimming at the default `--memory 1G`; see
+  [the memory section](https://trimgalore.com/performance/clumpy/#memory) for the new floors and the
+  `--memory` values that restore the old bin size.
+
+- **The threading docs no longer imply plain-path memory is too small to budget for**
+  ([nf-core/rnaseq#1903](https://github.com/nf-core/rnaseq/issues/1903)). The figures are heap, and a
+  cgroup scheduler also charges page cache, so the page now says to allocate with headroom.
+
+- **The threading docs name the memory fixture's read length**
+  ([nf-core/rnaseq#1903](https://github.com/nf-core/rnaseq/issues/1903)). The 84M-read Buckberry pair
+  is 65 bp, not the 150 bp the memory section claimed.
+
+- **The threading docs record the plain-path memory arriving in the next release**
+  ([#437](https://github.com/FelixKrueger/TrimGalore/issues/437)). Peak RSS moves from 74 to 146 MiB
+  at `--cores 8`, mostly `mimalloc` trading memory for ~30% wall-clock.
+
+- **`--gzip`'s deprecation notice no longer promises gzipped output for a plain-text input**
+  ([#453](https://github.com/FelixKrueger/TrimGalore/issues/453)). Output compression follows
+  the input, and the notice now says so on that path.
+
+- **The documented memory ceiling now reflects long reads**
+  ([#454](https://github.com/FelixKrueger/TrimGalore/issues/454)). `~100 MB` held only for
+  short reads; the threading docs now give measured figures up to ~2.3 GiB at 10 kb.
+
+- **`--clump_only` now prints its predicted peak memory, like `--clumpify` does**
+  ([#456](https://github.com/FelixKrueger/TrimGalore/issues/456)). All four banners name the
+  peak and the `--memory` budget it was sized against.
+
+- **The clumping banners report the encoding they write, not the configured level**
+  ([#453](https://github.com/FelixKrueger/TrimGalore/issues/453)). `--clumpify` on a plain input
+  prints `(plain output)` plus a warning that the reordering gains nothing without a compressor,
+  and `--clump_only --dont_gzip` no longer names a gzip level alongside the flag disabling it.
+
+- **`--rename --output-format ubam` is now refused on the `--rrbs` directional paired path**
+  ([#459](https://github.com/FelixKrueger/TrimGalore/issues/459)). That path auto-sets
+  `--clip_R2 2`, so the annotation was being appended and then dropped without a word.
+
+- **`--rename --output-format ubam` no longer refuses over a clip flag that applies to no read**
+  ([#450](https://github.com/FelixKrueger/TrimGalore/issues/450)). A Read 2 clip flag on a single-end
+  run is still warned about and ignored, but no longer blocks the run.
+
+- **`--library <preset>` names a library prep instead of four clip flags**
+  ([#440](https://github.com/FelixKrueger/TrimGalore/issues/440)). `emseq`, `accel` (aliases
+  `swift`, `xgen`), `zymo`, `scbs` (alias `single_cell`) and `pbat` each expand into
+  `--clip_R1` / `--clip_R2` / `--three_prime_clip_R1` / `--three_prime_clip_R2`, and nothing
+  else: adapters stay auto-detected and `--length` is untouched. The values match
+  nf-core/methylseq's presets of the same names, so a run driven through that pipeline and a
+  run driven straight through Trim Galore trim identically.
+
+  A preset is only a clip bundle, which is why `--rrbs`, `--clock` and `--implicon` stay
+  separate flags, and why Tecan/NuGEN Ovation RRBS is absent (diversity trimming is a
+  different algorithm, and it must run *without* `--rrbs`). For the same reason `--library` is
+  refused with `--hardtrim5`, `--hardtrim3`, `--clock` and `--implicon`, which do not honour the
+  clip flags — and a clip flag those modes cannot honour, or a Read 2 clip flag on a single-end
+  run, now warns instead of passing silently, and neither the log nor the text report announces a
+  Read 2 clip the run did not perform. An explicit clip flag wins over the preset value it displaces,
+  and both numbers are named in the log; a preset that supplies `--clip_R2` suppresses the
+  `--rrbs` directional auto-clip, exactly as an explicit `--clip_R2` already did. Both
+  trimming reports record the preset name and the clipping it resolved to — all four values
+  in JSON (`parameters.library`, `null` when no preset was used), and in the text report the
+  values in force for the run, so a single-end report lists Read 1 only. Preset values can
+  change in a future release (each change gets an entry here) without making an old report
+  ambiguous. A run that passes no `--library` trims exactly as before and its text report is
+  unchanged; the only difference anywhere is the new `"library": null` key in the JSON report.
+
+- **`--clumpify` keeps peak memory inside the `--memory` budget it prints, on reads of ~50 bp
+  and longer** ([#439](https://github.com/FelixKrueger/TrimGalore/issues/439)) — peak drops
+  13–17% from holding fewer bins in flight and the sizing model is refitted against measured
+  peak RSS (paired 10 M-read runs, 2–16 cores, macOS and Linux), so budgets above ~2 GiB and
+  `--fastqc` runs now get smaller bins, and `.fq.gz` output differs from earlier releases on
+  identical input (same records, different gzip member boundaries). The startup banner now
+  names the budget alongside the prediction (`predicted peak ≈ 930 of 1024 MiB budget`) so the
+  ~9% headroom is visible. Short reads are covered by
+  [#457](https://github.com/FelixKrueger/TrimGalore/issues/457) below.
+
+- **An output file is now published only if every byte it owes was written, including the
+  gzip trailer** ([#434](https://github.com/FelixKrueger/TrimGalore/issues/434)). #428 made the
+  final name appear only after the writer was closed; it did not make "closed" mean
+  "complete". `FastqWriter` held a `Box<dyn Write + Send>`, through which neither
+  `GzEncoder::try_finish` nor `gzp`'s `ParCompress::finish` is reachable, so each sink's
+  trailer was written by its own `Drop` and the error discarded — an `ENOSPC` or `EIO` in the
+  last few bytes of a serial-gzip run left a trailerless `.gz` at its final name and exited 0.
+  The boxed writer is now an enum over the three concrete sinks, and `finish()` runs the
+  concrete teardown and returns its error *before* the output is published. Two matching
+  cases in `--cores N`: a single-end worker error now reaches the main thread through the
+  result channel (it was printed and swallowed) instead of ending the run like a clean EOF,
+  and both parallel paths join their workers before publishing, so a worker panic can no
+  longer commit a short output on its way out.
+
+  **Output bytes are unchanged, deliberately, on both gzip paths.** The old gzip teardown
+  flushed the sink twice before writing its trailer — once in `FastqWriter::finish`, once
+  again in that type's `Drop` — and each flush emits a deflate sync marker, so the marker
+  count is part of the format v2.x has shipped whether or not it was meant to be.
+  `Sink::finish` reproduces both (`PRE_434_GZ_SYNC_FLUSHES`), because tools downstream pin the
+  *compressed* md5s of our outputs and would see a re-framing that our own tests, which
+  compare through `gzip -dc`, cannot. That applies to the parallel compressor as well as the
+  serial one: `--cores N` *trimming* never reaches the parallel sink — it writes each batch
+  through a raw file handle — but `--hardtrim5`, `--hardtrim3`, the other specialty modes and
+  `--demux` do. Verified byte-for-byte against v2.3.0 across single-end, `--paired`, `--rrbs`,
+  `--polyA`, `--nextera`, `--compression 6`, `--cores 2`, `--cores 4`, `--hardtrim5` and
+  `--hardtrim3` at one, two and four cores, and `--demux` at one and two.
+
+- **A read name that uBAM output cannot encode is now named in the refusal, along with the SAM
+  QNAME rule it breaks** ([#429](https://github.com/FelixKrueger/TrimGalore/issues/429)) — FASTQ
+  output still accepts those names.
+
+- **A run that is refused part-way through now writes no output file, and leaves a previous
+  run's output at that path untouched**
+  ([#428](https://github.com/FelixKrueger/TrimGalore/issues/428)) — see `docs/guide/outputs.md`
+  for what a leftover `.partial` file means.
+
+- **Breaking: `--fastqc` is now refused on the four specialty modes and on `--paired` with a
+  single interleaved uBAM writing FASTQ, instead of being silently ignored**
+  ([#421](https://github.com/FelixKrueger/TrimGalore/issues/421)); the same change makes
+  `--fastqc_args` alone activate FastQC under `--clump_only`, where it previously did nothing.
+
+- **A BAM read name containing whitespace, or whitespace other than a space inside a preserved
+  aux-tag value, is now refused on every output format**
+  ([#415](https://github.com/FelixKrueger/TrimGalore/issues/415)) — see the uBAM section of the
+  docs for the samtools recipe that rewrites space-bearing names.
+
+- **A paired run now writes every output to one directory**
+  ([#398](https://github.com/FelixKrueger/TrimGalore/issues/398)). Without
+  `--output_dir`, the validated FASTQs already went to Read 1's directory, but each
+  trimming report went beside *its own* mate and `--passthrough`'s carrier output
+  went beside the carrier input — so one pair could scatter across three
+  directories. Reports and the carrier now follow the primaries into Read 1's
+  directory. Filenames are unchanged: each report keeps its own input-derived name,
+  so `*_trimming_report.txt` globs and MultiQC still match. This restores the
+  one-directory-per-run behaviour of v0.6.11, which stripped the input's directory
+  and wrote everything to `--output_dir` — though the anchor differs, since Perl's
+  default was the working directory rather than Read 1's.
+
+  **This refuses some invocations that previously ran.** Output names derive from
+  the input filename alone, so two inputs sharing a filename now resolve to the same
+  report path once co-located, and the run stops before writing anything. The layout
+  this affects is reads split by mate rather than by sample —
+  `--paired R1/s1.fq R2/s1.fq R1/s2.fq R2/s2.fq` — where the *whole* invocation is
+  refused, not just the offending pair. Pass `--output_dir` to collect the outputs
+  somewhere unambiguous; `--no_report_file` also clears it but discards the reports.
+  The per-sample layout (`sampleA/reads_1.fq sampleA/reads_2.fq sampleB/…`) is
+  unaffected, because each pair's Read 1 already sits in its own directory.
+
+  One refusal disappears in the other direction: a single file used as the mate of
+  two pairs whose Read 1s live in different directories no longer collides, because
+  its two reports now resolve into those two directories. That run previously failed
+  and now succeeds; nothing is overwritten.
+
+  Also corrected: the output guide stated that without `--output_dir` files go to
+  the current working directory, which was true only of the specialty modes.
+
+#### Bug fixes
+
+- **`--rename` was neutralised by `--output-format ubam` on FASTQ input, with no
+  flag-specific diagnostic**
+  ([#408](https://github.com/FelixKrueger/TrimGalore/issues/408)). `--rename`
+  appends `:clip5:SEQ`/`:clip3:SEQ` to the end of the read ID. When a FASTQ header
+  carries text after the first space the annotation lands inside that text — and
+  BAM read names cannot contain whitespace, so the whole tail was discarded and
+  the explicitly-requested annotation went with it. The combination is now refused
+  when at least one input is FASTQ **and** a clipping flag is set, including on the
+  `--hardtrim5`/`--hardtrim3` paths, which reach the same annotation code via
+  `specialty.rs`. `--rename` on its own appends nothing, so that case is still
+  accepted — a wrapper that passes the flag unconditionally alongside an optional
+  `--clip_R1` keeps working in its no-clip configuration. **uBAM input is
+  unaffected and keeps working**: BAM read names carry no description by spec, so
+  there the annotation lands on the name itself and preserved aux tags round-trip
+  intact. Whether a given header loses the annotation is a per-record property, so
+  the refusal is deliberately coarser than the loss; deciding per record would mean
+  failing part-way through a BAM. The header-description notice added for #406 did
+  report the dropped text, but a user who passed `--rename` had no reason to
+  connect a general note about header descriptions to their own annotation being
+  gone. The output guide is corrected alongside: it described `--rename` as
+  `--rename PREFIX` replacing the input filename stem in the output names, which is
+  `--basename` — a flag with no dedicated section in the output guide, though it is
+  documented on the clump-only and passthrough pages. `--basename`'s own limits are
+  now stated too: reports keep input-derived names, and the specialty modes ignore
+  it.
+
+- **`--output-format ubam` no longer destroys an input named like a trimming
+  report** ([#409](https://github.com/FelixKrueger/TrimGalore/issues/409)).
+  `trim_galore --output-format ubam sample.fastq sample.fastq_trimming_report.txt`
+  overwrote input 2 with input 1's trimming report and only then failed reading
+  it — so the error ("not recognised as FASTQ") described damage the run had just
+  caused, and gave the user no hint their file was gone. The single-end uBAM
+  arm's collision pre-flight planned only the primary `.bam` outputs; the two
+  trimming reports it also writes never entered the candidate list, so the
+  output-vs-input check could not see them. The single-end FASTQ path was never
+  affected — it routes secondaries through the same helper the pre-flight reads.
+  Fifth instance of the family behind #383, #385, #388 and #391.
+
+- **The uBAM path's IUPAC warning told users the wrong direction, and could
+  suppress the right one** ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)).
+  One message served two opposite code paths. On FASTQ→uBAM it announced "input
+  uBAM … coerced to N for FASTQ output" — both halves false — and on uBAM→uBAM
+  the read-side message named a FASTQ output that did not exist. Worse, a single
+  process-wide guard meant a run with **mixed FASTQ and uBAM inputs** (legal, and
+  the documented remedy for `--preserve-tags` with all-FASTQ input) printed
+  whichever message came first and silently suppressed the other: with the FASTQ
+  file first, the user was told the wrong direction *and* never told about the
+  genuine uBAM coercion. Each direction now has its own text and its own guard,
+  and the read-side wording is output-neutral ("coerced to N on read").
+
+- **uBAM output silently dropped FASTQ header descriptions**
+  ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)). BAM read names
+  cannot contain whitespace, so everything after the first space is discarded —
+  frequently the original instrument identifier or an Illumina `1:N:0:INDEX`
+  field. This is required by the format and is not new; it was simply never
+  disclosed. A one-time `NOTE:` now reports it and echoes the text that was
+  dropped, so what is lost is visible rather than inferred. Nothing fires when
+  there is nothing to drop (whitespace-free headers, or a bare trailing space).
+  The uBAM section of the output guide and `--output-format`'s own help also
+  stated or implied lossless round-tripping; both now name the three FASTQ→uBAM
+  normalizations (description dropped, bases uppercased, IUPAC coerced).
+
+- **`--clump_only --paired` no longer silently overwrites one mate's clumping
+  report with the other's**
+  ([#391](https://github.com/FelixKrueger/TrimGalore/issues/391)). Primaries
+  carry `_clumped_1`/`_clumped_2`, but reports are named from the input
+  filename alone, so `-o out A/reads.fq B/reads.fq` wrote ONE report at exit 0.
+  Clumping-report paths now join the collision pre-flight on every clump arm
+  (gated on `--no_report_file`, matching the writers), which also stops a
+  clumping report from silently overwriting an *input* named like one — on the
+  paired arm and the single-end/uBAM arms alike. The single-interleaved-BAM
+  shape gets the same candidate line as defensive symmetry only; with one input
+  its report can never alias it. As with #388, two inputs whose filenames differ
+  only in case are now refused into a shared output directory even on a
+  case-sensitive filesystem, where both reports could in fact coexist.
+
+- **Whether input is gzipped is now decided by reading the file, not by its
+  name.** This corrects two opposite failures:
+
+  - `bgzip`-produced input named `.fq.bgz` (or anything else not ending in
+    `.gz`) failed with `stream did not contain valid UTF-8`, because the
+    compressed bytes were read as text.
+  - A plain FASTQ misnamed `.fastq.gz` failed with `invalid gzip header`.
+    It now reads successfully.
+
+  Both came from the same cause: the format is detected from file *content*,
+  but that verdict was discarded and re-derived from the *filename* by
+  `FastqReader`. Detection is now a three-byte gzip-magic check inside
+  `FastqReader` itself, so every caller gets it right by default, including
+  `--paired` at `--cores 1`, `--passthrough` and `--clump_only`. New
+  `open_with` / `open_threaded_with` / `sanity_check_with` constructors let
+  callers that have already detected the format pass the verdict in and skip
+  the re-check.
+
+  BAM discrimination is unaffected: `detect_input_format` still owns the
+  `BAM\1` payload check, and a `.bam` renamed `.fq.gz` is still read as BAM.
+
+  One known limitation remains, left to a separate change: output compression
+  still mirrors the input *filename*, so a `.bgz` input produces plain `.fq`
+  output. Moving that decision would change behaviour for every run, including
+  the misnamed-`.gz` file whose input handling changed above.
+
+- **`.bgz` / `.bgzf` input no longer leaves an inner `.fastq` in the output
+  filename** ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+  `sample.fastq.bgz` produced `sample.fastq_trimmed.fq` alongside
+  `sample.fastq.bgz_trimming_report.txt`; the two disagreed about the sample
+  name, and MultiQC takes that name from the report filename, so a trimmed
+  file and its report could land under different samples. The output is now
+  `sample_trimmed.fq`, matching what the same bytes under a `.fastq.gz` name
+  have always produced.
+
+  `io::strip_fastq_extensions` now removes a gzip-family suffix (`.gz`,
+  `.bgz`, `.bgzf`) and then the FASTQ extension, instead of matching an
+  enumerated list of combined suffixes. Names with no inner `.fastq`/`.fq`
+  are unaffected where they carry a single extension (`sample.bgz` →
+  `sample`). A multi-component name now loses one component more than before
+  (`sample.txt.bgz` → `sample`, previously `sample.txt`), matching what
+  `.gz` has always done. `.bam` inputs and unrelated extensions keep the
+  stems they had.
+
+  The specialty modes name their outputs from the same stem, so they shift
+  too. `--implicon` on `sample_R1.fastq.bgz` now writes
+  `sample_8bp_UMI_R1.fastq` where it wrote `sample_R1.fastq_8bp_UMI_R1.fastq`:
+  its R1/R2 de-duplication only fires on a stem ending in `_R1`, which the
+  old stem never did, so the doubled read tag disappears as well.
+  `--hardtrim5`, `--hardtrim3` and `--clock` shift in the same direction.
+
+  Output *filenames* only: no fixture in `test_files/` or in the
+  `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
+  comparison is untouched.
+
+- **Single-end trimming no longer discards one input's reads when two inputs
+  share an output name** ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
+  `trim_galore sample.fastq.gz sample.fq.gz` produced a single
+  `sample_trimmed.fq.gz` and exited 0, having written the second input over the
+  first. Two trimming reports were left behind, each stating that all its reads
+  had been written, so the arithmetic on disk was wrong and nothing checked it.
+
+  The output-collision pre-flight added for
+  [#216](https://github.com/FelixKrueger/TrimGalore/issues/216) already refused
+  this on `--paired`, `--clock`, `--implicon` and `--clump_only`. It was missing
+  from four dispatch paths, all sharing one shape — a loop over the input list
+  with no check in front of it: single-end trim (FASTQ and uBAM output) and
+  `--hardtrim5`/`--hardtrim3` (FASTQ and uBAM output). All four now check, and
+  every path routes through one shared implementation.
+
+  `--hardtrim5`/`--hardtrim3` were the wider case, because they name output into
+  the *current working directory* rather than beside the input: identical input
+  basenames collided there even when the inputs came from different directories,
+  so `--hardtrim5 30 */*.fastq.gz` over a per-sample layout kept only the last
+  sample. Because `--output_dir` cannot resolve that collision, these two modes
+  add their own remediation to the error rather than the generic advice.
+
+  Two further defects in the check itself are fixed at the same time:
+
+  - **The key was a raw path string**, so `./sample.fastq.gz` and
+    `sample.fastq.gz` — or a list mixing absolute and relative paths, as
+    `find`/`xargs` and pipeline staging produce — named one file under two keys
+    and passed. The key is now lexically normalised — absolutised, then `..`
+    folded against the component stack — so `./x`, `<cwd>/x` and `a/../x` all
+    resolve to one key without touching the filesystem. A path reached through a
+    **symlink** still aliases undetected; that is the one remaining case, and it
+    costs the same silent read loss this entry describes.
+  - **The check compared outputs only against other outputs**, never against the
+    run's own inputs — and, once that was fixed, only *primary* outputs were
+    compared. A trimming report, or a `--demux` per-barcode file, could still
+    overwrite a named input while every primary output stayed distinct. Reports
+    and `--demux` outputs are now in the checked set, and `--demux`'s barcode
+    file is treated as an input that may not be written over. An output path can
+    *be* an input:
+    `trim_galore sample.fastq.gz sample_trimmed.fq.gz` (reachable by re-running
+    over a directory holding an earlier run's output) destroyed the second
+    input's reads and wrote a `sample_trimmed_trimmed.fq.gz` containing the
+    first sample's — a wrong-sample file, which is harder to notice than a
+    missing one. This affected `--paired` as well, and is now refused on every
+    path with a message of its own.
+
+  A rejected run still writes nothing, and the diagnostic keeps naming the paths
+  as the user spelled them.
+
+- **Paired-end trimming reports can no longer silently overwrite each other**
+  ([#388](https://github.com/FelixKrueger/TrimGalore/issues/388)). Paired output
+  names carry a positional discriminator (`_val_1`/`_val_2`) that report names do
+  not, so two inputs with distinct trimmed outputs could still collide on their
+  reports: `--paired -o out A/reads.fq B/reads.fq` exited 0 with one report pair
+  for two inputs, and re-using a filename across pairs lost a report the same
+  way. The report paths (text and JSON, for both sides of every pair) now join
+  the collision pre-flight on the paired FASTQ and paired uBAM-output paths,
+  skipped under `--no_report_file` to match the writers.
+
+  Two behaviour changes follow. A pair whose R1 and R2 share a filename written
+  to a common output directory is now refused on every filesystem — that run
+  previously lost a report. And two genuinely distinct inputs whose filenames
+  differ only in case are refused even on a case-sensitive filesystem, where
+  both reports could in fact coexist: the same loud-error-over-silent-loss trade
+  the pre-flight has made since #216, now extended to paired reports.
+
+#### Changes
+
+- **Output-collision refusals now name the inputs you have to change**
+  ([#397](https://github.com/FelixKrueger/TrimGalore/issues/397)). The pre-flight
+  compared prospective output paths without recording which input each was named
+  from, so a report collision printed the same path twice — `out/reads.fq_trimming_report.txt
+  and out/reads.fq_trimming_report.txt would be written to the same file` — and then
+  advised "rename one input" without being able to say which. Refusals now carry
+  that provenance: two inputs racing for one path name both, aliased spellings show
+  both paths *and* both sources, and an output that would clobber an input names the
+  input its output was derived from. One case gains genuinely new advice: where a
+  single file supplies two colliding candidates (a file passed as a mate of two
+  different pairs, which validation permits), "rename one input" was impossible to
+  follow, so that branch now says to list each input once. Which runs are accepted
+  or refused is unchanged.
+
+
+- **`--preserve-tags`' help no longer says "ignored" for a case that aborts**
+  ([#407](https://github.com/FelixKrueger/TrimGalore/issues/407)). With all-FASTQ
+  inputs it is a warning, but combined with `--output-format ubam` it is a hard
+  error — the help said only "Ignored for FASTQ input", giving no reason to expect
+  the run to stop. Also, `--hardtrim5/3`'s help now shows the output-suffix
+  placeholder in backticks (`` `.<N>bp_5prime.fq(.gz)` ``), matching the
+  convention the rest of the help text already uses.
+
+
+- **`--clump_only`'s `--help` text no longer contradicts the shipped uBAM
+  support** ([#400](https://github.com/FelixKrueger/TrimGalore/issues/400)). The
+  block predated the uBAM arms and still listed `--output-format ubam` among the
+  *rejected* flags while closing with "v1 is FASTQ in / FASTQ out only" — so the
+  text actively deterred users from a feature that works. Most consequential: the
+  output-filename sentence was FASTQ-only, and under `--output-format ubam` a
+  paired run writes **one** interleaved `*_clumped.bam`, not two mate files, so
+  anyone scripting against `_clumped_{1,2}.fq.gz` was misled. The whole block is
+  now format-aware: per-format filenames, `--compression` and `--dont_gzip`
+  marked FASTQ-output-only, `--preserve-tags` documented as requiring a uBAM
+  input, and uBAM input documented as requiring `--output-format ubam`. The
+  `--output-format ubam` value description also gained the two rejections it was
+  missing (`--retain_unpaired`, `--dont_gzip`).
+
+  The fidelity claim is now scoped honestly, which is the correction most worth
+  reading: FASTQ in / FASTQ out is byte-identical, but **uBAM output is lossless
+  per record body and not byte-identical** — the space-separated header
+  description is dropped (so a standard Illumina `1:N:0:INDEX` field does not
+  survive), bases are uppercased, IUPAC codes become `N`, and aux tags survive
+  only when named in `--preserve-tags`. All four are long-standing writer
+  behaviours; only the documentation changes here. No behaviour change.
+
+- **The `--passthrough`-matches-R1/R2 message now says what it checks**
+  ([#389](https://github.com/FelixKrueger/TrimGalore/issues/389)). The old text
+  claimed the passthrough file "aliases an input file" unconditionally — false on
+  a case-sensitive filesystem, where the two spellings can be two real files. The
+  message is now subcase-specific: pointing at an input directly says the
+  passthrough must be a third file (e.g. the index read); a case-variant match
+  states the comparison is case-insensitive (APFS/NTFS safety) and suggests a
+  rename. Which runs are accepted or rejected is unchanged.
+
+- **A file given twice on one command line is now rejected**
+  ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
+  `trim_galore sample.fastq.gz sample.fastq.gz` previously trimmed the file
+  twice and wrote the same output twice, exiting 0. It is now refused during
+  argument validation, matching the duplicate-pair rejection `--paired` has
+  always had. `--clock` and `--implicon` keep their own more specific
+  "Read 1 and Read 2 appear to be the same file" message.
+
+- **`--hardtrim5` and `--hardtrim3` together are now a usage error**
+  ([#386](https://github.com/FelixKrueger/TrimGalore/issues/386)). Previously the
+  pair was accepted and only the 5' trim ran — the 3' request was silently
+  dropped (Perl v0.6.x behaved the same way). Run the two trims as separate
+  invocations.
+
+- **Two collision messages advised `--output-dir`, which is not a valid flag**
+  (only `--output_dir` and `-o` are). Both now name `--output_dir`.
+
+- **FASTQ extensions now match case-insensitively**
+  ([#384](https://github.com/FelixKrueger/TrimGalore/issues/384)).
+  `SAMPLE.FASTQ.GZ` previously kept an inner `.FASTQ` in its output stem while the
+  report used the full filename, so the two disagreed about the sample name. The
+  extension match (`.fastq`/`.fq`, `.gz`/`.bgz`/`.bgzf`) now folds ASCII case;
+  the rest of the name keeps its case. Four visible consequences for
+  uppercase-named input:
+
+  - `SAMPLE.FASTQ.GZ` now produces `SAMPLE_trimmed.fq.gz` where it produced
+    `SAMPLE.FASTQ_trimmed.fq`.
+  - Output for `.GZ`-named input is now **gzip-compressed**, mirroring `.gz`.
+    Perl v0.6.11's compression test was case-sensitive, so this knowingly departs
+    from v0.6.11 for uppercase names — the alternative was output named like the
+    gzipped convention but written plain.
+  - Some multi-input runs that used to succeed are now refused: inputs whose
+    extensions differ in spelling but whose stems now agree (`SAMPLE.FASTQ.GZ`
+    alongside `sample.fq.gz`) collide on the output path and fail loudly before
+    any file is written.
+  - `--clump_only` reports for `.GZ`-named input now label the input `gzip` and
+    include the `Compression ratio:` line; its output stem folds the same way.
+  - The specialty modes (`--hardtrim5/3`, `--clock`, `--implicon`) rename and
+    newly compress the same way — `SAMPLE_R1.FASTQ.GZ` under `--implicon` now
+    yields `SAMPLE_8bp_UMI_R1.fastq.gz`, with the `_R1` de-duplication newly
+    applying because the stem now ends in `_R1` (the same mechanism the `.bgz`
+    fix documented in #381).
+
+  This makes uppercase output internally consistent; it does not change the
+  report filename, which keeps the full input name as before.
+
+- **`--hardtrim5/3`, `--clock` and `--implicon` name output into the current
+  working directory**, so on a collision the usual advice — use different source
+  directories, or `--output_dir` — is false for them: neither changes the
+  outcome. These four modes now get their own remediation instead, replacing the
+  generic sentence rather than contradicting it a clause later.
+
+- **One definition of "the same file".** `--paired`'s R1≠R2 check, its
+  duplicate-pair check, the duplicate-input check and the `--passthrough` alias
+  check all compared paths more weakly than the collision pre-flight did, so
+  `trim_galore --paired ./a_R1.fq a_R1.fq` exited 0 and wrote two byte-identical
+  files labelled as a validated R1/R2 pair. All four now normalise paths the same
+  way as the pre-flight, so any two spellings of one file are caught. They do not
+  all use the *same* key: the pre-flight compares output paths case-insensitively
+  (`collision_key`), because outputs differing only in case alias each other on
+  APFS/NTFS, while the three input-identity checks preserve case
+  (`path_identity_key`), because on a case-sensitive filesystem `X` and `x` are
+  two real files and folding them would reject valid input. `--passthrough` asks
+  both questions and uses both keys.
+
+- **Case-folded paths are treated as colliding**, which is what makes the
+  APFS/NTFS guard work. On an opt-in case-sensitive volume two genuinely distinct
+  inputs differing only in case are therefore refused. That trade — a loud error
+  over a silent overwrite — is unchanged since v2.0; it is recorded here because
+  it had never been stated.
+
+- **`--clump_only` now supports uBAM in/out** — extending the mode with
+  unaligned BAM support via `--output-format ubam` (input auto-detected
+  by content). Aux-tag round-trip via `--preserve-tags TAG1,TAG2,…`
+  (A/Z/i/f scalars; B/H tags rejected at BAM-read time, same as trim
+  path). PE-uBAM output is ONE interleaved BAM per pair (mate-adjacent,
+  matching samtools/Picard/fgbio). Multi-pair input under `--paired`
+  supported (N=4, 6, … FASTQ inputs → one output per pair). Output
+  BAM's `@PG` line records the invocation; input `@PG` chain preserved.
+  `--fastqc` runs on BAM output (fastqc-rust reads BAM natively).
+  Byte-identity preserved for record contents (id + seq + qual +
+  preserved tags); cross-run byte-identity of the whole file uses
+  `@PG`-ignoring comparison (identical to the trim uBAM path's CI
+  treatment).
+- **`--dont_gzip` + `--output-format ubam` now rejected at CLI
+  validation** — closes a pre-existing gap on the trim uBAM path
+  where the combination was silently accepted (BAM is always BGZF).
+- **`--phred64` is now rejected with unaligned BAM input**
+  ([#358](https://github.com/FelixKrueger/TrimGalore/issues/358)). BAM
+  stores raw Phred scores by spec, so there is no ASCII encoding to
+  declare, and the reader always yields Phred+33 internally. The flag was
+  therefore never meaningful for BAM input — and was actively harmful:
+  combined with quality trimming it subtracted 64 from Phred+33 data,
+  collapsing every score by 31, which discarded effectively the whole
+  library as low-quality.
+
+  This removes invocations that previously worked — any BAM-input run in
+  which quality trimming was inert, so the flag had nothing to act on:
+  the `--clump_only` and `--hardtrim5/3` modes (which perform no quality
+  arithmetic at all), and `-q 0` on the ordinary trim path:
+
+  ```
+  trim_galore --clump_only --phred64 <input.bam>
+  trim_galore --hardtrim5 N --phred64 <input.bam>
+  trim_galore --phred64 -q 0 <input.bam>
+  ```
+
+  Drop `--phred64` from those commands; their output is unchanged. A
+  trimming run with `-q > 0` now produces the result it should have
+  produced all along.
+
+  The rejection is uniform across modes rather than mode-dependent,
+  because a conditional rule would be one refactor away from being wrong
+  — and, post-fix, an unguarded `--clump_only --phred64 <bam>` would
+  reduce every quality score by 31 while reporting success, breaking that
+  mode's documented lossless guarantee.
 - **New `--clump_only` specialty mode** — lossless reorder-only mode
   requested in [#353](https://github.com/FelixKrueger/TrimGalore/issues/353).
   Reorders FASTQ records by canonical 16-mer minimizer for gzip-friendly
@@ -44,6 +631,105 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
 
 #### Fixes
 
+- **Piped and stream input is now rejected with an accurate message**
+  ([#379](https://github.com/FelixKrueger/TrimGalore/issues/379)). Trim Galore
+  reads each input more than once — format detection, the initial sanity check
+  and adapter auto-detection each open it independently — so it requires a
+  regular file. Streams previously failed as though the *data* were at fault:
+  `<(zcat reads.fq.gz)` reported `doesn't seem to be in FastQ format`, a
+  gzipped pipe reported `Failed to decompress first block`, and a named FIFO
+  hung indefinitely with no message at all. All three now fail immediately,
+  naming the real constraint and giving the remedy (`zcat reads.fq.gz >
+  reads.fq` first).
+
+  This is a diagnostic change, not a capability change — piped input did not
+  work before and still does not. No input that previously succeeded is
+  affected: restartability is a property every working run already had.
+
+  Two cases are worth calling out. `--passthrough <stream>` was previously
+  unguarded on every layer, so a FIFO there hung *after* the R1/R2 output
+  files had been created, leaving partial output on disk; it is now rejected
+  before any output file is written. And `trim_galore /dev/stdin` typed at an
+  interactive terminal still waits for input rather than erroring — that is a
+  terminal, not a pipe, and telling them apart needs `isatty`.
+
+  Two smaller behaviour changes come with it. A `--demux` barcode file that is
+  a pipe or FIFO is now rejected: it is only read once, so restartability does
+  not apply, but a FIFO with no writer blocked with no message *after* trimming
+  and reporting had finished. And `--passthrough <uBAM>` is now rejected up
+  front rather than failing mid-run with `stream did not contain valid UTF-8`
+  — the existing uBAM rejection only inspected the R1/R2 inputs, never the
+  passthrough file.
+
+- **Documentation site: `$` in prose is no longer eaten as maths.** The docs
+  pipeline enables `remark-math`, which by default treats single dollars as
+  inline-maths delimiters. Prices in the changelog and benchmark pages were
+  being consumed: `~$7 vs ~$41 per 1000-sample cohort at AWS $0.05/vCPU-hour`
+  rendered with two `$` deleted and `7vs` italicised, and a whole sentence on
+  the benchmarks page rendered in red as a KaTeX parse error. Single-dollar
+  inline maths is now disabled; `$$` display maths is unaffected.
+
+- **Documentation site: the multi-threading benchmark image now loads.** The
+  v0.6.0 entry pointed at `docs/Images/pigz_bench.png`, a path that exists in
+  neither the repository nor the built site, so the image was broken in both
+  GitHub and web renderings. The asset now lives in `docs/public/images/` and
+  is referenced by absolute URL so one tag serves both renderers.
+
+- **`-a2`/`--adapter2` is no longer ignored unless `-a` is also given**
+  ([#369](https://github.com/FelixKrueger/TrimGalore/issues/369), reported by
+  @MathieuUm). Adapter resolution was an early-return chain in which only the
+  explicit-`-a` branch read `-a2`. Every preset (`--illumina`, `--nextera`,
+  `--stranded_illumina`, `--small_rna`, `--bgiseq`) and the **default
+  auto-detection path** returned a hardcoded Read 2 adapter and silently
+  discarded the flag. Read 2 then fell back to Read 1's adapter, so
+  `--illumina -a2 SEQ` trimmed Read 2 with `AGATCGGAAGAGC` instead of `SEQ`.
+
+  Restores the v0.6.11 contract: a user-supplied `-a2` always determines the
+  Read 2 adapter, and presets or auto-detection supply a default only in its
+  absence.
+
+  **This affects every v2 release** (v2.1.0 through v2.3.0), not only v2.3.0, so
+  downgrading within v2 is not a workaround. The reporter measured a ~20% drop
+  in mapping rate and properly-paired alignments after moving from 0.6.11 —
+  consistent with a pair-retention change, since trimming Read 2 correctly also
+  alters which pairs survive the joint `--length` filter.
+
+  **Trimmed output changes for affected invocations, on both reads.** Read 1's
+  per-read trimming is untouched, but the joint pair-length filter retains a
+  different set of pairs once Read 2 is trimmed correctly, so `_val_1.fq.gz`
+  differs too. Invocations that already passed `-a` are unchanged, as are all
+  invocations that do not pass `-a2`.
+
+  Also in this fix:
+
+  - `-a2` is now validated on every path, so a malformed value (invalid
+    characters, an empty string, a missing `file:` FASTA) is **rejected** rather
+    than silently discarded. Previously only the `-a` path checked it.
+  - `-a2` given where it cannot apply — single-end input, or `--hardtrim5/3`,
+    `--clock`, `--implicon`, which perform no adapter trimming — now warns
+    instead of being silently dropped. A malformed `-a2` is *not* fatal in those
+    modes: a value the run has already announced it will ignore should not fail
+    the run.
+  - Single-end runs no longer print an `Adapter 2 (Read 2):` line for an adapter
+    they will not use. This also applies to single-end `--small_rna` and
+    `--bgiseq` runs that pass no `-a2` at all, since those presets set a Read 2
+    default regardless of pairing.
+  - Displacing a preset's own Read 2 default (`--small_rna`, `--bgiseq`) prints
+    a NOTE naming the default that was not used.
+  - `--consider_already_trimmed` keeps precedence: when it suppresses adapter
+    trimming, `-a2` is not applied either, so both reads stay untrimmed and the
+    mode's "only quality trimming" statement remains true.
+  - `A{N}` brace expansion, repeated `-a2`, and `-a2 file:adapters.fa` now work
+    on every path; the documentation had described these as supported since v2,
+    but they only ever worked alongside `-a`. Two documented examples in the
+    adapter guide were consequently no-ops and are correct as written from this
+    release.
+
+  The Perl-parity CI matrix never passed `-a2`, which is why byte-identity
+  checks did not catch this. A validation case covering `-a2` with a preset and
+  with auto-detection is added, and was confirmed to fail against a pre-fix
+  binary.
+
 - **`--fastqc` now runs on `--output-format ubam` output** for both single-end
   and paired-end runs. The uBAM-output path previously silently skipped the
   bundled FastQC pass even when `--fastqc` (or `--fastqc_args`) was requested;
@@ -51,6 +737,102 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   so the report is generated directly from the trimmed `*_trimmed.bam` (SE) or
   the single interleaved `*_val.bam` (PE) — one FastQC report per output BAM,
   covering both mates in the PE case.
+- **`--phred64` now writes correct quality scores to uBAM output**
+  ([#358](https://github.com/FelixKrueger/TrimGalore/issues/358)). The BAM
+  writer subtracted a hardcoded 33 regardless of the input encoding, so
+  Phred+64 input was stored under-subtracted by 31 — a `'h'` (ASCII 104,
+  Q40 under Phred+64) was written as raw 71 instead of 40. Because 71 is
+  inside the SAM-legal 0–93 range, no consumer errored; quality was
+  silently inflated. Affected every uBAM-output path: normal trimming,
+  `--hardtrim5/3`, and `--clump_only`.
+
+  `--fastqc` on uBAM output was **mislabelled rather than misplotted**: the
+  inflated `QUAL` pushed every byte above ASCII 64, so FastQC's encoding
+  heuristic guessed `Illumina 1.5` and subtracted 64, cancelling the
+  writer's 31-point inflation. The plotted means were therefore coincidentally
+  correct while the reported `Encoding` was wrong. Consumers that read BAM
+  `QUAL` as raw Phred — samtools, aligners, Bismark — saw the inflated values
+  directly, with no cancellation.
+
+  **Archived output is recoverable**, though not in a single invocation
+  (`--phred64` is now rejected for BAM input). Round-trip through
+  `samtools fastq`, which reproduces the original Phred+64 ASCII verbatim,
+  then re-run:
+
+  ```bash
+  samtools fastq -n affected.bam > recovered.fq
+  trim_galore --phred64 --output-format ubam recovered.fq
+  ```
+
+  This yields output byte-identical to a correct first run, and needs no
+  access to the original FASTQ.
+
+  Also hardens the read side: converting BAM raw Phred to ASCII used
+  unchecked `+`, which overflowed `u8` for any raw byte above 222 — the
+  plausible instance being the `0xFF` missing-quality sentinel in a record
+  that mixes real scores with sentinels, since the existing sentinel check
+  only fires when *every* byte is `0xFF`. Such bytes are now mapped to
+  `'!'` per byte, matching the all-`0xFF` path, and any other out-of-spec
+  value is clamped to the SAM maximum of 93.
+- **A `--paired` pair containing one FASTQ and one uBAM is now diagnosed
+  correctly** ([#363](https://github.com/FelixKrueger/TrimGalore/issues/363)).
+  The guard reported *"--paired with two BAM files is not supported"* for any
+  pair containing at least one BAM, and offered the single-interleaved-file
+  remediation. For a mixed pair both statements were false, and the advice was
+  misdirection: the cause is usually a mis-typed filename or an intent to pass
+  two FASTQ files, neither of which is fixed by interleaving. Mixed pairs now
+  report which input is which format and are not offered that remediation; a
+  genuine two-BAM pair keeps the message, now naming both files.
+
+  The check also moved into input validation, ahead of dispatch. Three
+  consequences on rejected runs, all improvements but all observable:
+
+  - `--output_dir` is no longer created. This applies to every affected mode.
+  - On the ordinary trimming path, adapter auto-detection no longer runs
+    first. It previously scanned up to 1 M reads per input before the
+    guaranteed rejection. The `--output-format ubam` and `--clump_only` paths
+    already rejected before detection, or perform none at all.
+  - **Multi-pair runs on the trimming and `--clump_only` FASTQ paths now fail
+    before any pair is processed.** The check previously sat inside the
+    per-pair loop there, so pairs preceding the offending one were fully
+    trimmed and their `*_val_{1,2}.fq.gz` files and trimming reports written
+    to disk. A pipeline that consumed whatever pairs succeeded before the
+    failure now gets nothing. The `--output-format ubam` paths already
+    validated every pair up-front.
+
+  The two-BAM message now also names a command that combines the two files:
+  `samtools merge -n -o interleaved.bam r1.bam r2.bam`, verified to produce a
+  mate-adjacent file TrimGalore accepts. Previously the message said only that
+  an interleaved file was expected, without saying how to make one. Note that
+  `samtools collate` is not the tool for this — it takes a single input and
+  treats its second argument as a temp-file prefix, so `collate -O r1.bam
+  r2.bam` exits successfully having written only the first file's records.
+
+  `--clump_only` on the FASTQ-output path keeps its own diagnosis (uBAM input
+  requires `--output-format ubam`, because the FASTQ output path would drop
+  aux tags): there the fix is a flag, not a re-shaped input. Behaviour is
+  unchanged for `--hardtrim5/3`, which process each input independently and so
+  are unaffected by a mixed pair, and for `--clock` / `--implicon`, which
+  continue to report their own (separate) error on such input.
+
+#### Infrastructure (contributor-facing)
+
+- **New `docs-build` CI job.** Every pull request now builds the Astro docs site
+  and asserts the build produced HTML pages and non-empty satori OG images.
+  Previously `docs.yml` triggered only on `push` to `master`/`dev`, so a docs
+  change — or a docs dependency bump — was first validated by the live deploy on
+  the trunk. Found while merging a `satori` 0.28 → 0.29 bump whose eight green
+  checks were all Rust.
+
+  The OG-image assertion is the part worth having: a renderer failure can leave a
+  zero-byte PNG while the build still exits 0, so build status alone is not
+  evidence. The check uses a byte floor rather than a zero-size test, because
+  `find -size -1k` rounds up to a block and misses a truncated file.
+
+- **`justfile` docs recipes fixed.** `logos`, `docs` and `docs-dev` ran
+  `cd Docs`; the directory is `docs/`. These worked on case-insensitive
+  filesystems and failed on Linux, which defeated the recipes' purpose of giving
+  contributors local CI parity.
 
 
 ### Version 2.3.0 (Release on 27 June 2026)
