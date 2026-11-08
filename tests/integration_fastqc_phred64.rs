@@ -301,12 +301,12 @@ fn preflight_refuses_mislabelled_input_before_writing_anything() {
 }
 
 #[test]
-fn preflight_does_not_fire_without_fastqc() {
+fn preflight_does_not_fire_without_fastqc_on_fastq_output() {
     let dir = tempdir().unwrap();
     let input = write_phred33_fixture(dir.path(), "p33_nofastqc.fastq");
 
-    // The check is deliberately scoped to --fastqc. Without it, --phred64 on
-    // Phred+33 data keeps its existing behaviour, NOTE and all.
+    // The gate is --fastqc or uBAM output. FASTQ output without --fastqc is
+    // accepted, NOTE and all.
     let out = run_raw(
         dir.path(),
         &[
@@ -542,5 +542,110 @@ fn assert_preflight_refused(stderr: &str, out_dir: &Path) {
         !out_dir.exists(),
         "{} was created, so the refusal came after work began",
         out_dir.display()
+    );
+}
+
+// ─── the gate also covers uBAM output ───────────────────────────────────
+// On uBAM output the declared offset feeds the QUAL arithmetic, so a wrong
+// claim is refused whether or not --fastqc is given.
+
+#[test]
+fn preflight_fires_on_ubam_output_without_fastqc() {
+    let dir = tempdir().unwrap();
+    let input = write_phred33_fixture(dir.path(), "p33_ubam.fastq");
+    let out_dir = dir.path().join("out");
+
+    let out = run_raw(
+        &out_dir,
+        &[
+            "--phred64",
+            "--output-format",
+            "ubam",
+            "-q",
+            "0",
+            "--length",
+            "0",
+            input.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "should refuse, got:\n{stderr}");
+    assert_preflight_refused(&stderr, &out_dir);
+    assert!(
+        stderr.contains("ASCII 35"),
+        "the refusal must name the offending character, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn preflight_fires_on_hardtrim_ubam_output() {
+    let dir = tempdir().unwrap();
+    let input = write_phred33_fixture(dir.path(), "p33_ht5_ubam.fastq");
+    let out_dir = dir.path().join("out");
+
+    let out = run_raw(
+        &out_dir,
+        &[
+            "--phred64",
+            "--hardtrim5",
+            "20",
+            "--output-format",
+            "ubam",
+            input.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "should refuse, got:\n{stderr}");
+    assert_preflight_refused(&stderr, &out_dir);
+}
+
+#[test]
+fn preflight_fires_on_clump_only_ubam_output() {
+    // No --length: --clump_only rejects it outright, which would make this
+    // test pass on the unrelated error. No -q either; neither flag is needed,
+    // because the refusal precedes every dispatch branch.
+    let dir = tempdir().unwrap();
+    let input = write_phred33_fixture(dir.path(), "p33_clump_ubam.fastq");
+    let out_dir = dir.path().join("out");
+
+    let out = run_raw(
+        &out_dir,
+        &[
+            "--phred64",
+            "--clump_only",
+            "--output-format",
+            "ubam",
+            input.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "should refuse, got:\n{stderr}");
+    assert_preflight_refused(&stderr, &out_dir);
+}
+
+#[test]
+fn note_qualifies_pass_through_by_output_format() {
+    // The NOTE fires before dispatch and after the pre-flight, so a run that
+    // reaches it must be one the pre-flight accepts: FASTQ output here.
+    let dir = tempdir().unwrap();
+    let input = write_phred33_fixture(dir.path(), "p33_note.fastq");
+    let out_dir = dir.path().join("out");
+
+    let out = run_raw(
+        &out_dir,
+        &["--phred64", "--hardtrim5", "20", input.to_str().unwrap()],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        out.status.success(),
+        "FASTQ output is accepted, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("writing uBAM they do not"),
+        "the NOTE must scope pass-through to FASTQ output, got:\n{stderr}"
     );
 }

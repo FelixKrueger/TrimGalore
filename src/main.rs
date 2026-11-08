@@ -383,7 +383,12 @@ fn main() -> Result<()> {
     // trimmed output and the reports are on disk. A Phred+64 file cannot hold a
     // quality character below ASCII 64, because Q0 is ASCII 64, so the input
     // settles it before any work happens.
-    if cli.phred64 && cli.fastqc_requested() {
+    // On uBAM output the declared offset feeds the QUAL arithmetic, and bases
+    // below Q31 floor at 0 rather than shifting.
+    if cli.phred64
+        && (cli.fastqc_requested()
+            || matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam))
+    {
         for input in cli.input.iter().chain(cli.passthrough.iter()) {
             // BAM quality is raw Phred, and `BamReader` synthesises ASCII on read,
             // so a scan would report a byte the file does not contain. uBAM in
@@ -556,10 +561,13 @@ fn main() -> Result<()> {
              it really is. Wherever quality scores are read (quality trimming, and \
              BAM QUAL on uBAM output), Phred+33 data taken as Phred+64 loses 31 from \
              every score, floored at 0: typical Q2–Q41 becomes Q0–Q10, which reads \
-             as plausible poor-quality data rather than obviously empty. Modes that \
-             do no quality arithmetic, such as --hardtrim5/3 and --clump_only writing \
-             FASTQ, pass the scores through untouched. With --fastqc the FastQC step \
-             refuses a file holding any quality character below ASCII 64."
+             as plausible poor-quality data rather than obviously empty. Writing \
+             FASTQ, modes that do no quality arithmetic — such as --hardtrim5/3 and \
+             --clump_only — pass the scores through untouched; writing uBAM they do \
+             not. An input holding any quality character below ASCII 64 is refused \
+             before anything is written when the output is uBAM, or when --fastqc is \
+             given; uniformly high-quality Phred+33 data holds no such character and \
+             is accepted."
         );
     }
 

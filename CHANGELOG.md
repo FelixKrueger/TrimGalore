@@ -23,8 +23,14 @@
   quality character below ASCII 64, because Q0 is ASCII 64, so a mislabelled input is refused up
   front rather than part-processed. The check reads the input, where FastQC saw only the trimmed
   output, so it refuses some runs that previously completed — including ones whose low-quality
-  tail was trimmed away before FastQC could object. The scan covers the first 10,000 reads;
-  `--phred64` without `--fastqc` is unaffected.
+  tail was trimmed away before FastQC could object. The scan covers the first 10,000 reads; on
+  FASTQ output, `--phred64` without `--fastqc` is unaffected.
+
+- **`--phred64` is also checked against the input whenever the output is uBAM**
+  ([#532](https://github.com/FelixKrueger/TrimGalore/issues/532)). On uBAM output the declared
+  offset feeds the BAM `QUAL` arithmetic, so an input holding any quality character below ASCII 64
+  is now refused before anything is written instead of being stored 31 points low with bases under
+  Q31 floored to zero; see `docs/guide/quality.md` for what the check can and cannot settle.
 
 - **`--phred64` is declared to the bundled FastQC engine, and mislabelled input is refused**
   ([#500](https://github.com/FelixKrueger/TrimGalore/issues/500)). FastQC 0.13.0 reads Phred+33

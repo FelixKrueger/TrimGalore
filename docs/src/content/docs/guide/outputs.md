@@ -99,6 +99,8 @@ Most FASTQ-shaped features work with uBAM output. Rejected at startup, before an
 - `--clumpify` — in-place reorder is FASTQ-shape-specific (note: `--clump_only --output-format ubam` **is** supported — see [Clump-only](/modes/clump-only/))
 - `--rename` — only when at least one input is FASTQ, and only when a clipping or hardtrim flag that applies to this run is set; uBAM input is accepted (see [Annotating read IDs](#annotating-read-ids) below)
 
+`--phred64` is supported with uBAM output, and is not in that list: uBAM `QUAL` stores true Phred scores, so the declared offset is subtracted on write. Because that makes the declaration arithmetic rather than a reading convention, an input holding any quality character below ASCII 64 — which no Phred+64 file can — is refused before anything is written, rather than stored 31 points low. Genuine Phred+64 input is accepted. See [Phred encoding](/guide/quality/#phred-encoding).
+
 ## Output directory
 
 `--output_dir DIR` writes every output to `DIR/`. The filename stems are unchanged; only the parent directory differs.
