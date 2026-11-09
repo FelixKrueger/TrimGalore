@@ -29,6 +29,7 @@
   },
   "overrides": {
     "svgo": "^4.0.2",
-    "js-yaml": "^4.2.0"
+    "js-yaml": "^4.2.0",
+    "katex": "$katex"
   }
 }
