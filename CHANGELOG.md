@@ -3,7 +3,7 @@
 
 ### Unreleased
 
-### Version 2.4.0 (Release on 8 November 2026)
+### Version 2.4.0 (Release on 9 November 2026)
 
 #### Changes
 
