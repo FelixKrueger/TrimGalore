@@ -5,26 +5,26 @@ description: What Trim Galore refuses, what it only warns about, and the remedia
 tags: [errors, refusals, recovery]
 page_id: troubleshooting
 subject_status: current
-updated: 2026-11-02
+updated: 2026-11-09
 sources:
   - repo: FelixKrueger/TrimGalore
     path: src/fastq.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/format.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/bam.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/io.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 6303152
+    commit: 6caf099
 ---
 
 ## Summary
@@ -82,9 +82,14 @@ not silent no-ops.
 `--passthrough` requires `--paired` and exactly one pair, and is refused
 alongside `--retain_unpaired` and `--clumpify`.
 
-`--phred64` is refused with uBAM input: BAM stores raw quality values and the
-reader always yields Phred+33 internally, so the flag could only corrupt the
-output. A B (array) or H (hex) aux tag is refused by `bam::parse_tag_value`,
+`--phred64` is refused with uBAM input in every mode: BAM stores raw quality
+values and `BamReader` always yields Phred+33 internally, so the flag has no
+correct reading. Under `--fastqc`, or whenever the output is uBAM, the flag is
+also checked against the input: `lowest_quality_char` scans the first 10,000
+reads and `main` refuses a file holding any character below ASCII 64, naming
+the file, the character and its ASCII value, before `ensure_output_dir` runs.
+A Phred+33 file whose every base is Q31 or better holds no such character and
+is accepted. A B (array) or H (hex) aux tag is refused by `bam::parse_tag_value`,
 which supports only A, Z, i and f scalars — the FASTQ intermediate is textual
 and cannot carry the other two.
 

@@ -5,26 +5,26 @@ description: The purpose, who runs it, and when it is and is not the right tool.
 tags: [overview, ngs, trimming]
 page_id: overview
 subject_status: current
-updated: 2026-11-02
+updated: 2026-11-09
 sources:
   - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/format.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/fastq.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/bam.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/trimmer.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 6303152
+    commit: 6caf099
 ---
 
 ## Summary
@@ -72,6 +72,7 @@ which are rare. Use Cutadapt for those.
 | Demultiplexing is single-end only | `demux` module |
 | uBAM output is single-threaded in v1 and refuses seven flags, including `--clumpify` and `--demux` | `Cli::validate` |
 | Aux tags round-trip as A, Z, i and f scalars only | `bam::parse_tag_value` |
+| `--phred64` is refused with uBAM input, and verified against the input under `--fastqc` or with uBAM output | `lowest_quality_char` |
 | `--trim-n` has no effect under `--rrbs` | `trimmer::trim_read` |
 | Clumpify's memory reservation is calibrated above a floor read length; shorter reads are warned about, not covered | `main::warn_below_clumpify_floor` |
 

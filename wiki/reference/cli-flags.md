@@ -5,17 +5,17 @@ description: Every flag Trim Galore accepts, grouped by what it affects, with de
 tags: [cli, flags, defaults]
 page_id: cli-flags
 subject_status: current
-updated: 2026-11-02
+updated: 2026-11-09
 sources:
   - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/library.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/adapter.rs
-    commit: 6303152
+    commit: 6caf099
 ---
 
 ## Summary
@@ -43,7 +43,7 @@ forms, so `-r1` and `-r2` still reach `--length_1` and `--length_2`.
 | `--poly_g` / `--no_poly_g` | auto | Force 3' poly-G trimming on or off, overriding auto-detection. |
 | `--trim-n` | off | Trim Ns from both ends. Suppressed under `--rrbs`. |
 | `--consider_already_trimmed` | unset | Takes a length; above it, adapter trimming is skipped and only quality trimming runs. Conflicts with the preset flags. |
-| `--phred64` / `--phred33` | Phred+33 | Input quality encoding. |
+| `--phred64` / `--phred33` | Phred+33 | Input quality encoding. `--phred64` is refused with uBAM input, and checked against the input under `--fastqc` or with uBAM output. |
 
 ## Adapter presets
 
@@ -126,7 +126,7 @@ each owns its output naming.
 | Flag | Effect |
 |---|---|
 | `--fastqc` | Run the bundled FastQC on the trimmed output. |
-| `--fastqc_args` | A curated subset of FastQC flags; unknown flags warn and are ignored. |
+| `--fastqc_args` | A curated subset of FastQC flags; unknown flags warn and are ignored. `--png` embeds PNG charts instead of SVG; `--svg` is accepted as a no-op. |
 
 `--fastqc` is refused on the four specialty modes and on one interleaved uBAM
 with FASTQ output, because those paths write no report.

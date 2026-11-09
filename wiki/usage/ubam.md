@@ -5,20 +5,20 @@ description: Running unaligned BAM input, writing uBAM output, carrying aux tags
 tags: [ubam, bam, aux-tags, interleaved]
 page_id: ubam
 subject_status: current
-updated: 2026-11-02
+updated: 2026-11-09
 sources:
   - repo: FelixKrueger/TrimGalore
     path: src/bam.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/main.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/format.rs
-    commit: 6303152
+    commit: 6caf099
   - repo: FelixKrueger/TrimGalore
     path: src/cli.rs
-    commit: 6303152
+    commit: 6caf099
 ---
 
 ## Summary
@@ -43,9 +43,17 @@ what `samtools sort -n`, `samtools collate`, Picard and fgbio all produce. Two
 separate uBAM files are not the paired-uBAM shape. Grouped-but-not-adjacent
 input is refused with a `samtools collate` pointer.
 
-`--phred64` is refused with uBAM input: BAM stores raw quality values and the
-reader always yields Phred+33 internally, so the flag could only corrupt the
-output.
+`--phred64` is refused with uBAM input in every mode: BAM stores raw quality
+values and `BamReader` always yields Phred+33 internally, so the flag has no
+correct reading. With uBAM *output* it is honoured for FASTQ input, because
+`BamWriter::create` takes the declared offset and subtracts it per byte to
+store true Phred scores. That makes the declaration arithmetic rather than a
+reading convention, so it is checked against the input first: a file holding
+any quality character below ASCII 64 cannot be Phred+64, and `main` refuses it
+via `lowest_quality_char` before `ensure_output_dir` runs. The scan covers the
+first 10,000 reads. A Phred+33 file whose every base is Q31 or better carries
+no character below 64 and is accepted, because nothing in its bytes
+distinguishes it from Phred+64.
 
 ## Carrying aux tags into FASTQ
 
