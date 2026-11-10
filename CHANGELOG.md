@@ -3,6 +3,14 @@
 
 ### Unreleased
 
+#### Bug fixes
+
+- **`Total written (filtered)` no longer varies with `--cores`**
+  ([#541](https://github.com/FelixKrueger/TrimGalore/issues/541)). The parallel path reported the
+  post-clip length where the serial paths report the post-adapter length from #232, so the figure
+  moved with the core count on any run that trims after the adapter stage — including every
+  `--clumpify` run, which requires `--cores >= 2`.
+
 ### Version 2.4.0 (Release on 9 November 2026)
 
 #### Changes
