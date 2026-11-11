@@ -5,6 +5,13 @@
 
 #### Bug fixes
 
+- **`Unpaired read N kept` is no longer reported for reads that were never written**
+  ([#544](https://github.com/FelixKrueger/TrimGalore/issues/544)). At `--cores >= 2` the parallel
+  path counted rescuable mates whether or not `--retain_unpaired` had opened a rescue file, so a
+  paired run without it printed a count beside no output file and carried the same figure in
+  `r1_unpaired` / `r2_unpaired` in the JSON; the counters now track the records actually written, as
+  the serial path and Perl v0.6.x already did.
+
 - **`Total written (filtered)` no longer varies with `--cores`**
   ([#541](https://github.com/FelixKrueger/TrimGalore/issues/541)). The parallel path reported the
   post-clip length where the serial paths report the post-adapter length from #232, so the figure
