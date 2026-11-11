@@ -1,0 +1,142 @@
+########## se_trim (exit=0) :: in/a.fastq
+in/a_trimmed.fq
+in/a.fastq_trimming_report.json
+in/a.fastq_trimming_report.txt
+
+########## se_trim_fastqc (exit=0) :: --fastqc in/a.fastq
+in/a_trimmed_fastqc.html
+in/a_trimmed_fastqc.zip
+in/a_trimmed.fq
+in/a.fastq_trimming_report.json
+in/a.fastq_trimming_report.txt
+
+########## se_trim_o (exit=0) :: -o out in/a.fastq in/b.fastq
+out/a_trimmed.fq
+out/a.fastq_trimming_report.json
+out/a.fastq_trimming_report.txt
+out/b_trimmed.fq
+out/b.fastq_trimming_report.json
+out/b.fastq_trimming_report.txt
+
+########## pe_trim (exit=0) :: --paired r1/s_R1.fastq r2/s_R2.fastq
+r1/s_R1_val_1.fq
+r1/s_R1.fastq_trimming_report.json
+r1/s_R1.fastq_trimming_report.txt
+r1/s_R2_val_2.fq
+r1/s_R2.fastq_trimming_report.json
+r1/s_R2.fastq_trimming_report.txt
+
+########## pe_retain (exit=0) :: --paired --retain_unpaired s_R1.fastq s_R2.fastq
+s_R1_unpaired_1.fq
+s_R1_val_1.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2_unpaired_2.fq
+s_R2_val_2.fq
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## pe_pt (exit=1) :: --paired --passthrough s_I1.fastq s_R1.fastq s_R2.fastq
+s_I1_passthrough.fq
+s_R1_val_1.fq
+s_R2_val_2.fq
+--- stderr tail ---
+Error: processing pair 1 of 1 (R1=s_R1.fastq, R2=s_R2.fastq)
+
+Caused by:
+    Read ID mismatch at record 1: R1='R1_read0', R2='R2_read0', passthrough='I1_read0'. Files are out of sync.
+
+########## pe_fastqc (exit=0) :: --paired --fastqc s_R1.fastq s_R2.fastq
+s_R1_val_1_fastqc.html
+s_R1_val_1_fastqc.zip
+s_R1_val_1.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2_val_2_fastqc.html
+s_R2_val_2_fastqc.zip
+s_R2_val_2.fq
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## se_demux (exit=1) :: --demux bc.txt a.fastq
+--- stderr tail ---
+3008b37 — macos/aarch64 — built 2026-08-10T12:03:32Z
+==================================================
+
+Error: Barcode file bc.txt line 1: expected tab-separated 'sample_name\tbarcode_sequence', got: 'sampleA\tACGT'
+
+########## ht5 (exit=0) :: --hardtrim5 20 in/a.fastq
+a.20bp_5prime.fq
+
+########## clock (exit=0) :: --clock --paired c_R1.fastq c_R2.fastq
+c_R1.clock_UMI.R1.fq
+c_R2.clock_UMI.R2.fq
+
+########## implicon (exit=0) :: --implicon --paired i_R1.fastq i_R2.fastq
+i_8bp_UMI_R1.fastq
+i_8bp_UMI_R2.fastq
+
+########## co_se (exit=0) :: --clump_only a.fastq
+a_clumped.fq
+a.fastq_clumping_report.txt
+
+########## co_pe (exit=0) :: --clump_only --paired r1/s_R1.fastq r2/s_R2.fastq
+r1/s_R1_clumped_1.fq
+r1/s_R1.fastq_clumping_report.txt
+r1/s_R2_clumped_2.fq
+r1/s_R2.fastq_clumping_report.txt
+
+########## clumpify (exit=1) :: --clumpify a.fastq
+--- stderr tail ---
+Error: --clumpify requires --cores >= 2 (the bin dispatcher feeds parallel workers)
+
+########## ubam_se (exit=0) :: --output-format ubam a.fastq
+a_trimmed.bam
+a.fastq_trimming_report.json
+a.fastq_trimming_report.txt
+
+########## ubam_pe2 (exit=0) :: --paired --output-format ubam r1/s_R1.fastq r2/s_R2.fastq
+r1/s_R1_val.bam
+r1/s_R1.fastq_trimming_report.json
+r1/s_R1.fastq_trimming_report.txt
+r1/s_R2.fastq_trimming_report.json
+r1/s_R2.fastq_trimming_report.txt
+
+########## ubam_pe1 (exit=0) :: --paired --output-format ubam ip.bam
+ip_R1_trimming_report.json
+ip_R1_trimming_report.txt
+ip_R2_trimming_report.json
+ip_R2_trimming_report.txt
+ip_val.bam
+
+########## fq_pe1 (exit=0) :: --paired ip.bam
+ip_R1_trimming_report.json
+ip_R1_trimming_report.txt
+ip_R2_trimming_report.json
+ip_R2_trimming_report.txt
+ip_val_1.fq
+ip_val_2.fq
+
+########## bamin_se (exit=0) :: s.bam
+s_trimmed.fq
+s.bam_trimming_report.json
+s.bam_trimming_report.txt
+
+########## co_ubam_se (exit=0) :: --clump_only --output-format ubam s.bam
+s_clumped.bam
+s.bam_clumping_report.txt
+
+########## co_ubam_pe1 (exit=0) :: --clump_only --paired --output-format ubam ip.bam
+ip_clumped.bam
+ip.bam_clumping_report.txt
+
+########## co_ubam_pe2 (exit=0) :: --clump_only --paired --output-format ubam s_R1.fastq s_R2.fastq
+s_R1_clumped.bam
+s_R1.fastq_clumping_report.txt
+
+########## ht5_ubam (exit=0) :: --hardtrim5 20 --output-format ubam a.fastq
+a.20bp_5prime.bam
+
+########## se_norep (exit=0) :: --no_report_file a.fastq
+a_trimmed.fq
+

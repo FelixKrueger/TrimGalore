@@ -1,0 +1,131 @@
+########## demux (exit=0) :: --demux bc.txt a.fastq
+a_trimmed_demultiplexing_summary.txt
+a_trimmed_NoCode.fq
+a_trimmed_sampleA.fq
+a_trimmed_sampleB.fq
+a_trimmed.fq
+a.fastq_trimming_report.json
+a.fastq_trimming_report.txt
+
+########## demux_fqc (exit=0) :: --demux bc.txt --fastqc a.fastq
+a_trimmed_demultiplexing_summary.txt
+a_trimmed_fastqc.html
+a_trimmed_fastqc.zip
+a_trimmed_NoCode.fq
+a_trimmed_sampleA.fq
+a_trimmed_sampleB.fq
+a_trimmed.fq
+a.fastq_trimming_report.json
+a.fastq_trimming_report.txt
+
+########## pt (exit=0) :: --paired --passthrough s_I1.fastq s_R1.fastq s_R2.fastq
+s_I1_passthrough.fq
+s_R1_val_1.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2_val_2.fq
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## pt_fqc (exit=0) :: --paired --fastqc --passthrough s_I1.fastq s_R1.fastq s_R2.fastq
+s_I1_passthrough_fastqc.html
+s_I1_passthrough_fastqc.zip
+s_I1_passthrough.fq
+s_R1_val_1_fastqc.html
+s_R1_val_1_fastqc.zip
+s_R1_val_1.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2_val_2_fastqc.html
+s_R2_val_2_fastqc.zip
+s_R2_val_2.fq
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## clumpify (exit=0) :: --clumpify --cores 2 a.fastq
+a_trimmed.fq
+a.fastq_trimming_report.json
+a.fastq_trimming_report.txt
+
+########## clumpify_pe (exit=0) :: --paired --clumpify --cores 2 s_R1.fastq s_R2.fastq
+s_R1_val_1.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2_val_2.fq
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## co_fqc (exit=0) :: --clump_only --fastqc a.fastq
+a_clumped_fastqc.html
+a_clumped_fastqc.zip
+a_clumped.fq
+a.fastq_clumping_report.txt
+
+########## fqc_odir (exit=0) :: --fastqc --fastqc_args -o qc a.fastq
+a_trimmed.fq
+a.fastq_trimming_report.json
+a.fastq_trimming_report.txt
+qc/a_trimmed_fastqc.html
+qc/a_trimmed_fastqc.zip
+
+########## basename_pe (exit=0) :: --paired --basename fixed s_R1.fastq s_R2.fastq
+fixed_val_1.fq
+fixed_val_2.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## basename_se (exit=1) :: --basename fixed a.fastq b.fastq
+--- stderr ---
+Error: --basename cannot be used with multiple input files (ambiguous output naming)
+
+########## gz (exit=0) :: a.fastq.gz
+a_trimmed.fq.gz
+a.fastq.gz_trimming_report.json
+a.fastq.gz_trimming_report.txt
+
+########## multipair (exit=0) :: --paired p1_R1.fastq p1_R2.fastq p2_R1.fastq p2_R2.fastq
+p1_R1_val_1.fq
+p1_R1.fastq_trimming_report.json
+p1_R1.fastq_trimming_report.txt
+p1_R2_val_2.fq
+p1_R2.fastq_trimming_report.json
+p1_R2.fastq_trimming_report.txt
+p2_R1_val_1.fq
+p2_R1.fastq_trimming_report.json
+p2_R1.fastq_trimming_report.txt
+p2_R2_val_2.fq
+p2_R2.fastq_trimming_report.json
+p2_R2.fastq_trimming_report.txt
+
+########## ht3 (exit=0) :: --hardtrim3 20 a.fastq b.fastq
+a.20bp_3prime.fq
+b.20bp_3prime.fq
+
+########## clock2 (exit=0) :: --clock --paired c1_R1.fastq c1_R2.fastq c2_R1.fastq c2_R2.fastq
+c1_R1.clock_UMI.R1.fq
+c1_R2.clock_UMI.R2.fq
+c2_R1.clock_UMI.R1.fq
+c2_R2.clock_UMI.R2.fq
+
+########## retain_real (exit=0) :: --paired --retain_unpaired s_R1.fastq s_R2.fastq
+s_R1_unpaired_1.fq
+s_R1_val_1.fq
+s_R1.fastq_trimming_report.json
+s_R1.fastq_trimming_report.txt
+s_R2_unpaired_2.fq
+s_R2_val_2.fq
+s_R2.fastq_trimming_report.json
+s_R2.fastq_trimming_report.txt
+
+########## ubam_fqc (exit=0) :: --output-format ubam --fastqc a.fastq
+a_trimmed_fastqc.html
+a_trimmed_fastqc.zip
+a_trimmed.bam
+a.fastq_trimming_report.json
+a.fastq_trimming_report.txt
+
+########## ubam_norep (exit=0) :: --output-format ubam --no_report_file a.fastq
+a_trimmed.bam
+

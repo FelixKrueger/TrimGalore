@@ -1,0 +1,316 @@
+# Plan: poly-A tails survive behind a poly-G tail (`--poly_a`)
+
+**Issue:** [#504](https://github.com/FelixKrueger/TrimGalore/issues/504) — "Less effective PolyA
+trimming with v2.3.0", reported by @marenmsk (3'seq libraries, v0.6.10 → v2.3.0).
+**Date:** 2026-10-20
+**Branch to cut:** `fix/polya-behind-polyg` off `dev`
+
+## Goal
+
+`--poly_a` must remove poly-A tails that sit behind a 3' poly-G run, and tolerate a few stray
+non-A bases at the 3' end. Today it leaves both classes untouched, so 2-colour 3'seq libraries
+come out of v2.3.0 with full poly-A tails that v0.6.10 removed.
+
+Non-goal: byte-identity with Perl `--polyA`. See "Decision: keep the Cutadapt `--poly-a`
+semantics" below — reverting to the v0.6.x algorithm would re-introduce a worse failure.
+
+## Context
+
+### What changed between v0.6.x and v2
+
+Perl `--polyA` was a Cutadapt invocation with `-a "A{20}"` (`0.6.10:trim_galore:1130-1156`;
+`-g "T{150}"` for R2). A 3' adapter match removes the match **and everything downstream of it**,
+so `[insert][polyA][anything]` lost the tail and the trailing bases together.
+
+v2's `--poly_a` is a different algorithm: `quality::homopolymer_trim_index` walks inward from the
+3' end (+1 per A, −2 per non-A, 20% cumulative error gate) and only records a cut where the running
+score is positive. Non-A bases **at the very 3' end** drive the score negative before the A-run is
+reached, and the cut is never recorded.
+
+`src/trimmer.rs::trim_read` then runs the stages in this order:
+
+| Step | Stage |
+|---|---|
+| 2.7 | poly-A / poly-T |
+| 2.8 | poly-G / poly-C |
+
+Poly-A runs **first**. On a 2-colour read `[insert][polyA][polyG]` the poly-A scan hits the G-run,
+gives up, and the poly-G stage then strips the G-run — leaving the poly-A tail exposed in the
+output. That is exactly the reporter's symptom ("adapter and polyg are successfully removed, but
+the polya is only partially trimmed").
+
+### Reproduction (verified, 2026-10-20, `d471269`)
+
+`target/release/trim_galore --quality 20 --phred33 --polyA --poly_g -a AGATCGGAAGAGC` on synthetic
+reads, against `alignment::find_3prime_adapter(seq, "A"×20, 0.1, 1)` as a v0.6.x stand-in (that DP
+is the Cutadapt-parity path the `validation` job pins):
+
+| Read | Input | v2.3.0 emits | v0.6.x equivalent |
+|---|---|---|---|
+| `insert60 + A40` | 100 | 60 | 58 |
+| `insert60 + A40 + G15` | 115 | **100** (tail kept) | 58 |
+| `insert40 + A60 + G20` | 140 | **100** (tail kept) | 58 |
+| `insert60 + A20 + 10 bp junk` | 90 | **88** (tail kept) | 58 |
+
+`--2colour 20` in place of `--quality 20` works around it (G scored as quality 0 → removed in the
+quality step, before poly-A looks at the read): the two poly-G reads then come out at exactly 60
+and 40. This is the workaround given to the reporter, and it is independent evidence that the
+scan itself is sound once the G-run is gone.
+
+### Why it was never caught
+
+- The `validation` job has **no `--polyA` step** (it covers SE, PE, `-a2`, hardtrim5, clock, demux,
+  clump_only, uBAM). No Perl baseline was ever taken for this flag.
+- No test under `tests/` exercises `--poly_a` at all.
+- `--poly_a` shipped as a *new* capability (CHANGELOG line 964, "Generic poly-A trimming for
+  mRNA-seq libraries"), so nobody looked for a v0.6.x predecessor — and
+  `docs/reference/migration.md:28` still records `| Poly-A trimming | None | Built-in --poly_a |`,
+  which is wrong.
+- Issue #245 item B (the `-a 'A{15}'` homopolymer DP divergence) was deferred partly on the
+  reasoning that *"poly-A trimming has its own dedicated `--poly_a` flag that doesn't go through
+  this path"*. That separation is the defect, not a mitigation.
+
+### Decision: keep the Cutadapt `--poly-a` semantics
+
+v2's scan matches modern Cutadapt's `--poly-a` (same +1/−2 scoring and 20% gate). It should stay.
+Switching the stage back to an `A{20}` adapter match would re-introduce v0.6.x's over-trimming: on
+`test_files/illumina10K_with_polyA.fastq.gz`, the `A{20}` match cut **117 bp** off one read because
+of an internal 16-A stretch, where the current scan correctly leaves it alone. Over a 10,898-read
+sweep of that fixture the `A{20}` path trimmed more than the current scan on 3,009 reads, 1,965 of
+them where the current scan trims nothing. Most are harmless 1-2 bp terminal A's (Perl ran
+`-O 1`), but the long-cut class is a real data-loss risk on bisulfite libraries.
+
+So: fix the ordering and the 3'-end tolerance, keep the algorithm.
+
+## Behavior
+
+### B1 — stage order
+
+`trim_read` runs poly-G **before** poly-A. All other stages keep their position: quality (1),
+adapter (2), RRBS (2.5), N-trim (3), fixed clipping (4).
+
+Rationale, stated once in the source as one line: poly-G is a terminal sequencer artifact (the
+instrument calls no-signal as high-quality G when it overruns the template), so nothing of value
+sits behind it, and a poly-A tail behind it is invisible to a 3'-anchored scan.
+
+Scope of the change:
+
+- **R1 / single-end only.** Poly-A trims the 3' end and poly-G trims the 3' end, so they compete
+  for the same end on R1/SE. On R2 poly-T is removed from the 5' end and poly-G from the 3' end —
+  disjoint, so R2 output is unchanged by the reorder.
+- **No existing output changes.** Step 2.7 is skipped entirely when `config.poly_a` is false, which
+  is the default and is the case for every current CI validation step. Swapping a skipped stage
+  with poly-G cannot alter any pinned md5.
+
+### B2 — bounded 3' offset for the poly-A scan
+
+`poly_a_trim_index` may step over up to `MAX_TAIL_OFFSET = 10` bases at the 3' end before scanning
+for the tail. The first offset that yields a cut wins (smallest offset = most conservative), and
+the cut removes everything from the A-run start to the read end, including the stepped-over bases.
+
+Verified against the current behaviour (candidate probed in-tree, 2026-10-20):
+
+| Read | current | candidate | |
+|---|---|---|---|
+| `insert60 + A40` | 60 | 60 | unchanged |
+| `insert60 + A40 + G15` | 115 | **60** | fixed |
+| `insert40 + A60 + G20` | 120 | **40** | fixed |
+| `insert60 + A20 + G20` | 100 | 100 | still needs B1 |
+| `insert60 + A20 + junk10` | 90 | **60** | fixed |
+| `insert60 + A20 + junk11` | 91 | **60** | fixed |
+| `insert60 + A40 + NNNNN` | 60 | 60 | unchanged |
+| no tail | 60 | 60 | unchanged |
+| internal 16-A run | 76 | 76 | **no over-trim** |
+| 3-base tail | 60 | 60 | unchanged |
+
+Two results worth keeping in view:
+
+1. B2 absorbs *short* G-runs on its own (a long A-run can pay for a few trailing G's out of its
+   20% error budget), but `A20 + G20` still fails. **B1 is the fix; B2 is the robustness margin.**
+   Neither substitutes for the other.
+2. The internal-A case is unchanged, so B2 does not re-open the v0.6.x over-trim.
+
+### B3 — 5' branch is already tolerant
+
+`homopolymer_trim_index(.., revcomp = true)` scans forward from the 5' end and returns a clip
+*length*, so leading junk is absorbed by the same walk and removed with the head. Probed:
+`junk5 + T40` → 45, `junk11 + T40` → 51, both unchanged by the candidate. The offset loop is
+therefore applied to the 3' branch only; B2 makes the two branches behave alike rather than
+introducing a new asymmetry.
+
+### Edge cases
+
+| Case | Handling |
+|---|---|
+| Read shorter than 3 bp | existing `n < 3` guard in `homopolymer_trim_index`; offset loop is bounded by `n` |
+| Empty record | existing `!record.is_empty()` guard at the call site |
+| Read is all A | unchanged (current returns 0; offset 0 already cuts) |
+| Tail < 3 bp | unchanged — still ignored, at every offset |
+| `--no_poly_g --poly_a` on 2-colour data | tails behind G-runs longer than B2's margin still survive. Explicit opt-out; documented, not worked around. See Questions Q1. |
+| `--poly_a` on R2 | unchanged (B3) |
+| `--rrbs` | RRBS is step 2.5, ahead of both poly stages; unaffected |
+
+## Signature
+
+```rust
+/// Maximum number of 3' bases the poly-A scan steps over before the tail.
+const MAX_TAIL_OFFSET: usize = 10;
+
+/// Find the start index of a poly-A tail (3' end) or poly-T head (5' end).
+///
+/// At the 3' end the tail may sit up to `MAX_TAIL_OFFSET` bases short of the read
+/// end; the stepped-over bases are removed with the tail.
+pub fn poly_a_trim_index(sequence: &[u8], revcomp: bool) -> usize
+```
+
+`homopolymer_trim_index` keeps its current signature and behaviour — poly-G uses it unchanged,
+and offset-0 is correct there because dark-cycle G-runs are strictly terminal.
+
+## Implementation outline
+
+Four commits on `fix/polya-behind-polyg`.
+
+### Commit 1 — reorder the poly stages
+
+1. `src/trimmer.rs`: move the poly-G block (currently "2.8", `src/trimmer.rs:~220-232`) above the
+   poly-A block (currently "2.7", `~192-212`). Renumber the two comment headers so poly-G is 2.7
+   and poly-A is 2.8.
+2. Add one line above the poly-G block giving the invariant (current state, no history — see
+   CLAUDE.md "Code comments"). Keep the existing #321 explanation; it is still accurate.
+3. Update the `trim_read` doc comment (`src/trimmer.rs:95-101`), whose processing-order list omits
+   the poly stages entirely. Add them in their real positions.
+4. `src/quality.rs:501`: the comment on `test_poly_g_after_poly_a_removal` asserts the old order in
+   prose. The assertion itself is order-independent; reword the comment and rename the test to
+   `test_poly_g_tail` so it does not encode a stale pipeline order.
+
+### Commit 2 — bounded 3' offset
+
+1. `src/quality.rs`: add `MAX_TAIL_OFFSET` and rewrite `poly_a_trim_index`'s body as the offset
+   loop (3' branch only; the `revcomp` branch delegates to `homopolymer_trim_index` unchanged).
+   Replace the "thin wrapper … for backwards compatibility" doc comment.
+2. Call site in `src/trimmer.rs` is unchanged — it already calls `poly_a_trim_index`.
+
+### Commit 3 — tests
+
+1. `src/quality.rs` unit tests: tail behind 15 G, tail behind 20 G (expect *not* trimmed at this
+   level — B1 covers it), 10 bp junk, 11 bp junk, internal 16-A run unchanged, 3-base tail
+   unchanged, `n < 3`, all-A, and the three R2 poly-T cases from B3.
+2. New `tests/integration_poly.rs` — the gap that let this ship. Write a synthetic FASTQ with
+   `std::fs::write` into a `tempfile::TempDir` (the pattern in
+   `tests/integration_partial_output.rs:525`), run the binary with `--poly_a --poly_g -a
+   AGATCGGAAGAGC --dont_gzip`, and assert **no output read ends in ≥10 A**. Cover
+   `[insert][polyA][polyG]`, `[insert][polyA][junk]`, and a clean `[insert][polyA]` control.
+3. Second integration case: same input with `--2colour 20` instead of `--quality 20`, asserting the
+   same postcondition — this is the path recommended to the reporter, so it should be guarded.
+
+### Commit 4 — docs and CHANGELOG
+
+1. `docs/src/content/docs/reference/migration.md:28` — `| Poly-A trimming | None | Built-in
+   --poly_a |` is factually wrong. v0.6.x had `--polyA` (Cutadapt `-a "A{20}"`). Correct the row.
+2. `docs/src/content/docs/reference/migration.md:51-53` — the `-a 'A{N}'` note calls that form "a
+   v0.6.x workaround that pre-dates `--poly_a`". It *was* v0.6.x `--polyA`. Say so, and say that
+   `--poly_a` is a different algorithm (Cutadapt `--poly-a`) rather than a renamed one, so a
+   migrating user should expect different output, not identical output.
+3. `docs/src/content/docs/modes/poly.md` — add the stage order (poly-G before poly-A) and the
+   2-colour interaction, in the existing register. Keep the "When to use which" table; add a 3'seq
+   / poly-A-selected row pointing at `--2colour`.
+4. `src/cli.rs:365-368` — the `--poly_a` help text says "Runs after adapter trimming, so poly-A
+   tails hidden behind adapters are also removed". Still true; extend to name poly-G.
+5. `CHANGELOG.md` — one sentence, repo format, crediting @marenmsk for the report.
+
+## Efficiency
+
+The offset loop is O(K·n) with K ≤ 11 and n = read length, worst case when no tail is found. Reads
+are short and `--poly_a` is opt-in and off by default, so this is not on any hot path that matters;
+the adapter DP in step 2 dominates by orders of magnitude. Early return on the first offset that
+cuts means the common case (tail flush with the 3' end) costs exactly one scan, as today. No
+allocation — the loop slices.
+
+## Integration
+
+- **Reads:** `config.poly_a`, `config.poly_g`, `record.seq`.
+- **Writes:** `record` (truncate / `clip_5prime`), `TrimResult::poly_a_trimmed`,
+  `TrimResult::poly_g_trimmed`.
+- **Order:** quality → adapter → RRBS → **poly-G → poly-A** → N-trim → fixed clipping.
+- `bp_after_cutadapt` is captured before all poly stages (`src/trimmer.rs:161`), so the
+  cutadapt-section report figures and the #232 invariant are untouched.
+- `src/parallel.rs` holds no copy of this logic — it calls `trimmer::trim_read` at
+  `src/parallel.rs:495-496` and `:1133` and only aggregates stats. One edit site.
+- `poly_a_trimmed` counts every base the stage removed, so after B2 it includes the stepped-over
+  bases. The report label is "Poly-A/T bases removed", which stays accurate.
+- Report line order in `src/report.rs:401-425` prints poly-A before poly-G. Cosmetic; left alone
+  so the reporter's existing reports stay comparable.
+
+## Assumptions
+
+1. The reporter's reads are `[insert][polyA][polyG]` — inferred from "adapter and polyg are
+   successfully removed, but the polya is only partially trimmed", not confirmed on her data. The
+   reply asks for her `Reads with poly-A/T trimmed` count to confirm. **If that count is already
+   high, the diagnosis is wrong and this plan does not apply.**
+2. Poly-G auto-detection fired on her run (she passed neither `--poly_g` nor `--no_poly_g`), which
+   her description implies.
+3. Dark-cycle poly-G is strictly terminal, so offset 0 remains correct for the poly-G scan.
+4. `MAX_TAIL_OFFSET = 10` is a judgement call, not a derived constant. Fixed, not configurable —
+   no new flag. Raising it trades tolerance for over-trim risk on A-rich inserts.
+5. `find_3prime_adapter(seq, "A"×20, 0.1, 1)` is a faithful v0.6.x stand-in for the comparison
+   numbers above. Caveat: #245 item B records a known DP divergence from Cutadapt on homopolymer
+   adapters, so those numbers are indicative of the *class* of v0.6.x behaviour, not exact Perl
+   output.
+
+## Validation
+
+| # | What to verify | How | Expected |
+|---|---|---|---|
+| 1 | The reported case is fixed end-to-end | Build, run `--quality 20 --phred33 --polyA --poly_g -a AGATCGGAAGAGC` on the synthetic set in Context | `A40+G15` → 60 bp, `A60+G20` → 40 bp, no read ends in ≥10 A |
+| 2 | B1 and B2 are independently load-bearing | Run the `A20+G20` case with B2 only, then with both | B2 alone: tail kept. Both: trimmed |
+| 3 | No over-trim regression | `poly_a_trim_index` on the internal-16-A read; full run over `test_files/illumina10K_with_polyA.fastq.gz` | internal case unchanged; no read loses >tail length |
+| 4 | No pinned output moves | `cargo test` (509 lib tests) + full `validation` job | all green, no md5 step changes |
+| 5 | R2 is untouched | `--paired --poly_a` on `polyAT_R1/R2`, before and after | R2 output byte-identical across the change |
+| 6 | The documented workaround still works | integration case with `--2colour 20` | same postcondition as case 1 |
+
+Validation 4 is the one that matters most for merge confidence: the claim that no existing output
+changes rests on `config.poly_a` being false everywhere in CI, which the full job settles.
+
+## Questions or ambiguities
+
+- **Q1 (Open).** `--no_poly_g --poly_a` on 2-colour data still leaves tails behind long G-runs.
+  Recommendation: leave it. `--no_poly_g` is an explicit opt-out and honouring it is correct;
+  document the interaction instead of special-casing it.
+- **Q2 (Open).** Add a Perl `--polyA` step to the `validation` job? Recommendation: **no.** The
+  divergence is intentional (see "Decision"), so byte-identity is the wrong gate and would
+  immediately fail. The behavioural postcondition in `tests/integration_poly.rs` is the right
+  guard and runs on every `cargo test` without conda or Perl.
+- **Q3 (Open).** `MAX_TAIL_OFFSET = 10` — no data behind the exact value. 10 covers every junk
+  length observed in the fixtures and leaves the internal-A case untouched. Worth revisiting if a
+  real dataset shows longer trailing artifacts.
+- **Q4 (Open).** #245 item B remains unresolved and is adjacent: the `-a 'A{N}'` route is what the
+  reporter is being told to use as a fallback. Not in scope here; worth re-opening separately now
+  that the "the dedicated flag covers it" reasoning has failed.
+
+## Self-Review
+
+**Efficiency.** O(K·n), K ≤ 11, early-return on the common case. No allocation. Off the default
+path entirely. Checked that nothing hoists `poly_a_trim_index` into a per-base loop.
+
+**Logic.** Checked that B1 and B2 are independent and neither is redundant — probed `A20+G20`
+specifically to confirm B2 alone does not cover it, and `A40+G15` to confirm B2 alone *does*. The
+plan originally claimed B2 could not absorb any G-run; the probe disproved that and the Behavior
+section now states the real boundary.
+
+**Edge cases.** `n < 3`, empty record, all-A, 3-base tail, tail exactly at `MAX_TAIL_OFFSET` and one
+past it, R2/5' branch, `--rrbs` interaction. The offset loop is bounded by `n`, so no slice can
+panic on short reads.
+
+**Integration.** Confirmed `trimmer::trim_read` is the only implementation of the stage order
+(`grep` for `trim_read(` and for `poly_a|poly_g|homopolymer` across `src/`): `parallel.rs`,
+`specialty.rs`, `clump*.rs` hold no copy. Confirmed `bp_after_cutadapt` is captured upstream of both
+poly stages, so the #232 report invariant is unaffected. Confirmed the reorder cannot move any
+pinned md5, because `config.poly_a` is false in every CI validation step.
+
+**Remaining risks.**
+
+1. Assumption 1 is unconfirmed on the reporter's data. The reply asks for the one number that
+   settles it; if it comes back high, re-diagnose before implementing.
+2. `MAX_TAIL_OFFSET` is a judgement call (Q3).
+3. The v0.6.x comparison figures inherit #245 item B's caveat — indicative of the behaviour class,
+   not exact Perl output.
