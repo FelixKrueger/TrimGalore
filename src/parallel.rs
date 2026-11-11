@@ -568,12 +568,6 @@ fn classify_paired(
             pair_stats.pairs_removed += 1;
             stats_r1.too_short += 1;
             stats_r2.too_short += 1;
-            if r1_ok {
-                pair_stats.r1_unpaired += 1;
-            }
-            if r2_ok {
-                pair_stats.r2_unpaired += 1;
-            }
             PairOutcome::Unpaired { r1_ok, r2_ok }
         }
         PairFilterResult::TooLong => {
@@ -640,21 +634,19 @@ fn process_pairs<W: Write>(
                 }
             }
             PairOutcome::Unpaired { r1_ok, r2_ok } => {
-                // `Unpaired` is set by the filter based on r1_ok / r2_ok —
-                // independent of whether --retain_unpaired is on. With
-                // passthrough enabled but --retain_unpaired off (the only
-                // legal combination — validation step 1.iii rejects both
-                // on), the unpaired writers are None, the rescue writes
-                // are no-ops, and the passthrough record gets dropped.
+                // Counted only when the rescue writer is open, so the figure
+                // matches the records written (#544, and Perl 0.6.11).
                 if let Some(ref mut w) = writer_up_r1
                     && r1_ok
                 {
                     r1.write_to(*w)?;
+                    pair_stats.r1_unpaired += 1;
                 }
                 if let Some(ref mut w) = writer_up_r2
                     && r2_ok
                 {
                     r2.write_to(*w)?;
+                    pair_stats.r2_unpaired += 1;
                 }
                 if pt.is_some() {
                     pair_stats.passthrough_records_dropped += 1;
@@ -1729,6 +1721,201 @@ mod tests {
         Ok(())
     }
 
+    /// #544: `r1_unpaired` / `r2_unpaired` count records written to the rescue
+    /// files, so they stay 0 without `--retain_unpaired` at every `--cores`.
+    /// Four pair shapes drive the four `r1_ok`/`r2_ok` combinations, with
+    /// unequal R1 and R2 totals so a side applied to only one fails.
+    #[test]
+    fn test_parallel_serial_unpaired_counter_parity() -> Result<()> {
+        // `ACGT` cycled; lengths avoid n % 4 == 1 so no sequence ends in 'A',
+        // which at min_overlap 1 would match the adapter's first base.
+        fn seq(n: usize) -> String {
+            "ACGT".chars().cycle().take(n).collect()
+        }
+        fn rec(i: usize, side: u8, n: usize) -> String {
+            let s = seq(n);
+            format!("@read_{i}/{side}\n{s}\n+\n{}\n", "I".repeat(n))
+        }
+
+        // (count, r1_len, r2_len) with length_cutoff 30 and UnpairedLengths 20/20:
+        //   A rescues R2 only, B rescues R1 only, C rescues both (#245 shape),
+        //   D rescues neither, P passes the filter entirely.
+        let shapes = [
+            (3usize, 10usize, 40usize),
+            (5, 40, 10),
+            (2, 26, 26),
+            (4, 10, 10),
+            (6, 40, 40),
+        ];
+        // 20 pairs per cycle; enough cycles to span several batches, so the
+        // per-worker `PairValidationStats::merge` of these fields is covered.
+        const CYCLES: usize = 210;
+        const PAIRS: usize = 20 * CYCLES;
+        const EXPECTED_R1_UNPAIRED: usize = (5 + 2) * CYCLES; // B + C
+        const EXPECTED_R2_UNPAIRED: usize = (3 + 2) * CYCLES; // A + C
+
+        // Guards on the fixture definition itself, independent of any run: a
+        // later edit that made the shapes degenerate would pass every
+        // assertion below otherwise, since those compare against these totals.
+        const _: () = assert!(PAIRS > BATCH_SIZE, "fixture must span >1 batch");
+        const _: () = assert!(
+            EXPECTED_R1_UNPAIRED > 0
+                && EXPECTED_R2_UNPAIRED > 0
+                && EXPECTED_R1_UNPAIRED != EXPECTED_R2_UNPAIRED,
+            "shapes must rescue on both sides with unequal totals"
+        );
+
+        let dir = fresh_tmpdir("tg_unpaired_counter_parity");
+        let r1_path = dir.join("input_R1.fq");
+        let r2_path = dir.join("input_R2.fq");
+        let (mut c1, mut c2) = (String::new(), String::new());
+        let mut i = 0;
+        for _ in 0..CYCLES {
+            for (count, l1, l2) in shapes {
+                for _ in 0..count {
+                    c1.push_str(&rec(i, 1, l1));
+                    c2.push_str(&rec(i, 2, l2));
+                    i += 1;
+                }
+            }
+        }
+        assert_eq!(i, PAIRS);
+        fs::write(&r1_path, c1)?;
+        fs::write(&r2_path, c2)?;
+
+        let config = TrimConfig {
+            is_paired: true,
+            length_cutoff: 30,
+            ..parity_test_config()
+        };
+        let unpaired = UnpairedLengths { r1: 20, r2: 20 };
+
+        // gzip covers the `GzEncoder` rescue sinks, which a plain run bypasses.
+        for gzip in [false, true] {
+            for retain in [false, true] {
+                let tag = format!(
+                    "{}_{}",
+                    if gzip { "gz" } else { "plain" },
+                    if retain { "retain" } else { "norescue" }
+                );
+                let ext = if gzip { "fq.gz" } else { "fq" };
+                let p = |stem: &str| dir.join(format!("{stem}_{tag}.{ext}"));
+                let (s_up_r1, s_up_r2) = (p("s_up1"), p("s_up2"));
+                let (p_up_r1, p_up_r2) = (p("p_up1"), p("p_up2"));
+
+                let serial = {
+                    let mut rdr_r1 = FastqReader::open(&r1_path)?;
+                    let mut rdr_r2 = FastqReader::open(&r2_path)?;
+                    let mut wr_r1 = FastqWriter::create(p("s_R1"), gzip, 1, 1)?;
+                    let mut wr_r2 = FastqWriter::create(p("s_R2"), gzip, 1, 1)?;
+                    let mut up_r1 = if retain {
+                        Some(FastqWriter::create(&s_up_r1, gzip, 1, 1)?)
+                    } else {
+                        None
+                    };
+                    let mut up_r2 = if retain {
+                        Some(FastqWriter::create(&s_up_r2, gzip, 1, 1)?)
+                    } else {
+                        None
+                    };
+                    let stats = crate::trimmer::run_paired_end(
+                        &mut rdr_r1,
+                        &mut rdr_r2,
+                        None,
+                        &mut wr_r1,
+                        &mut wr_r2,
+                        None,
+                        up_r1.as_mut(),
+                        up_r2.as_mut(),
+                        &config,
+                        unpaired,
+                    )?;
+                    wr_r1.finish()?;
+                    wr_r2.finish()?;
+                    if let Some(w) = up_r1.take() {
+                        w.finish()?;
+                    }
+                    if let Some(w) = up_r2.take() {
+                        w.finish()?;
+                    }
+                    stats
+                };
+
+                let parallel = run_paired_end_parallel(
+                    open_fq(&r1_path),
+                    open_fq(&r2_path),
+                    None,
+                    &p("p_R1"),
+                    &p("p_R2"),
+                    None,
+                    if retain {
+                        Some(p_up_r1.as_path())
+                    } else {
+                        None
+                    },
+                    if retain {
+                        Some(p_up_r2.as_path())
+                    } else {
+                        None
+                    },
+                    &config,
+                    4,
+                    gzip,
+                    unpaired,
+                    None,
+                )?;
+
+                assert_eq!(
+                    serial.2, parallel.2,
+                    "PairValidationStats must match between paths ({tag}).\n\
+                     serial:   {:#?}\nparallel: {:#?}",
+                    serial.2, parallel.2
+                );
+
+                let (exp_r1, exp_r2) = if retain {
+                    (EXPECTED_R1_UNPAIRED, EXPECTED_R2_UNPAIRED)
+                } else {
+                    (0, 0)
+                };
+                for (label, got) in [("serial", &serial.2), ("parallel", &parallel.2)] {
+                    assert_eq!(
+                        got.r1_unpaired, exp_r1,
+                        "{label} r1_unpaired ({tag}) must equal the records written"
+                    );
+                    assert_eq!(
+                        got.r2_unpaired, exp_r2,
+                        "{label} r2_unpaired ({tag}) must equal the records written"
+                    );
+                }
+
+                if retain {
+                    // The counters must match the files, not just each other.
+                    for (path, want) in [
+                        (&p_up_r1, EXPECTED_R1_UNPAIRED),
+                        (&s_up_r1, EXPECTED_R1_UNPAIRED),
+                        (&p_up_r2, EXPECTED_R2_UNPAIRED),
+                        (&s_up_r2, EXPECTED_R2_UNPAIRED),
+                    ] {
+                        assert_eq!(
+                            read_all_records(path)?.len(),
+                            want,
+                            "{} ({tag}) must hold exactly the reported count",
+                            path.display()
+                        );
+                    }
+                } else {
+                    assert!(
+                        !p_up_r1.exists() && !p_up_r2.exists(),
+                        "no rescue file may be written without --retain_unpaired ({tag})"
+                    );
+                }
+            }
+        }
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
     /// #246 follow-up: the worker pool emits each batch's output as
     /// its own independently-compressed gzip member, then concatenates
     /// them. Per RFC 1952 the result is a valid `.gz` file that
@@ -2268,18 +2455,13 @@ mod tests {
         pt_seq: String,
     }
 
-    /// Generate a deterministic Multiome-shaped fixture. Every 3rd record
-    /// has SHORT R1 *and* R2 (16 bp each) — these get dropped by
-    /// `length_cutoff = 20`, giving roughly a 33% drop rate.
-    ///
-    /// Why both mates short rather than just R1: the parallel and serial
-    /// paths have a pre-existing divergence in how they count
-    /// `r1_unpaired` / `r2_unpaired` (parallel increments based on the
-    /// filter's `r1_ok` / `r2_ok` regardless of whether the rescue writer
-    /// is open; serial only increments when the writer is open). Fixing
-    /// that is out of scope for the passthrough PR — keeping both mates
-    /// short means `r1_ok == r2_ok == false`, so neither path increments
-    /// `r1_unpaired` / `r2_unpaired`, and the parity test passes.
+    /// Generate a deterministic Multiome-shaped fixture. Every 3rd record has a
+    /// SHORT R1 (16 bp) — dropped by `length_cutoff = 20`, giving roughly a 33%
+    /// drop rate — against a 48 bp R2 that clears the `length_2 = 35` rescue
+    /// cutoff. Those rows therefore reach the filter's `TooShort` arm with
+    /// `r1_ok == false, r2_ok == true`, so the parity test pins that
+    /// `r1_unpaired` / `r2_unpaired` stay 0 while a mate is rescuable:
+    /// `--passthrough` forbids `--retain_unpaired`, so no rescue writer is open.
     fn gen_multiome_rows(n: usize) -> Vec<MultiomeRow> {
         (0..n)
             .map(|i| {
@@ -2294,14 +2476,11 @@ mod tests {
                         // 42 bp — survives.
                         "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC".to_string()
                     },
-                    r2_seq: if short {
-                        // Match R1's short length so r2_ok = false too —
-                        // avoids the serial/parallel r2_unpaired
-                        // divergence noted above.
-                        "TGCATGCATGCATGCA".to_string()
-                    } else {
-                        "TGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCA".to_string()
-                    },
+                    // 48 bp throughout: on a short-R1 row this leaves the mate
+                    // rescuable (`r2_ok`) without changing the pair verdict.
+                    // Ends in 'T', so the adapter's leading 'A' finds no
+                    // one-base overlap at stringency 1.
+                    r2_seq: "GCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCAT".to_string(),
                     pt_seq: "AAAACCCCGGGGTTTT".to_string(),
                 }
             })
