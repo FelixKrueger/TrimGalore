@@ -241,207 +241,6 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   Also corrected: the output guide stated that without `--output_dir` files go to
   the current working directory, which was true only of the specialty modes.
 
-#### Bug fixes
-
-- **`--rename` was neutralised by `--output-format ubam` on FASTQ input, with no
-  flag-specific diagnostic**
-  ([#408](https://github.com/FelixKrueger/TrimGalore/issues/408)). `--rename`
-  appends `:clip5:SEQ`/`:clip3:SEQ` to the end of the read ID. When a FASTQ header
-  carries text after the first space the annotation lands inside that text — and
-  BAM read names cannot contain whitespace, so the whole tail was discarded and
-  the explicitly-requested annotation went with it. The combination is now refused
-  when at least one input is FASTQ **and** a clipping flag is set, including on the
-  `--hardtrim5`/`--hardtrim3` paths, which reach the same annotation code via
-  `specialty.rs`. `--rename` on its own appends nothing, so that case is still
-  accepted — a wrapper that passes the flag unconditionally alongside an optional
-  `--clip_R1` keeps working in its no-clip configuration. **uBAM input is
-  unaffected and keeps working**: BAM read names carry no description by spec, so
-  there the annotation lands on the name itself and preserved aux tags round-trip
-  intact. Whether a given header loses the annotation is a per-record property, so
-  the refusal is deliberately coarser than the loss; deciding per record would mean
-  failing part-way through a BAM. The header-description notice added for #406 did
-  report the dropped text, but a user who passed `--rename` had no reason to
-  connect a general note about header descriptions to their own annotation being
-  gone. The output guide is corrected alongside: it described `--rename` as
-  `--rename PREFIX` replacing the input filename stem in the output names, which is
-  `--basename` — a flag with no dedicated section in the output guide, though it is
-  documented on the clump-only and passthrough pages. `--basename`'s own limits are
-  now stated too: reports keep input-derived names, and the specialty modes ignore
-  it.
-
-- **`--output-format ubam` no longer destroys an input named like a trimming
-  report** ([#409](https://github.com/FelixKrueger/TrimGalore/issues/409)).
-  `trim_galore --output-format ubam sample.fastq sample.fastq_trimming_report.txt`
-  overwrote input 2 with input 1's trimming report and only then failed reading
-  it — so the error ("not recognised as FASTQ") described damage the run had just
-  caused, and gave the user no hint their file was gone. The single-end uBAM
-  arm's collision pre-flight planned only the primary `.bam` outputs; the two
-  trimming reports it also writes never entered the candidate list, so the
-  output-vs-input check could not see them. The single-end FASTQ path was never
-  affected — it routes secondaries through the same helper the pre-flight reads.
-  Fifth instance of the family behind #383, #385, #388 and #391.
-
-- **The uBAM path's IUPAC warning told users the wrong direction, and could
-  suppress the right one** ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)).
-  One message served two opposite code paths. On FASTQ→uBAM it announced "input
-  uBAM … coerced to N for FASTQ output" — both halves false — and on uBAM→uBAM
-  the read-side message named a FASTQ output that did not exist. Worse, a single
-  process-wide guard meant a run with **mixed FASTQ and uBAM inputs** (legal, and
-  the documented remedy for `--preserve-tags` with all-FASTQ input) printed
-  whichever message came first and silently suppressed the other: with the FASTQ
-  file first, the user was told the wrong direction *and* never told about the
-  genuine uBAM coercion. Each direction now has its own text and its own guard,
-  and the read-side wording is output-neutral ("coerced to N on read").
-
-- **uBAM output silently dropped FASTQ header descriptions**
-  ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)). BAM read names
-  cannot contain whitespace, so everything after the first space is discarded —
-  frequently the original instrument identifier or an Illumina `1:N:0:INDEX`
-  field. This is required by the format and is not new; it was simply never
-  disclosed. A one-time `NOTE:` now reports it and echoes the text that was
-  dropped, so what is lost is visible rather than inferred. Nothing fires when
-  there is nothing to drop (whitespace-free headers, or a bare trailing space).
-  The uBAM section of the output guide and `--output-format`'s own help also
-  stated or implied lossless round-tripping; both now name the three FASTQ→uBAM
-  normalizations (description dropped, bases uppercased, IUPAC coerced).
-
-- **`--clump_only --paired` no longer silently overwrites one mate's clumping
-  report with the other's**
-  ([#391](https://github.com/FelixKrueger/TrimGalore/issues/391)). Primaries
-  carry `_clumped_1`/`_clumped_2`, but reports are named from the input
-  filename alone, so `-o out A/reads.fq B/reads.fq` wrote ONE report at exit 0.
-  Clumping-report paths now join the collision pre-flight on every clump arm
-  (gated on `--no_report_file`, matching the writers), which also stops a
-  clumping report from silently overwriting an *input* named like one — on the
-  paired arm and the single-end/uBAM arms alike. The single-interleaved-BAM
-  shape gets the same candidate line as defensive symmetry only; with one input
-  its report can never alias it. As with #388, two inputs whose filenames differ
-  only in case are now refused into a shared output directory even on a
-  case-sensitive filesystem, where both reports could in fact coexist.
-
-- **Whether input is gzipped is now decided by reading the file, not by its
-  name.** This corrects two opposite failures:
-
-  - `bgzip`-produced input named `.fq.bgz` (or anything else not ending in
-    `.gz`) failed with `stream did not contain valid UTF-8`, because the
-    compressed bytes were read as text.
-  - A plain FASTQ misnamed `.fastq.gz` failed with `invalid gzip header`.
-    It now reads successfully.
-
-  Both came from the same cause: the format is detected from file *content*,
-  but that verdict was discarded and re-derived from the *filename* by
-  `FastqReader`. Detection is now a three-byte gzip-magic check inside
-  `FastqReader` itself, so every caller gets it right by default, including
-  `--paired` at `--cores 1`, `--passthrough` and `--clump_only`. New
-  `open_with` / `open_threaded_with` / `sanity_check_with` constructors let
-  callers that have already detected the format pass the verdict in and skip
-  the re-check.
-
-  BAM discrimination is unaffected: `detect_input_format` still owns the
-  `BAM\1` payload check, and a `.bam` renamed `.fq.gz` is still read as BAM.
-
-  One known limitation remains, left to a separate change: output compression
-  still mirrors the input *filename*, so a `.bgz` input produces plain `.fq`
-  output. Moving that decision would change behaviour for every run, including
-  the misnamed-`.gz` file whose input handling changed above.
-
-- **`.bgz` / `.bgzf` input no longer leaves an inner `.fastq` in the output
-  filename** ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
-  `sample.fastq.bgz` produced `sample.fastq_trimmed.fq` alongside
-  `sample.fastq.bgz_trimming_report.txt`; the two disagreed about the sample
-  name, and MultiQC takes that name from the report filename, so a trimmed
-  file and its report could land under different samples. The output is now
-  `sample_trimmed.fq`, matching what the same bytes under a `.fastq.gz` name
-  have always produced.
-
-  `io::strip_fastq_extensions` now removes a gzip-family suffix (`.gz`,
-  `.bgz`, `.bgzf`) and then the FASTQ extension, instead of matching an
-  enumerated list of combined suffixes. Names with no inner `.fastq`/`.fq`
-  are unaffected where they carry a single extension (`sample.bgz` →
-  `sample`). A multi-component name now loses one component more than before
-  (`sample.txt.bgz` → `sample`, previously `sample.txt`), matching what
-  `.gz` has always done. `.bam` inputs and unrelated extensions keep the
-  stems they had.
-
-  The specialty modes name their outputs from the same stem, so they shift
-  too. `--implicon` on `sample_R1.fastq.bgz` now writes
-  `sample_8bp_UMI_R1.fastq` where it wrote `sample_R1.fastq_8bp_UMI_R1.fastq`:
-  its R1/R2 de-duplication only fires on a stem ending in `_R1`, which the
-  old stem never did, so the doubled read tag disappears as well.
-  `--hardtrim5`, `--hardtrim3` and `--clock` shift in the same direction.
-
-  Output *filenames* only: no fixture in `test_files/` or in the
-  `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
-  comparison is untouched.
-
-- **Single-end trimming no longer discards one input's reads when two inputs
-  share an output name** ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
-  `trim_galore sample.fastq.gz sample.fq.gz` produced a single
-  `sample_trimmed.fq.gz` and exited 0, having written the second input over the
-  first. Two trimming reports were left behind, each stating that all its reads
-  had been written, so the arithmetic on disk was wrong and nothing checked it.
-
-  The output-collision pre-flight added for
-  [#216](https://github.com/FelixKrueger/TrimGalore/issues/216) already refused
-  this on `--paired`, `--clock`, `--implicon` and `--clump_only`. It was missing
-  from four dispatch paths, all sharing one shape — a loop over the input list
-  with no check in front of it: single-end trim (FASTQ and uBAM output) and
-  `--hardtrim5`/`--hardtrim3` (FASTQ and uBAM output). All four now check, and
-  every path routes through one shared implementation.
-
-  `--hardtrim5`/`--hardtrim3` were the wider case, because they name output into
-  the *current working directory* rather than beside the input: identical input
-  basenames collided there even when the inputs came from different directories,
-  so `--hardtrim5 30 */*.fastq.gz` over a per-sample layout kept only the last
-  sample. Because `--output_dir` cannot resolve that collision, these two modes
-  add their own remediation to the error rather than the generic advice.
-
-  Two further defects in the check itself are fixed at the same time:
-
-  - **The key was a raw path string**, so `./sample.fastq.gz` and
-    `sample.fastq.gz` — or a list mixing absolute and relative paths, as
-    `find`/`xargs` and pipeline staging produce — named one file under two keys
-    and passed. The key is now lexically normalised — absolutised, then `..`
-    folded against the component stack — so `./x`, `<cwd>/x` and `a/../x` all
-    resolve to one key without touching the filesystem. A path reached through a
-    **symlink** still aliases undetected; that is the one remaining case, and it
-    costs the same silent read loss this entry describes.
-  - **The check compared outputs only against other outputs**, never against the
-    run's own inputs — and, once that was fixed, only *primary* outputs were
-    compared. A trimming report, or a `--demux` per-barcode file, could still
-    overwrite a named input while every primary output stayed distinct. Reports
-    and `--demux` outputs are now in the checked set, and `--demux`'s barcode
-    file is treated as an input that may not be written over. An output path can
-    *be* an input:
-    `trim_galore sample.fastq.gz sample_trimmed.fq.gz` (reachable by re-running
-    over a directory holding an earlier run's output) destroyed the second
-    input's reads and wrote a `sample_trimmed_trimmed.fq.gz` containing the
-    first sample's — a wrong-sample file, which is harder to notice than a
-    missing one. This affected `--paired` as well, and is now refused on every
-    path with a message of its own.
-
-  A rejected run still writes nothing, and the diagnostic keeps naming the paths
-  as the user spelled them.
-
-- **Paired-end trimming reports can no longer silently overwrite each other**
-  ([#388](https://github.com/FelixKrueger/TrimGalore/issues/388)). Paired output
-  names carry a positional discriminator (`_val_1`/`_val_2`) that report names do
-  not, so two inputs with distinct trimmed outputs could still collide on their
-  reports: `--paired -o out A/reads.fq B/reads.fq` exited 0 with one report pair
-  for two inputs, and re-using a filename across pairs lost a report the same
-  way. The report paths (text and JSON, for both sides of every pair) now join
-  the collision pre-flight on the paired FASTQ and paired uBAM-output paths,
-  skipped under `--no_report_file` to match the writers.
-
-  Two behaviour changes follow. A pair whose R1 and R2 share a filename written
-  to a common output directory is now refused on every filesystem — that run
-  previously lost a report. And two genuinely distinct inputs whose filenames
-  differ only in case are refused even on a case-sensitive filesystem, where
-  both reports could in fact coexist: the same loud-error-over-silent-loss trade
-  the pre-flight has made since #216, now extended to paired reports.
-
-#### Changes
-
 - **Output-collision refusals now name the inputs you have to change**
   ([#397](https://github.com/FelixKrueger/TrimGalore/issues/397)). The pre-flight
   compared prospective output paths without recording which input each was named
@@ -644,7 +443,204 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   Perl `v0.6.x` version notes and internal `PLAN.md`/`§` pointers) that had
   leaked into user-facing flag descriptions. No behaviour change.
 
-#### Fixes
+#### Bug fixes
+
+- **`--rename` was neutralised by `--output-format ubam` on FASTQ input, with no
+  flag-specific diagnostic**
+  ([#408](https://github.com/FelixKrueger/TrimGalore/issues/408)). `--rename`
+  appends `:clip5:SEQ`/`:clip3:SEQ` to the end of the read ID. When a FASTQ header
+  carries text after the first space the annotation lands inside that text — and
+  BAM read names cannot contain whitespace, so the whole tail was discarded and
+  the explicitly-requested annotation went with it. The combination is now refused
+  when at least one input is FASTQ **and** a clipping flag is set, including on the
+  `--hardtrim5`/`--hardtrim3` paths, which reach the same annotation code via
+  `specialty.rs`. `--rename` on its own appends nothing, so that case is still
+  accepted — a wrapper that passes the flag unconditionally alongside an optional
+  `--clip_R1` keeps working in its no-clip configuration. **uBAM input is
+  unaffected and keeps working**: BAM read names carry no description by spec, so
+  there the annotation lands on the name itself and preserved aux tags round-trip
+  intact. Whether a given header loses the annotation is a per-record property, so
+  the refusal is deliberately coarser than the loss; deciding per record would mean
+  failing part-way through a BAM. The header-description notice added for #406 did
+  report the dropped text, but a user who passed `--rename` had no reason to
+  connect a general note about header descriptions to their own annotation being
+  gone. The output guide is corrected alongside: it described `--rename` as
+  `--rename PREFIX` replacing the input filename stem in the output names, which is
+  `--basename` — a flag with no dedicated section in the output guide, though it is
+  documented on the clump-only and passthrough pages. `--basename`'s own limits are
+  now stated too: reports keep input-derived names, and the specialty modes ignore
+  it.
+
+- **`--output-format ubam` no longer destroys an input named like a trimming
+  report** ([#409](https://github.com/FelixKrueger/TrimGalore/issues/409)).
+  `trim_galore --output-format ubam sample.fastq sample.fastq_trimming_report.txt`
+  overwrote input 2 with input 1's trimming report and only then failed reading
+  it — so the error ("not recognised as FASTQ") described damage the run had just
+  caused, and gave the user no hint their file was gone. The single-end uBAM
+  arm's collision pre-flight planned only the primary `.bam` outputs; the two
+  trimming reports it also writes never entered the candidate list, so the
+  output-vs-input check could not see them. The single-end FASTQ path was never
+  affected — it routes secondaries through the same helper the pre-flight reads.
+  Fifth instance of the family behind #383, #385, #388 and #391.
+
+- **The uBAM path's IUPAC warning told users the wrong direction, and could
+  suppress the right one** ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)).
+  One message served two opposite code paths. On FASTQ→uBAM it announced "input
+  uBAM … coerced to N for FASTQ output" — both halves false — and on uBAM→uBAM
+  the read-side message named a FASTQ output that did not exist. Worse, a single
+  process-wide guard meant a run with **mixed FASTQ and uBAM inputs** (legal, and
+  the documented remedy for `--preserve-tags` with all-FASTQ input) printed
+  whichever message came first and silently suppressed the other: with the FASTQ
+  file first, the user was told the wrong direction *and* never told about the
+  genuine uBAM coercion. Each direction now has its own text and its own guard,
+  and the read-side wording is output-neutral ("coerced to N on read").
+
+- **uBAM output silently dropped FASTQ header descriptions**
+  ([#406](https://github.com/FelixKrueger/TrimGalore/issues/406)). BAM read names
+  cannot contain whitespace, so everything after the first space is discarded —
+  frequently the original instrument identifier or an Illumina `1:N:0:INDEX`
+  field. This is required by the format and is not new; it was simply never
+  disclosed. A one-time `NOTE:` now reports it and echoes the text that was
+  dropped, so what is lost is visible rather than inferred. Nothing fires when
+  there is nothing to drop (whitespace-free headers, or a bare trailing space).
+  The uBAM section of the output guide and `--output-format`'s own help also
+  stated or implied lossless round-tripping; both now name the three FASTQ→uBAM
+  normalizations (description dropped, bases uppercased, IUPAC coerced).
+
+- **`--clump_only --paired` no longer silently overwrites one mate's clumping
+  report with the other's**
+  ([#391](https://github.com/FelixKrueger/TrimGalore/issues/391)). Primaries
+  carry `_clumped_1`/`_clumped_2`, but reports are named from the input
+  filename alone, so `-o out A/reads.fq B/reads.fq` wrote ONE report at exit 0.
+  Clumping-report paths now join the collision pre-flight on every clump arm
+  (gated on `--no_report_file`, matching the writers), which also stops a
+  clumping report from silently overwriting an *input* named like one — on the
+  paired arm and the single-end/uBAM arms alike. The single-interleaved-BAM
+  shape gets the same candidate line as defensive symmetry only; with one input
+  its report can never alias it. As with #388, two inputs whose filenames differ
+  only in case are now refused into a shared output directory even on a
+  case-sensitive filesystem, where both reports could in fact coexist.
+
+- **Whether input is gzipped is now decided by reading the file, not by its
+  name.** This corrects two opposite failures:
+
+  - `bgzip`-produced input named `.fq.bgz` (or anything else not ending in
+    `.gz`) failed with `stream did not contain valid UTF-8`, because the
+    compressed bytes were read as text.
+  - A plain FASTQ misnamed `.fastq.gz` failed with `invalid gzip header`.
+    It now reads successfully.
+
+  Both came from the same cause: the format is detected from file *content*,
+  but that verdict was discarded and re-derived from the *filename* by
+  `FastqReader`. Detection is now a three-byte gzip-magic check inside
+  `FastqReader` itself, so every caller gets it right by default, including
+  `--paired` at `--cores 1`, `--passthrough` and `--clump_only`. New
+  `open_with` / `open_threaded_with` / `sanity_check_with` constructors let
+  callers that have already detected the format pass the verdict in and skip
+  the re-check.
+
+  BAM discrimination is unaffected: `detect_input_format` still owns the
+  `BAM\1` payload check, and a `.bam` renamed `.fq.gz` is still read as BAM.
+
+  One known limitation remains, left to a separate change: output compression
+  still mirrors the input *filename*, so a `.bgz` input produces plain `.fq`
+  output. Moving that decision would change behaviour for every run, including
+  the misnamed-`.gz` file whose input handling changed above.
+
+- **`.bgz` / `.bgzf` input no longer leaves an inner `.fastq` in the output
+  filename** ([#381](https://github.com/FelixKrueger/TrimGalore/issues/381)).
+  `sample.fastq.bgz` produced `sample.fastq_trimmed.fq` alongside
+  `sample.fastq.bgz_trimming_report.txt`; the two disagreed about the sample
+  name, and MultiQC takes that name from the report filename, so a trimmed
+  file and its report could land under different samples. The output is now
+  `sample_trimmed.fq`, matching what the same bytes under a `.fastq.gz` name
+  have always produced.
+
+  `io::strip_fastq_extensions` now removes a gzip-family suffix (`.gz`,
+  `.bgz`, `.bgzf`) and then the FASTQ extension, instead of matching an
+  enumerated list of combined suffixes. Names with no inner `.fastq`/`.fq`
+  are unaffected where they carry a single extension (`sample.bgz` →
+  `sample`). A multi-component name now loses one component more than before
+  (`sample.txt.bgz` → `sample`, previously `sample.txt`), matching what
+  `.gz` has always done. `.bam` inputs and unrelated extensions keep the
+  stems they had.
+
+  The specialty modes name their outputs from the same stem, so they shift
+  too. `--implicon` on `sample_R1.fastq.bgz` now writes
+  `sample_8bp_UMI_R1.fastq` where it wrote `sample_R1.fastq_8bp_UMI_R1.fastq`:
+  its R1/R2 de-duplication only fires on a stem ending in `_R1`, which the
+  old stem never did, so the doubled read tag disappears as well.
+  `--hardtrim5`, `--hardtrim3` and `--clock` shift in the same direction.
+
+  Output *filenames* only: no fixture in `test_files/` or in the
+  `validation` matrix is named `.bgz`, so the Perl-0.6.11 byte-identity
+  comparison is untouched.
+
+- **Single-end trimming no longer discards one input's reads when two inputs
+  share an output name** ([#383](https://github.com/FelixKrueger/TrimGalore/issues/383)).
+  `trim_galore sample.fastq.gz sample.fq.gz` produced a single
+  `sample_trimmed.fq.gz` and exited 0, having written the second input over the
+  first. Two trimming reports were left behind, each stating that all its reads
+  had been written, so the arithmetic on disk was wrong and nothing checked it.
+
+  The output-collision pre-flight added for
+  [#216](https://github.com/FelixKrueger/TrimGalore/issues/216) already refused
+  this on `--paired`, `--clock`, `--implicon` and `--clump_only`. It was missing
+  from four dispatch paths, all sharing one shape — a loop over the input list
+  with no check in front of it: single-end trim (FASTQ and uBAM output) and
+  `--hardtrim5`/`--hardtrim3` (FASTQ and uBAM output). All four now check, and
+  every path routes through one shared implementation.
+
+  `--hardtrim5`/`--hardtrim3` were the wider case, because they name output into
+  the *current working directory* rather than beside the input: identical input
+  basenames collided there even when the inputs came from different directories,
+  so `--hardtrim5 30 */*.fastq.gz` over a per-sample layout kept only the last
+  sample. Because `--output_dir` cannot resolve that collision, these two modes
+  add their own remediation to the error rather than the generic advice.
+
+  Two further defects in the check itself are fixed at the same time:
+
+  - **The key was a raw path string**, so `./sample.fastq.gz` and
+    `sample.fastq.gz` — or a list mixing absolute and relative paths, as
+    `find`/`xargs` and pipeline staging produce — named one file under two keys
+    and passed. The key is now lexically normalised — absolutised, then `..`
+    folded against the component stack — so `./x`, `<cwd>/x` and `a/../x` all
+    resolve to one key without touching the filesystem. A path reached through a
+    **symlink** still aliases undetected; that is the one remaining case, and it
+    costs the same silent read loss this entry describes.
+  - **The check compared outputs only against other outputs**, never against the
+    run's own inputs — and, once that was fixed, only *primary* outputs were
+    compared. A trimming report, or a `--demux` per-barcode file, could still
+    overwrite a named input while every primary output stayed distinct. Reports
+    and `--demux` outputs are now in the checked set, and `--demux`'s barcode
+    file is treated as an input that may not be written over. An output path can
+    *be* an input:
+    `trim_galore sample.fastq.gz sample_trimmed.fq.gz` (reachable by re-running
+    over a directory holding an earlier run's output) destroyed the second
+    input's reads and wrote a `sample_trimmed_trimmed.fq.gz` containing the
+    first sample's — a wrong-sample file, which is harder to notice than a
+    missing one. This affected `--paired` as well, and is now refused on every
+    path with a message of its own.
+
+  A rejected run still writes nothing, and the diagnostic keeps naming the paths
+  as the user spelled them.
+
+- **Paired-end trimming reports can no longer silently overwrite each other**
+  ([#388](https://github.com/FelixKrueger/TrimGalore/issues/388)). Paired output
+  names carry a positional discriminator (`_val_1`/`_val_2`) that report names do
+  not, so two inputs with distinct trimmed outputs could still collide on their
+  reports: `--paired -o out A/reads.fq B/reads.fq` exited 0 with one report pair
+  for two inputs, and re-using a filename across pairs lost a report the same
+  way. The report paths (text and JSON, for both sides of every pair) now join
+  the collision pre-flight on the paired FASTQ and paired uBAM-output paths,
+  skipped under `--no_report_file` to match the writers.
+
+  Two behaviour changes follow. A pair whose R1 and R2 share a filename written
+  to a common output directory is now refused on every filesystem — that run
+  previously lost a report. And two genuinely distinct inputs whose filenames
+  differ only in case are refused even on a case-sensitive filesystem, where
+  both reports could in fact coexist: the same loud-error-over-silent-loss trade
+  the pre-flight has made since #216, now extended to paired reports.
 
 - **Piped and stream input is now rejected with an accurate message**
   ([#379](https://github.com/FelixKrueger/TrimGalore/issues/379)). Trim Galore
