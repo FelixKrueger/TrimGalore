@@ -538,9 +538,9 @@ fn classify_paired(
         return PairOutcome::Discarded;
     }
 
-    // Track bp after trimming but before pair/length filtering (Cutadapt-compatible stat)
-    stats_r1.total_bp_after_trim += r1.seq.len();
-    stats_r2.total_bp_after_trim += r2.seq.len();
+    // Post-adapter length, before RRBS/poly-X/N-trim/clipping, matching Perl v0.6.x (#232).
+    stats_r1.total_bp_after_trim += res_r1.bp_after_cutadapt;
+    stats_r2.total_bp_after_trim += res_r2.bp_after_cutadapt;
 
     match filters::filter_paired_end(
         r1,
@@ -1153,8 +1153,8 @@ fn classify_single(
         return SingleOutcome::Discarded;
     }
 
-    // Track bp after trimming but before length filtering (Cutadapt-compatible stat)
-    stats.total_bp_after_trim += record.seq.len();
+    // Post-adapter length, before RRBS/poly-X/N-trim/clipping, matching Perl v0.6.x (#232).
+    stats.total_bp_after_trim += result.bp_after_cutadapt;
 
     match filters::filter_single_end(
         record,
@@ -1450,6 +1450,19 @@ mod tests {
         }
     }
 
+    /// Clipping on both reads and both ends, so `bp_after_cutadapt` and the final
+    /// record length differ for every read longer than the clip lengths. Both R2
+    /// values are required: `stats_r2.total_bp_after_trim` is a separate site.
+    fn parity_test_config_post_adapter() -> TrimConfig {
+        TrimConfig {
+            clip_r1: Some(5),
+            clip_r2: Some(5),
+            three_prime_clip_r1: Some(3),
+            three_prime_clip_r2: Some(3),
+            ..parity_test_config()
+        }
+    }
+
     /// #246 §5.2 regression: `trimmer::run_single_end` (serial path)
     /// and `parallel::run_single_end_parallel` (worker pool) must
     /// produce field-identical `TrimStats` on the same input. Beta.0/1
@@ -1520,6 +1533,196 @@ mod tests {
         assert!(
             stats_serial.total_reads_with_adapter > 0,
             "test fixture must have at least one adapter-bearing read"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// #541: `total_bp_after_trim` must be the post-adapter, pre-clip length on
+    /// both paths, so `Total written (filtered)` does not move with `--cores`.
+    /// The config clips after adapter trimming — the only regime in which the
+    /// post-adapter length and the final record length differ.
+    #[test]
+    fn test_parallel_serial_bp_after_trim_parity_with_clipping() -> Result<()> {
+        let dir = fresh_tmpdir("tg_parallel_serial_bp_after_trim");
+        let input_path = dir.join("input.fq");
+
+        let mut content = String::new();
+        for i in 0..30 {
+            let seq = if i % 2 == 0 {
+                // 30 bp + 13 bp Illumina adapter.
+                "ACGTACGTACGTACGTACGTACGTACGTACAGATCGGAAGAGC"
+            } else {
+                // 34 bp clean.
+                "ACGTACGTACGTACGTACGTACGTACGTACGTAC"
+            };
+            let qual = "I".repeat(seq.len());
+            content.push_str(&format!("@read_{i}\n{seq}\n+\n{qual}\n"));
+        }
+        fs::write(&input_path, content)?;
+
+        let config = parity_test_config_post_adapter();
+
+        let serial_output = dir.join("serial_out.fq");
+        let stats_serial = {
+            let mut reader = FastqReader::open(&input_path)?;
+            let mut writer =
+                FastqWriter::create(&serial_output, false, 1, crate::fastq::DEFAULT_GZIP_LEVEL)?;
+            let stats = crate::trimmer::run_single_end(&mut reader, &mut writer, &config)?;
+            writer.finish()?;
+            stats
+        };
+
+        let parallel_output = dir.join("parallel_out.fq");
+        let stats_parallel = run_single_end_parallel(
+            open_fq(&input_path),
+            &parallel_output,
+            &config,
+            4,
+            false,
+            None,
+        )?;
+
+        assert_eq!(
+            stats_serial, stats_parallel,
+            "TrimStats must match between serial (cores=1) and parallel (cores=4) paths.\n\
+             serial:   {stats_serial:#?}\n\
+             parallel: {stats_parallel:#?}"
+        );
+
+        // 15 adapter-bearing reads trim to 30 bp, 15 clean reads stay at 34 bp.
+        // Hand-derived: an expectation read back from either path would reproduce
+        // the defect it exists to catch.
+        const EXPECTED_BP_AFTER_TRIM: usize = 15 * 30 + 15 * 34;
+        assert_eq!(
+            stats_serial.total_bp_after_trim, EXPECTED_BP_AFTER_TRIM,
+            "serial total_bp_after_trim must be the post-adapter, pre-clip length"
+        );
+        assert_eq!(
+            stats_parallel.total_bp_after_trim, EXPECTED_BP_AFTER_TRIM,
+            "parallel total_bp_after_trim must be the post-adapter, pre-clip length"
+        );
+
+        // Without post-adapter trimming the two quantities coincide, and nothing
+        // above can fail.
+        assert!(
+            stats_serial.total_bp_after_trim > stats_serial.total_bp_written,
+            "config must apply post-adapter trimming, or this test cannot fail"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    /// #541, paired: `stats_r1` and `stats_r2` accumulate at separate sites, so
+    /// both sides are asserted — a fix applied to only one must not pass. R1 and
+    /// R2 carry different read lengths so their expectations differ.
+    #[test]
+    fn test_parallel_serial_bp_after_trim_parity_paired() -> Result<()> {
+        let dir = fresh_tmpdir("tg_parallel_serial_bp_paired");
+        let r1_path = dir.join("input_R1.fq");
+        let r2_path = dir.join("input_R2.fq");
+
+        let mut c1 = String::new();
+        let mut c2 = String::new();
+        for i in 0..30 {
+            // R1 alternates adapter-bearing (30 bp + 13 bp adapter) and 34 bp clean.
+            let s1 = if i % 2 == 0 {
+                "ACGTACGTACGTACGTACGTACGTACGTACAGATCGGAAGAGC"
+            } else {
+                "ACGTACGTACGTACGTACGTACGTACGTACGTAC"
+            };
+            // R2 is 33 bp clean throughout; clipping alone makes the two
+            // quantities diverge, so R2 needs no adapter.
+            let s2 = "ACGTACGTACGTACGTACGTACGTACGTACGTC";
+            c1.push_str(&format!("@read_{i}/1\n{s1}\n+\n{}\n", "I".repeat(s1.len())));
+            c2.push_str(&format!("@read_{i}/2\n{s2}\n+\n{}\n", "I".repeat(s2.len())));
+        }
+        fs::write(&r1_path, c1)?;
+        fs::write(&r2_path, c2)?;
+
+        let config = TrimConfig {
+            is_paired: true,
+            ..parity_test_config_post_adapter()
+        };
+        let unpaired = UnpairedLengths { r1: 35, r2: 35 };
+
+        let s_r1 = dir.join("serial_R1.fq");
+        let s_r2 = dir.join("serial_R2.fq");
+        let serial = {
+            let mut rdr_r1 = FastqReader::open(&r1_path)?;
+            let mut rdr_r2 = FastqReader::open(&r2_path)?;
+            let mut wr_r1 = FastqWriter::create(&s_r1, false, 1, crate::fastq::DEFAULT_GZIP_LEVEL)?;
+            let mut wr_r2 = FastqWriter::create(&s_r2, false, 1, crate::fastq::DEFAULT_GZIP_LEVEL)?;
+            let stats = crate::trimmer::run_paired_end(
+                &mut rdr_r1,
+                &mut rdr_r2,
+                None,
+                &mut wr_r1,
+                &mut wr_r2,
+                None,
+                None,
+                None,
+                &config,
+                unpaired,
+            )?;
+            wr_r1.finish()?;
+            wr_r2.finish()?;
+            stats
+        };
+
+        let p_r1 = dir.join("parallel_R1.fq");
+        let p_r2 = dir.join("parallel_R2.fq");
+        let parallel = run_paired_end_parallel(
+            open_fq(&r1_path),
+            open_fq(&r2_path),
+            None,
+            &p_r1,
+            &p_r2,
+            None,
+            None,
+            None,
+            &config,
+            4,
+            false,
+            unpaired,
+            None,
+        )?;
+
+        assert_eq!(
+            serial.0, parallel.0,
+            "R1 TrimStats must match between serial and parallel paths.\n\
+             serial:   {:#?}\nparallel: {:#?}",
+            serial.0, parallel.0
+        );
+        assert_eq!(
+            serial.1, parallel.1,
+            "R2 TrimStats must match between serial and parallel paths.\n\
+             serial:   {:#?}\nparallel: {:#?}",
+            serial.1, parallel.1
+        );
+        assert_eq!(
+            serial.2, parallel.2,
+            "PairValidationStats must match between serial and parallel paths.\n\
+             serial:   {:#?}\nparallel: {:#?}",
+            serial.2, parallel.2
+        );
+
+        // Hand-derived: R1 is 15 × 30 bp trimmed + 15 × 34 bp clean; R2 is 30 × 33 bp.
+        const EXPECTED_R1: usize = 15 * 30 + 15 * 34;
+        const EXPECTED_R2: usize = 30 * 33;
+        assert_eq!(parallel.0.total_bp_after_trim, EXPECTED_R1);
+        assert_eq!(parallel.1.total_bp_after_trim, EXPECTED_R2);
+        assert_eq!(serial.0.total_bp_after_trim, EXPECTED_R1);
+        assert_eq!(serial.1.total_bp_after_trim, EXPECTED_R2);
+
+        // Without post-adapter trimming on both reads the two quantities coincide
+        // and nothing above can fail.
+        assert!(
+            serial.0.total_bp_after_trim > serial.0.total_bp_written
+                && serial.1.total_bp_after_trim > serial.1.total_bp_written,
+            "config must clip both reads, or this test cannot fail"
         );
 
         fs::remove_dir_all(&dir).ok();
