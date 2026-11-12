@@ -118,6 +118,8 @@ pub struct PairValidationStats {
     pub pairs_removed_n: usize,
     /// Pairs removed for being too long
     pub pairs_removed_too_long: usize,
+    /// Pairs removed because at least one read fell below the length cutoff
+    pub pairs_removed_too_short: usize,
     /// R1 reads written to unpaired output
     pub r1_unpaired: usize,
     /// R2 reads written to unpaired output
@@ -145,6 +147,7 @@ impl PairValidationStats {
         self.pairs_removed += other.pairs_removed;
         self.pairs_removed_n += other.pairs_removed_n;
         self.pairs_removed_too_long += other.pairs_removed_too_long;
+        self.pairs_removed_too_short += other.pairs_removed_too_short;
         self.r1_unpaired += other.r1_unpaired;
         self.r2_unpaired += other.r2_unpaired;
         // --passthrough fields (plan v2 Step 3)
@@ -344,12 +347,12 @@ pub fn write_pair_validation_stats<W: Write>(
     writeln!(
         w,
         "Number of sequence pairs removed because at least one read was shorter than the length cutoff ({:.2}%):",
-        percentage(stats.pairs_removed, stats.pairs_analyzed)
+        percentage(stats.pairs_removed_too_short, stats.pairs_analyzed)
     )?;
     writeln!(
         w,
         "                             {:>10}",
-        format_number(stats.pairs_removed)
+        format_number(stats.pairs_removed_too_short)
     )?;
 
     // PE counterpart to the RUN-STATISTICS unconditional emission (#233).
@@ -970,6 +973,13 @@ pub fn write_json_report<W: Write>(
                 i2,
                 "pairs_removed_too_long",
                 ps.pairs_removed_too_long,
+                true,
+            )?;
+            json_int(
+                w,
+                i2,
+                "pairs_removed_too_short",
+                ps.pairs_removed_too_short,
                 true,
             )?;
             json_int(w, i2, "r1_unpaired", ps.r1_unpaired, true)?;
