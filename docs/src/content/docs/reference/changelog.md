@@ -9,7 +9,75 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
 
 ### Unreleased
 
+#### Changes
+
+- **Breaking: `--basename` is now refused by the modes whose output naming ignores it**
+  ([#558](https://github.com/FelixKrueger/TrimGalore/pull/558)). `--hardtrim5`, `--hardtrim3`,
+  `--clock`, `--implicon` and paired interleaved uBAM input name their output after the input file
+  and accepted the flag silently; `--clump_only`, whose namer honours it, still takes it.
+
+- **A duplicate barcode in a `--demux` sample sheet is now refused**
+  ([#553](https://github.com/FelixKrueger/TrimGalore/pull/553)). The second entry replaced the
+  first's writer, so the first sample's reads were written into the second and its own file was left
+  empty.
+
+- **A `--demux` sample name that is empty or contains a path separator is now refused**
+  ([#554](https://github.com/FelixKrueger/TrimGalore/pull/554)). The name is joined into the output
+  path, so `x/../../escaped` wrote outside the output directory.
+
+- **A paired uBAM whose mates have different read names is now refused**
+  ([#547](https://github.com/FelixKrueger/TrimGalore/pull/547)). The de-interleaver paired whatever
+  sat at the head of each queue, so a single orphan read shifted every pair after it and trimming ran
+  on reads from different fragments.
+
+- **FASTQ input must now be one 4-line record per read**
+  ([#564](https://github.com/FelixKrueger/TrimGalore/pull/564)). Wrapped (multi-line) FASTQ was cut
+  on a four-line stride into records whose header was a sequence line, and a non-ASCII sequence split
+  a character when clipped by byte offset; both are refused, which rejects input that previously ran.
+
+- **`-e` and `--max_n` now reject NaN, infinity and negative values**
+  ([#556](https://github.com/FelixKrueger/TrimGalore/pull/556)). `--max_n` was unvalidated, and
+  `-e`'s range test was a pair of comparisons that NaN fails on both sides.
+
+- **`SEQ = *` uBAM records and `UInt32` aux tags are now accepted**
+  ([#548](https://github.com/FelixKrueger/TrimGalore/pull/548)). Both are valid input the reader
+  refused, the latter despite the write side emitting it.
+
+- **`--demux` compresses each per-barcode output on a single thread**
+  ([#555](https://github.com/FelixKrueger/TrimGalore/pull/555)). Every writer carried its own
+  compressor pool sized by `--cores`, so peak memory grew with barcodes × cores; the decompressed
+  output is unchanged.
+
+- **The adapter alignment and the 5' clip no longer allocate per read**
+  ([#566](https://github.com/FelixKrueger/TrimGalore/pull/566)). One flat matrix buffer and an
+  in-place clip cut about 10% off single-core wall-clock on 150 bp reads, with byte-identical output.
+
 #### Bug fixes
+
+- **A reader thread that dies is no longer read as end of input**
+  ([#565](https://github.com/FelixKrueger/TrimGalore/pull/565)). The run finished successfully on a
+  truncated file and published the output, because nothing had reported a failure.
+
+- **A non-UTF-8 file name no longer aborts the run**
+  ([#557](https://github.com/FelixKrueger/TrimGalore/pull/557)). `std::env::args` panics on one, so
+  the process died before any of its own diagnostics could name the file.
+
+- **The `--clock` summary line described the opposite of the figure it reported**
+  ([#559](https://github.com/FelixKrueger/TrimGalore/pull/559)). The count is of pairs lacking `CAGT`
+  in R1 or R2 and the label now says so; Perl v0.6.11 carried the same inverted wording.
+
+- **`--demux` summary rows with equal counts are now ordered by barcode**
+  ([#560](https://github.com/FelixKrueger/TrimGalore/pull/560)). They followed hash iteration order,
+  so two runs over the same input could write different summary files.
+
+- **The adapter table's `expect` and `max.err` are capped at the adapter length**
+  ([#562](https://github.com/FelixKrueger/TrimGalore/pull/562)). Both were computed from the removal
+  length, which can exceed the adapter, where Cutadapt's level off.
+
+- **The paired-end length-cutoff line counts only length removals**
+  ([#561](https://github.com/FelixKrueger/TrimGalore/pull/561)). It reported every removed pair
+  whatever the reason; the JSON gains `pairs_removed_too_short` beside the other sub-reasons, and
+  `pairs_removed` remains the total.
 
 - **`Unpaired read N kept` is no longer reported for reads that were never written**
   ([#544](https://github.com/FelixKrueger/TrimGalore/issues/544)). At `--cores >= 2` the parallel
