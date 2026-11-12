@@ -199,7 +199,6 @@ pub fn demultiplex(
     barcodes: &[BarcodeEntry],
     gzip: bool,
     output_dir: Option<&Path>,
-    cores: usize,
     gzip_level: u32,
 ) -> Result<()> {
     let barcode_length = barcodes[0].barcode.len();
@@ -214,20 +213,21 @@ pub fn demultiplex(
 
     let dir = demux_output_dir(trimmed_file, output_dir);
 
-    // Open per-sample output writers + NoCode
+    // Open per-sample output writers + NoCode. Single-threaded gzip: each
+    // writer with N threads holds its own pool, so memory grew with barcodes × cores.
     let mut writers: HashMap<String, FastqWriter> = HashMap::new();
     for entry in barcodes {
         let filename = output_filename(&base_name, &entry.sample_name, gzip);
         let path = dir.join(&filename);
         writers.insert(
             entry.barcode.clone(),
-            FastqWriter::create(&path, gzip, cores, gzip_level)?,
+            FastqWriter::create(&path, gzip, 1, gzip_level)?,
         );
     }
     // NoCode writer for unmatched barcodes
     let nocode_filename = output_filename(&base_name, "NoCode", gzip);
     let nocode_path = dir.join(&nocode_filename);
-    let mut nocode_writer = FastqWriter::create(&nocode_path, gzip, cores, gzip_level)?;
+    let mut nocode_writer = FastqWriter::create(&nocode_path, gzip, 1, gzip_level)?;
 
     // Per-barcode counts
     let mut counts: HashMap<String, usize> =
@@ -414,7 +414,6 @@ mod tests {
             &barcodes,
             false,
             Some(&dir),
-            1,
             crate::fastq::DEFAULT_GZIP_LEVEL,
         )
         .unwrap();
@@ -514,7 +513,6 @@ mod tests {
             &barcodes,
             false,
             Some(&dir),
-            1,
             crate::fastq::DEFAULT_GZIP_LEVEL,
         )
         .unwrap();

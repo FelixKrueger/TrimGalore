@@ -1680,14 +1680,7 @@ fn run_single_file(
             barcode_file.display()
         );
         let barcodes = demux::read_barcode_file(barcode_file)?;
-        demux::demultiplex(
-            &output_path,
-            &barcodes,
-            gzip,
-            output_dir,
-            cli.cores,
-            cli.compression,
-        )?;
+        demux::demultiplex(&output_path, &barcodes, gzip, output_dir, cli.compression)?;
     }
 
     Ok(())
