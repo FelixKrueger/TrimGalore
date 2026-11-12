@@ -28,6 +28,7 @@ pub struct BarcodeEntry {
 /// - Each line has exactly 2 tab-separated fields
 /// - Barcode sequences contain only A, C, T, G, N
 /// - All barcodes have the same length
+/// - No barcode appears twice
 pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
     let file = File::open(path)
         .with_context(|| format!("Failed to open barcode file: {}", path.display()))?;
@@ -35,6 +36,8 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
 
     let mut entries = Vec::new();
     let mut expected_len: Option<usize> = None;
+    // barcode → (line number, sample name) of its first occurrence
+    let mut seen: HashMap<String, (usize, String)> = HashMap::new();
 
     for (line_num, line) in reader.lines().enumerate() {
         let line = line?;
@@ -84,6 +87,19 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
             }
             _ => {}
         }
+
+        if let Some((first_line, first_sample)) = seen.get(&barcode) {
+            bail!(
+                "Barcode file {} line {}: barcode '{}' for sample '{}' was already given on line {} for sample '{}' (each barcode must be unique)",
+                path.display(),
+                line_num + 1,
+                barcode,
+                sample_name,
+                first_line,
+                first_sample
+            );
+        }
+        seen.insert(barcode.clone(), (line_num + 1, sample_name.clone()));
 
         eprintln!("Testing:\t{}\t{}", sample_name, barcode);
         entries.push(BarcodeEntry {
@@ -408,6 +424,23 @@ mod tests {
                 "GGGG\tsGGGG\t0",
                 "TGCA\tsTGCA\t0",
             ]
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A repeated barcode used to replace the first sample's writer in the
+    /// `HashMap`, silently routing all its reads to the second sample.
+    #[test]
+    fn test_read_barcode_file_rejects_duplicate_barcode() {
+        let dir = fresh_tmpdir("tg_demux_duplicate_barcode");
+        let path = dir.join("barcodes.tsv");
+        fs::write(&path, "a\tACGTACGT\nc\tTTTTAAAA\nb\tACGTACGT\n").unwrap();
+
+        let err = read_barcode_file(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("line 3: barcode 'ACGTACGT' for sample 'b' was already given on line 1 for sample 'a'"),
+            "unexpected error: {err}"
         );
 
         fs::remove_dir_all(&dir).unwrap();
