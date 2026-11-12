@@ -697,11 +697,18 @@ impl Cli {
             );
         }
 
-        if self.error_rate < 0.0 || self.error_rate > 1.0 {
+        // `contains` also rejects NaN, which slips past `< 0.0 || > 1.0`.
+        if !(0.0..=1.0).contains(&self.error_rate) {
             anyhow::bail!(
                 "Error rate must be between 0 and 1, got {}",
                 self.error_rate
             );
+        }
+
+        if let Some(max_n) = self.max_n
+            && !(max_n.is_finite() && max_n >= 0.0)
+        {
+            anyhow::bail!("--max_n must be a non-negative number, got {max_n}");
         }
 
         if self.stringency == 0 {
@@ -1272,6 +1279,29 @@ mod tests {
     const R2: &str = "test_files/BS-seq_10K_R2.fastq.gz";
     const ALT_R1: &str = "test_files/SRR24766921_RRBS_R1.fastq.gz";
     const ALT_R2: &str = "test_files/SRR24766921_RRBS_R2.fastq.gz";
+
+    #[test]
+    fn test_validate_rejects_nan_and_negative_float_options() {
+        for argv in [
+            vec!["trim_galore", "-e", "nan", R1],
+            vec!["trim_galore", "-e", "1.5", R1],
+            vec!["trim_galore", "--max_n", "nan", R1],
+            vec!["trim_galore", "--max_n=-1", R1],
+            vec!["trim_galore", "--max_n", "inf", R1],
+        ] {
+            let cli = Cli::parse_from(&argv);
+            assert!(cli.validate().is_err(), "expected rejection for {argv:?}");
+        }
+        for argv in [
+            vec!["trim_galore", "-e", "0", R1],
+            vec!["trim_galore", "-e", "1", R1],
+            vec!["trim_galore", "--max_n", "0", R1],
+            vec!["trim_galore", "--max_n", "0.5", R1],
+        ] {
+            let cli = Cli::parse_from(&argv);
+            assert!(cli.validate().is_ok(), "expected acceptance for {argv:?}");
+        }
+    }
 
     #[test]
     fn test_validate_paired_odd_count_rejected() {
