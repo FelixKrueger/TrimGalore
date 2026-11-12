@@ -339,7 +339,7 @@ pub fn clock(
     };
     eprintln!("\nSequences processed in total: {}", count);
     eprintln!(
-        "thereof had fixed sequence CAGT in both R1 and R2: {} ({}%)\n",
+        "thereof did not have the fixed sequence CAGT in both R1 and R2: {} ({}%)\n",
         filtered_count, perc
     );
 
