@@ -566,6 +566,7 @@ fn classify_paired(
         }
         PairFilterResult::TooShort { r1_ok, r2_ok } => {
             pair_stats.pairs_removed += 1;
+            pair_stats.pairs_removed_too_short += 1;
             stats_r1.too_short += 1;
             stats_r2.too_short += 1;
             PairOutcome::Unpaired { r1_ok, r2_ok }
