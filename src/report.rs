@@ -975,6 +975,13 @@ pub fn write_json_report<W: Write>(
                 ps.pairs_removed_too_long,
                 true,
             )?;
+            json_int(
+                w,
+                i2,
+                "pairs_removed_too_short",
+                ps.pairs_removed_too_short,
+                true,
+            )?;
             json_int(w, i2, "r1_unpaired", ps.r1_unpaired, true)?;
             json_int(w, i2, "r2_unpaired", ps.r2_unpaired, false)?;
             writeln!(w, "{}}},", i1)?;

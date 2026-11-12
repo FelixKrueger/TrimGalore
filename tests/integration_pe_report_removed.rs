@@ -26,7 +26,7 @@ fn write_fastq(path: &Path) {
     std::fs::write(path, text).unwrap();
 }
 
-fn run(cores: &str) -> String {
+fn run(cores: &str) -> (String, String) {
     let dir = tempfile::tempdir().unwrap();
     let r1 = dir.path().join("s_R1.fq");
     let r2 = dir.path().join("s_R2.fq");
@@ -51,18 +51,32 @@ fn run(cores: &str) -> String {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    std::fs::read_to_string(dir.path().join("s_R2.fq_trimming_report.txt")).unwrap()
+    (
+        std::fs::read_to_string(dir.path().join("s_R2.fq_trimming_report.txt")).unwrap(),
+        std::fs::read_to_string(dir.path().join("s_R2.fq_trimming_report.json")).unwrap(),
+    )
 }
 
 #[test]
 fn pe_report_shorter_line_counts_only_length_removals() {
     for cores in ["1", "2"] {
-        let report = run(cores);
+        let (report, json) = run(cores);
         assert!(
             report.contains(
                 "Number of sequence pairs removed because at least one read was shorter than the length cutoff (25.00%):\n                                      1\n"
             ),
             "--cores {cores}:\n{report}"
         );
+
+        // `pairs_removed` stays the total that MultiQC reads, with the
+        // per-reason figures as its sub-reasons: of the four pairs, one is
+        // short, one untrimmed and one over --max_length.
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let pv = &v["pair_validation"];
+        assert_eq!(pv["pairs_analyzed"], 4, "--cores {cores}: {pv}");
+        assert_eq!(pv["pairs_removed"], 3, "--cores {cores}: {pv}");
+        assert_eq!(pv["pairs_removed_too_short"], 1, "--cores {cores}: {pv}");
+        assert_eq!(pv["pairs_removed_too_long"], 1, "--cores {cores}: {pv}");
+        assert_eq!(pv["pairs_removed_n"], 0, "--cores {cores}: {pv}");
     }
 }
