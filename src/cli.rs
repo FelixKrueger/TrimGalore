@@ -666,7 +666,17 @@ impl Cli {
             self.validate_paired_input("Paired-end")?;
         }
 
-        if !self.paired && self.input.len() > 1 && self.basename.is_some() {
+        // The specialty modes take several inputs legitimately and own a more
+        // specific --basename message, so they are excluded rather than
+        // pre-empted by the ambiguity wording.
+        if !self.paired
+            && self.input.len() > 1
+            && self.basename.is_some()
+            && !self.clock
+            && self.implicon.is_none()
+            && self.hardtrim5.is_none()
+            && self.hardtrim3.is_none()
+        {
             anyhow::bail!(
                 "--basename cannot be used with multiple input files (ambiguous output naming)"
             );
@@ -1082,6 +1092,21 @@ impl Cli {
             }
         }
 
+        // These modes name their output after each input and never consult
+        // --basename. Below the value and input-list checks, like the refusals
+        // that follow, so malformed values and bad input lists report first.
+        if self.basename.is_some()
+            && (self.hardtrim5.is_some()
+                || self.hardtrim3.is_some()
+                || self.clock
+                || self.implicon.is_some())
+        {
+            anyhow::bail!(
+                "--basename is not supported with --hardtrim5, --hardtrim3, --clock or \
+                 --implicon (their output is always named after the input file)"
+            );
+        }
+
         // #421 — these arms reach no `fastqc::run` call site. Below the value and
         // input-list checks, so malformed values and bad input lists report first.
         if self.fastqc_requested() {
@@ -1433,6 +1458,50 @@ mod tests {
             err.contains("basename cannot be used with multiple"),
             "expected multi-pair basename rejection, got: {err}"
         );
+    }
+
+    #[test]
+    fn hardtrim5_range_error_precedes_the_basename_refusal() {
+        let cli = Cli::parse_from(["trim_galore", "--hardtrim5", "0", "--basename", "foo", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("between 1 and 999"),
+            "expected the range error first, got: {err}"
+        );
+        assert!(
+            !err.contains("--basename"),
+            "the range error must not mention --basename, got: {err}"
+        );
+    }
+
+    #[test]
+    fn clock_arity_error_precedes_the_basename_refusal() {
+        let cli = Cli::parse_from(["trim_galore", "--clock", "--basename", "foo", R1]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("requires an even number of input files"),
+            "expected the arity error first, got: {err}"
+        );
+        assert!(!err.contains("--basename"), "got: {err}");
+    }
+
+    #[test]
+    fn test_validate_basename_rejected_with_specialty_modes() {
+        for mode in [
+            vec!["--hardtrim5", "20", R1],
+            vec!["--hardtrim3", "20", R1],
+            vec!["--clock", R1, R2],
+            // --implicon takes `require_equals`, so a spaced value lands as input.
+            vec!["--implicon=8", R1, R2],
+        ] {
+            let mut argv = vec!["trim_galore", "--basename", "foo"];
+            argv.extend(mode.iter().copied());
+            let err = Cli::parse_from(&argv).validate().unwrap_err().to_string();
+            assert!(
+                err.contains("--basename is not supported with --hardtrim5"),
+                "expected specialty-mode basename rejection for {argv:?}, got: {err}"
+            );
+        }
     }
 
     #[test]

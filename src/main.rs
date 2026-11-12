@@ -476,6 +476,13 @@ fn main() -> Result<()> {
              Provide R1 and R2 as separate files for FASTQ paired-end mode."
         );
     }
+    // The interleaved-uBAM namers take no basename (`--clump_only`'s does).
+    if cli.paired && cli.input.len() == 1 && cli.basename.is_some() && !cli.clump_only {
+        anyhow::bail!(
+            "--basename is not supported with single-file interleaved uBAM input \
+             (--paired with one BAM file); output is named after the input file."
+        );
+    }
 
     // Issue #363 — both inputs of a `--paired` pair must agree on being BAM.
     //

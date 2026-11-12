@@ -257,6 +257,36 @@ fn paired_with_single_fastq_rejected() {
     );
 }
 
+#[test]
+fn paired_interleaved_ubam_rejects_basename() {
+    // The interleaved namers ignore --basename, so it used to be dropped silently
+    // (`x_val_1.fq` was written). Both output formats must refuse before writing.
+    for fmt in ["fastq", "ubam"] {
+        let dir = fresh_tmpdir(&format!("tg_int_paired_ubam_basename_{fmt}"));
+        let output = Command::new(binary())
+            .args(["--paired", "--basename", "foo", "--output-format", fmt])
+            .arg("test_files/ubam_paired_test.bam")
+            .arg("-o")
+            .arg(&dir)
+            .output()
+            .expect("trim_galore failed to run");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success(),
+            "{fmt}: --basename must be rejected"
+        );
+        assert!(
+            stderr.contains("--basename is not supported with single-file interleaved uBAM"),
+            "{fmt}: unexpected stderr: {stderr}"
+        );
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "{fmt}: no output may be written"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // #415 — whitespace in a BAM read name, and framing bytes in a Z tag value.
 //
