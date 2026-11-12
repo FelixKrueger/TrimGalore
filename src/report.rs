@@ -564,8 +564,10 @@ pub fn write_cutadapt_compatible_section<W: Write>(
                 if length == 0 || count == 0 {
                     continue;
                 }
-                let expect = stats.total_reads as f64 / 4f64.powi(length as i32);
-                let max_err = (length as f64 * config.error_rate).floor() as usize;
+                // Cutadapt caps both at the adapter length: a longer removal can't match more adapter.
+                let capped = length.min(seq.len());
+                let expect = stats.total_reads as f64 / 4f64.powi(capped as i32);
+                let max_err = (capped as f64 * config.error_rate).floor() as usize;
                 writeln!(
                     w,
                     "{}\t{}\t{:.1}\t{}\t{}",
@@ -1963,5 +1965,24 @@ mod tests {
             text.contains("Number of pairs removed for N content"),
             "pairs_removed_n line must be emitted even at count 0"
         );
+    }
+
+    #[test]
+    fn test_adapter_table_caps_expect_and_max_err_at_adapter_length() {
+        // Cutadapt: expect = n / 4^min(len, adapter_len), max.err = int(e * min(len, adapter_len)).
+        // 13 bp adapter, n = 4^13, so expect levels off at 1.0 and max.err at 1.
+        let config = test_config();
+        let mut stats = TrimStats::with_adapter_count(1);
+        stats.total_reads = 4usize.pow(13);
+        stats.adapter_length_counts[0] = vec![0; 21];
+        stats.adapter_length_counts[0][13] = 1;
+        stats.adapter_length_counts[0][20] = 1;
+
+        let mut buf = Vec::new();
+        write_cutadapt_compatible_section(&mut buf, &config, &stats, 1).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(text.contains("\n13\t1\t1.0\t1\t1\n"), "got:\n{text}");
+        assert!(text.contains("\n20\t1\t1.0\t1\t1\n"), "got:\n{text}");
     }
 }
