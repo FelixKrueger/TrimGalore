@@ -709,29 +709,6 @@ pub fn write_clump_only_report(
     Ok(())
 }
 
-/// Utility for callers that want to inspect the expected output path
-/// (e.g. for output-collision pre-flight in `main.rs`).
-pub fn expected_output_paths_single(
-    input: &Path,
-    output_dir: Option<&Path>,
-    basename: Option<&str>,
-    gzip_output: bool,
-) -> PathBuf {
-    naming::clumped_output_name(input, output_dir, basename, gzip_output)
-}
-
-/// Utility for callers that want to inspect the expected paired output
-/// paths (both mates).
-pub fn expected_output_paths_paired(
-    input_r1: &Path,
-    input_r2: &Path,
-    output_dir: Option<&Path>,
-    basename: Option<&str>,
-    gzip_output: bool,
-) -> (PathBuf, PathBuf) {
-    naming::clumped_paired_output_names(input_r1, input_r2, output_dir, basename, gzip_output)
-}
-
 // ────────────────────────── uBAM output variants (v2) ─────────────────────
 //
 // Mirror hardtrim5_to_bam's pattern: peek input header, open reader via
@@ -1039,11 +1016,6 @@ pub fn clump_only_paired_to_bam_one_pair(
                 r2_path.display()
             );
         }
-        let header = if matches!(fmt, InputFormat::UnalignedBam) {
-            Some(peek_header(r1_path)?)
-        } else {
-            None
-        };
         let r1 = crate::format::open_sync_reader(r1_path, preserve_tags)?;
         let r2 = crate::format::open_sync_reader(r2_path, preserve_tags)?;
         let out =
@@ -1052,7 +1024,7 @@ pub fn clump_only_paired_to_bam_one_pair(
         PairedInputSetup {
             reader_r1: r1,
             reader_r2: r2,
-            source_header: header,
+            source_header: None,
             input_fmt_for_label: fmt,
             output_path: out,
             input_bytes_total: in_bytes,
