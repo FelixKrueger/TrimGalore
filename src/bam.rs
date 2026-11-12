@@ -90,6 +90,7 @@ enum BamReaderSource {
         rx: mpsc::Receiver<Result<Vec<FastqRecord>>>,
         buffer: Vec<FastqRecord>,
         buf_pos: usize,
+        eof: bool,
         _handle: JoinHandle<()>,
     },
 }
@@ -329,6 +330,7 @@ impl BamReader {
                 rx: rx_r1,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: spawn_noop_joinhandle(),
             },
             preserved_tags: preserve_tags.to_vec(),
@@ -338,6 +340,7 @@ impl BamReader {
                 rx: rx_r2,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: spawn_noop_joinhandle(),
             },
             preserved_tags: preserve_tags.to_vec(),
@@ -417,6 +420,7 @@ impl BamReader {
                 rx,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: handle,
             },
             preserved_tags,
@@ -464,6 +468,7 @@ impl BamReader {
                 rx,
                 buffer,
                 buf_pos,
+                eof,
                 ..
             } => {
                 if *buf_pos < buffer.len() {
@@ -479,9 +484,13 @@ impl BamReader {
                     );
                     return Ok(Some(record));
                 }
+                if *eof {
+                    return Ok(None);
+                }
                 match rx.recv() {
                     Ok(Ok(batch)) => {
                         if batch.is_empty() {
+                            *eof = true;
                             Ok(None)
                         } else {
                             *buffer = batch;
@@ -498,7 +507,10 @@ impl BamReader {
                         }
                     }
                     Ok(Err(e)) => Err(e),
-                    Err(_) => Ok(None),
+                    // The marker latches `eof`, so a closed channel here means the
+                    // producer died before signalling; treating it as end of input
+                    // means the thread died (panicked), not EOF.
+                    Err(_) => bail!("BAM reader thread ended without signalling end of input"),
                 }
             }
         }
@@ -2074,5 +2086,52 @@ mod tests {
             "@PG ID:trim_galore must appear in synthesised header"
         );
         Ok(())
+    }
+
+    /// Same contract as the FASTQ reader: a producer that dies drops its
+    /// sender without the EOF marker, and the consumer must report it.
+    #[test]
+    fn threaded_reader_closed_without_eof_marker_is_an_error() {
+        let (tx, rx) = mpsc::sync_channel::<Result<Vec<FastqRecord>>>(1);
+        drop(tx);
+        let mut reader = BamReader {
+            source: BamReaderSource::Threaded {
+                rx,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                eof: false,
+                _handle: spawn_noop_joinhandle(),
+            },
+            preserved_tags: Vec::new(),
+        };
+        assert!(reader.next_record().is_err());
+    }
+
+    /// The marker latches: once end of input is reported, later calls keep
+    /// reporting it even though the producer has dropped its sender.
+    #[test]
+    fn threaded_reader_eof_marker_latches() {
+        let (tx, rx) = mpsc::sync_channel::<Result<Vec<FastqRecord>>>(2);
+        tx.send(Ok(vec![FastqRecord {
+            id: "@r1".to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        }]))
+        .unwrap();
+        tx.send(Ok(Vec::new())).unwrap();
+        drop(tx);
+        let mut reader = BamReader {
+            source: BamReaderSource::Threaded {
+                rx,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                eof: false,
+                _handle: spawn_noop_joinhandle(),
+            },
+            preserved_tags: Vec::new(),
+        };
+        assert_eq!(reader.next_record().unwrap().unwrap().id, "@r1");
+        assert!(reader.next_record().unwrap().is_none());
+        assert!(reader.next_record().unwrap().is_none());
     }
 }
