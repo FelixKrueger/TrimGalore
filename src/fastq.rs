@@ -234,6 +234,7 @@ enum ReaderSource {
         rx: std::sync::mpsc::Receiver<Result<Vec<FastqRecord>>>,
         buffer: Vec<FastqRecord>,
         buf_pos: usize,
+        eof: bool,
         _handle: std::thread::JoinHandle<()>,
     },
 }
@@ -370,6 +371,7 @@ impl FastqReader {
                 rx,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: handle,
             },
         })
@@ -472,6 +474,7 @@ impl FastqReader {
                 rx,
                 buffer,
                 buf_pos,
+                eof,
                 ..
             } => {
                 // Return next record from current batch buffer
@@ -490,9 +493,13 @@ impl FastqReader {
                     return Ok(Some(record));
                 }
                 // Buffer exhausted — receive next batch
+                if *eof {
+                    return Ok(None);
+                }
                 match rx.recv() {
                     Ok(Ok(batch)) => {
                         if batch.is_empty() {
+                            *eof = true;
                             Ok(None) // EOF signal
                         } else {
                             *buffer = batch;
@@ -510,9 +517,9 @@ impl FastqReader {
                         }
                     }
                     Ok(Err(e)) => Err(e),
-                    // Every producer exit sends the empty-batch marker or an
-                    // `Err` first, so a closed channel means the thread died
-                    // (panicked); treating it as EOF would publish short output.
+                    // The marker latches `eof`, so a closed channel here means the
+                    // producer died before signalling; treating it as end of input
+                    // would publish short output as a success.
                     Err(_) => bail!("FASTQ reader thread ended without signalling end of input"),
                 }
             }
@@ -1479,10 +1486,38 @@ mod tests {
                 rx,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: std::thread::spawn(|| {}),
             },
         };
         assert_eq!(reader.next_record().unwrap().unwrap().id, "@r1");
         assert!(reader.next_record().is_err());
+    }
+
+    /// The marker latches: once end of input is reported, later calls keep
+    /// reporting it even though the producer has dropped its sender.
+    #[test]
+    fn threaded_reader_eof_marker_latches() {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Vec<FastqRecord>>>(2);
+        tx.send(Ok(vec![FastqRecord {
+            id: "@r1".to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        }]))
+        .unwrap();
+        tx.send(Ok(Vec::new())).unwrap();
+        drop(tx);
+        let mut reader = FastqReader {
+            source: ReaderSource::Threaded {
+                rx,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                eof: false,
+                _handle: std::thread::spawn(|| {}),
+            },
+        };
+        assert_eq!(reader.next_record().unwrap().unwrap().id, "@r1");
+        assert!(reader.next_record().unwrap().is_none());
+        assert!(reader.next_record().unwrap().is_none());
     }
 }
