@@ -282,8 +282,30 @@ impl BamReader {
                         }
                         // Emit a matched pair if both queues are non-empty.
                         if !r1_queue.is_empty() && !r2_queue.is_empty() {
-                            batch_r1.push(r1_queue.pop_front().unwrap());
-                            batch_r2.push(r2_queue.pop_front().unwrap());
+                            let fq1 = r1_queue.pop_front().unwrap();
+                            let fq2 = r2_queue.pop_front().unwrap();
+                            // The id is `@QNAME` plus any `\t`-joined --preserve-tags tail.
+                            let name1 = fq1.id.split('\t').next().unwrap_or_default();
+                            let name2 = fq2.id.split('\t').next().unwrap_or_default();
+                            if name1 != name2 {
+                                send_pair_err(
+                                    &tx_r1,
+                                    &tx_r2,
+                                    format!(
+                                        "Paired uBAM '{}': mate names differ at BAM record {} (R1 '{}', R2 '{}'). \
+                                         Each R1 must sit next to its own R2; an orphan read would otherwise be \
+                                         paired with the wrong mate. Re-interleave the input first: \
+                                         `samtools collate -O input.bam tmp > interleaved.bam`.",
+                                        path_for_thread.display(),
+                                        record_idx,
+                                        &name1[1..],
+                                        &name2[1..]
+                                    ),
+                                );
+                                return;
+                            }
+                            batch_r1.push(fq1);
+                            batch_r2.push(fq2);
                             if batch_r1.len() >= BAM_READER_BATCH_SIZE {
                                 let send_r1 = std::mem::replace(
                                     &mut batch_r1,
@@ -1718,6 +1740,44 @@ mod tests {
         }
         assert!(r1r.next_record()?.is_none());
         assert!(r2r.next_record()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn paired_interleaved_rejects_mismatched_mate_names() -> Result<()> {
+        // Pair A is complete (differing tag tails must not count as a mismatch);
+        // then an orphan R1 of B meets an orphan R2 of C at record 4.
+        let dir = tempfile::tempdir()?;
+        let out = dir.path().join("mismatched_mates.bam");
+        let rec = |id: &str| FastqRecord {
+            id: id.to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        };
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore mate test", 33)?;
+        w.write_record(&rec("@A\tXN:i:1"), Some(1))?;
+        w.write_record(&rec("@A\tXN:i:2"), Some(2))?;
+        w.write_record(&rec("@B"), Some(1))?;
+        w.write_record(&rec("@C"), Some(2))?;
+        w.finish()?;
+
+        let (mut r1r, mut r2r) =
+            BamReader::open_paired_interleaved_with_tags(&out, &["XN".to_string()])?;
+        let err = loop {
+            match (r1r.next_record(), r2r.next_record()) {
+                (Ok(Some(a)), Ok(Some(b))) => {
+                    assert_eq!((a.id.as_str(), b.id.as_str()), ("@A\tXN:i:1", "@A\tXN:i:2"));
+                }
+                (Err(e), _) | (_, Err(e)) => break e,
+                other => panic!("mismatched mates were paired without error: {:?}", other),
+            }
+        };
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("mate names differ at BAM record 4 (R1 'B', R2 'C')")
+                && msg.contains("samtools collate"),
+            "unexpected error: {msg}"
+        );
         Ok(())
     }
 
