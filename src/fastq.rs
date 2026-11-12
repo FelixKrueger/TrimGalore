@@ -406,9 +406,8 @@ impl FastqReader {
     ///
     /// Rejects anything that is not one 4-line record: the header must start
     /// with '@', the third line with '+', and sequence and quality must be
-    /// ASCII and of equal length. Without this a wrapped (multi-line) FASTQ
-    /// was cut into garbage records, and a non-ASCII sequence panicked the
-    /// byte-offset slicing in `clip_5prime` / `--hardtrim5`.
+    /// ASCII and of equal length. The ASCII rule is what lets `clip_5prime`
+    /// and `--hardtrim5` slice by byte offset.
     fn read_next_direct(
         reader: &mut dyn BufRead,
         line_buf: &mut String,
@@ -1538,8 +1537,8 @@ mod tests {
         }
     }
 
-    /// A wrapped (multi-line) FASTQ: the 4-line reader used to slice it into
-    /// records whose "id" was a sequence line, and exit 0.
+    /// A wrapped (multi-line) FASTQ is caught by the '+' check, which lands on
+    /// a second sequence line.
     #[test]
     fn wrapped_fastq_is_rejected() {
         let err = first_read_error(b"@r1\nACGT\nACGT\n+\nIIII\nIIII\n");
@@ -1565,8 +1564,8 @@ mod tests {
         );
     }
 
-    /// `é` is 2 bytes, so byte lengths match ("AéT" vs "IIII") but slicing at
-    /// byte 2 (`--clip_R1 2`) panicked with "not a char boundary".
+    /// `é` is 2 bytes, so byte lengths can match ("AéT" vs "IIII") while the
+    /// sequence is not ASCII, and a byte-offset clip would split a character.
     #[test]
     fn non_ascii_sequence_is_rejected() {
         let err = first_read_error("@r1\nA\u{e9}T\n+\nIIII\n".as_bytes());
