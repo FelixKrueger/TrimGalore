@@ -29,6 +29,7 @@ pub struct BarcodeEntry {
 /// - Barcode sequences contain only A, C, T, G, N
 /// - All barcodes have the same length
 /// - No barcode appears twice
+/// - Sample names are non-empty and contain no path separator
 pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
     let file = File::open(path)
         .with_context(|| format!("Failed to open barcode file: {}", path.display()))?;
@@ -58,6 +59,16 @@ pub fn read_barcode_file(path: &Path) -> Result<Vec<BarcodeEntry>> {
 
         let sample_name = parts[0].to_string();
         let barcode = parts[1].to_string();
+
+        // The sample name becomes part of an output file name.
+        if sample_name.is_empty() || sample_name.contains(['/', '\\']) {
+            bail!(
+                "Barcode file {} line {}: sample name must be non-empty and must not contain '/' or '\\'. Got: '{}'",
+                path.display(),
+                line_num + 1,
+                sample_name
+            );
+        }
 
         // Validate barcode characters
         if !barcode
@@ -442,6 +453,25 @@ mod tests {
             err.contains("line 3: barcode 'ACGTACGT' for sample 'b' was already given on line 1 for sample 'a'"),
             "unexpected error: {err}"
         );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The sample name is joined into an output path, so `x/../../escaped`
+    /// used to write outside the output directory.
+    #[test]
+    fn test_read_barcode_file_rejects_path_like_sample_names() {
+        let dir = fresh_tmpdir("tg_demux_sample_name_path");
+        let path = dir.join("barcodes.tsv");
+        for bad in ["x/../../escaped", "a\\b", ""] {
+            fs::write(&path, format!("ok\tACGTACGT\n{bad}\tTTTTAAAA\n")).unwrap();
+            let err = read_barcode_file(&path).unwrap_err().to_string();
+            assert!(
+                err.contains("line 2: sample name must be non-empty")
+                    && err.ends_with(&format!("Got: '{bad}'")),
+                "unexpected error for {bad:?}: {err}"
+            );
+        }
 
         fs::remove_dir_all(&dir).unwrap();
     }
