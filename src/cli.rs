@@ -664,6 +664,19 @@ impl Cli {
             self.validate_paired_input("Paired-end")?;
         }
 
+        // These modes name their output after each input and never consult --basename.
+        if self.basename.is_some()
+            && (self.hardtrim5.is_some()
+                || self.hardtrim3.is_some()
+                || self.clock
+                || self.implicon.is_some())
+        {
+            anyhow::bail!(
+                "--basename is not supported with --hardtrim5, --hardtrim3, --clock or \
+                 --implicon (their output is always named after the input file)"
+            );
+        }
+
         if !self.paired && self.input.len() > 1 && self.basename.is_some() {
             anyhow::bail!(
                 "--basename cannot be used with multiple input files (ambiguous output naming)"
@@ -1431,6 +1444,24 @@ mod tests {
             err.contains("basename cannot be used with multiple"),
             "expected multi-pair basename rejection, got: {err}"
         );
+    }
+
+    #[test]
+    fn test_validate_basename_rejected_with_specialty_modes() {
+        for mode in [
+            vec!["--hardtrim5", "20", R1],
+            vec!["--hardtrim3", "20", R1],
+            vec!["--clock", R1, R2],
+            vec!["--implicon", "8", R1, R2],
+        ] {
+            let mut argv = vec!["trim_galore", "--basename", "foo"];
+            argv.extend(mode.iter().copied());
+            let err = Cli::parse_from(&argv).validate().unwrap_err().to_string();
+            assert!(
+                err.contains("--basename is not supported with --hardtrim5"),
+                "expected specialty-mode basename rejection for {argv:?}, got: {err}"
+            );
+        }
     }
 
     #[test]
