@@ -105,6 +105,23 @@ fn header_minus_pg(path: &Path) -> String {
 ///
 /// Fixture regen: see `test_files/README.md` "uBAM output reference
 /// fixtures" section.
+/// `count` reads named `@r<N>`, 40 bp and adapter-free so they pass the filters
+/// unchanged. `long_name` makes the read at that index carry a name of the given
+/// byte length instead.
+fn write_numbered_fastq(path: &Path, count: usize, long_name: Option<(usize, usize)>) {
+    use std::fmt::Write as _;
+    const SEQ: &str = "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACT";
+    let mut text = String::with_capacity(count * 96);
+    for i in 0..count {
+        let name = match long_name {
+            Some((idx, len)) if idx == i => "n".repeat(len),
+            _ => format!("r{i}"),
+        };
+        writeln!(text, "@{name}\n{SEQ}\n+\n{}", "I".repeat(SEQ.len())).unwrap();
+    }
+    std::fs::write(path, text).unwrap();
+}
+
 fn assert_ubam_eq(actual: &Path, expected: &Path) {
     let actual_hdr = header_minus_pg(actual);
     let expected_hdr = header_minus_pg(expected);
@@ -308,31 +325,73 @@ fn ubam_out_hardtrim5_writes_bam() {
 }
 
 #[test]
-fn ubam_out_cores_gt_1_warns_and_proceeds() {
-    // PLAN §9 row: `--cores N>1` + uBAM-out must warn ("ignored") and
-    // STILL PRODUCE a valid output BAM. Code-review AGREE-2 row.
+fn ubam_out_cores_gt_1_matches_single_core_across_batches() {
+    // The reader batches at 4096 records, so a fixture has to exceed that
+    // several times over before the worker pool has any order to get wrong.
     let dir = fresh_tmpdir("tg_int_ubam_out_cores");
+    let input = dir.join("many.fq");
+    write_numbered_fastq(&input, 12_000, None);
+
+    let mut outs = Vec::new();
+    for cores in ["1", "4"] {
+        let out_dir = dir.join(format!("c{cores}"));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let output = Command::new(binary())
+            .args(["--cores", cores, "--output-format", "ubam", "--no_poly_g"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&out_dir)
+            .output()
+            .expect("trim_galore failed to run");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "--cores {cores}: stderr={stderr}");
+        assert!(
+            !stderr.contains("ignored"),
+            "--cores {cores} must not be reported as ignored: {stderr}"
+        );
+        outs.push(out_dir.join("many_trimmed.bam"));
+    }
+
+    // Same records, same order. A pool that published batches out of order,
+    // dropped one or duplicated one fails here rather than on a count.
+    assert_ubam_eq(&outs[1], &outs[0]);
+    assert_eq!(
+        bam_tuples(&outs[1]).len(),
+        12_000,
+        "every record must survive the pool"
+    );
+}
+
+/// A run that fails part-way at `--cores > 1` must publish nothing: the sink
+/// writes to a temporary and renames only on success, so a file already at the
+/// output name is still there afterwards.
+#[test]
+fn ubam_out_cores_gt_1_failure_leaves_existing_output_untouched() {
+    let dir = fresh_tmpdir("tg_int_ubam_out_cores_fail");
+    let input = dir.join("many.fq");
+    // A 300-byte read name in the second batch: BAM allows 1-254, so the
+    // encoder rejects it once ~4096 records have already been written.
+    write_numbered_fastq(&input, 8_000, Some((5_000, 300)));
+
+    let out = dir.join("many_trimmed.bam");
+    std::fs::write(&out, b"not a bam, but it was here first").unwrap();
+
     let output = Command::new(binary())
-        .args(["--cores", "4", "--output-format", "ubam"])
-        .arg("test_files/ubam_test.bam")
+        .args(["--cores", "4", "--output-format", "ubam", "--no_poly_g"])
+        .arg(&input)
         .arg("-o")
         .arg(&dir)
         .output()
         .expect("trim_galore failed to run");
-    assert!(
-        output.status.success(),
-        "--cores 4 + uBAM should succeed (with warning); stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("ignored"),
-        "expected '--cores ignored' note in stderr, got: {}",
-        stderr
+        !output.status.success(),
+        "the over-long read name must fail the run; stderr={stderr}"
     );
-    assert!(
-        dir.join("ubam_test_trimmed.bam").exists(),
-        "expected output BAM to still be produced"
+    assert_eq!(
+        std::fs::read(&out).unwrap(),
+        b"not a bam, but it was here first",
+        "a failed run must leave the file that was already there: {stderr}"
     );
 }
 
