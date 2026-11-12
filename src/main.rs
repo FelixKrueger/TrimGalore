@@ -303,7 +303,15 @@ fn main() -> Result<()> {
     // clap surfaces the help/version outcomes as `Err`, so intercept those three
     // kinds and route them to stdout with a success code; genuine usage errors
     // keep clap's default stderr + non-zero behaviour.
-    let cli = match Cli::try_parse_from(rewrite_perl_short_flags(std::env::args())) {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // Command-line as seen by the user (pre-clap-rewrite), for the reports and
+    // the uBAM `@PG CL:`. Lossy because a file name need not be UTF-8.
+    let command_line = args
+        .iter()
+        .map(|a| a.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cli = match Cli::try_parse_from(rewrite_perl_short_flags(args)) {
         Ok(cli) => cli,
         Err(err) => {
             use clap::error::ErrorKind::{
@@ -320,11 +328,6 @@ fn main() -> Result<()> {
         }
     };
     cli.validate()?;
-
-    // Command-line as seen by the user (pre-clap-rewrite). Used by the
-    // uBAM-output path to populate `@PG CL:`; consumed by the FASTQ path's
-    // report writers via their own inline `std::env::args().collect(...)`.
-    let command_line = std::env::args().collect::<Vec<_>>().join(" ");
 
     // Input sanity check on first file
     eprintln!("\nTrim Galore v{}", env!("CARGO_PKG_VERSION"));
@@ -1021,6 +1024,7 @@ fn main() -> Result<()> {
             gzip,
             &adapters_r1,
             &adapters_r2,
+            &command_line,
         )?;
         return Ok(());
     }
@@ -1132,6 +1136,7 @@ fn main() -> Result<()> {
                 cli.basename.as_deref(),
                 &adapters_r1,
                 &adapters_r2,
+                &command_line,
             )
             .with_context(|| {
                 format!(
@@ -1171,7 +1176,15 @@ fn main() -> Result<()> {
                 sanity_check_any(input)?;
             }
             let (_label, adapters_r1, _, config) = setup_trimming(&cli, input)?;
-            run_single_file(&cli, input, &config, gzip, output_dir, &adapters_r1)?;
+            run_single_file(
+                &cli,
+                input,
+                &config,
+                gzip,
+                output_dir,
+                &adapters_r1,
+                &command_line,
+            )?;
         }
     }
 
@@ -1492,6 +1505,7 @@ fn run_single_file(
     gzip: bool,
     output_dir: Option<&Path>,
     adapters_r1: &[(String, String)],
+    command_line: &str,
 ) -> Result<()> {
     let output_path =
         naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip);
@@ -1609,7 +1623,7 @@ fn run_single_file(
             phred_encoding: cli.phred_offset(),
             poly_a: cli.poly_a,
             poly_g: config.poly_g,
-            command_line: std::env::args().collect::<Vec<_>>().join(" "),
+            command_line: command_line.to_string(),
             input_filename: input_filename.clone(),
             input_filenames: vec![input_filename.clone()],
             library: Some(cli.effective_clips()),
@@ -1683,6 +1697,7 @@ fn run_paired(
     basename: Option<&str>,
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
+    command_line: &str,
 ) -> Result<()> {
     let (output_r1, output_r2) =
         naming::paired_end_output_names(input_r1, input_r2, output_dir, basename, gzip);
@@ -1956,6 +1971,7 @@ fn run_paired(
             adapters_r1,
             adapters_r2,
             passthrough,
+            command_line,
         )?;
     }
 
@@ -2009,6 +2025,7 @@ fn run_paired_ubam_single_file(
     gzip: bool,
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
+    command_line: &str,
 ) -> Result<()> {
     let output_r1 = outputs.val_1.clone();
     let output_r2 = outputs.val_2.clone();
@@ -2171,6 +2188,7 @@ fn run_paired_ubam_single_file(
             adapters_r1,
             adapters_r2,
             None,
+            command_line,
         )?;
     }
 
@@ -2593,6 +2611,7 @@ fn run_ubam_output_paired_two_files(
             adapters_r1,
             adapters_r2,
             None, // --passthrough rejected upstream
+            command_line,
         )?;
     }
 
@@ -2713,6 +2732,7 @@ fn run_ubam_output_paired_single_file(
             adapters_r1,
             adapters_r2,
             None,
+            command_line,
         )?;
     }
 
@@ -2769,6 +2789,7 @@ fn write_paired_reports(
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
     passthrough: Option<(&Path, &Path)>,
+    command_line: &str,
 ) -> Result<()> {
     for (idx, (stats, descriptor)) in [(stats_r1, &r1), (stats_r2, &r2)].iter().enumerate() {
         let report_cfg = report::TrimConfig {
@@ -2790,7 +2811,7 @@ fn write_paired_reports(
             phred_encoding: cli.phred_offset(),
             poly_a: cli.poly_a,
             poly_g: config.poly_g,
-            command_line: std::env::args().collect::<Vec<_>>().join(" "),
+            command_line: command_line.to_string(),
             input_filename: descriptor.input_filename.clone(),
             input_filenames: all_input_filenames.to_vec(),
             library: Some(cli.effective_clips()),
