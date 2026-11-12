@@ -814,10 +814,25 @@ fn parse_tag_value(type_code: u8, raw: &str) -> Result<BufValue> {
             Ok(BufValue::Character(c))
         }
         b'Z' => Ok(BufValue::from(raw)),
-        b'i' => raw
-            .parse::<i32>()
-            .map(BufValue::Int32)
-            .map_err(|e| anyhow::anyhow!("invalid i: tag value {:?}: {}", raw, e)),
+        // The read side writes every BAM integer width (Int8..UInt32) as `i:`, so accept
+        // the union of their ranges: Int32 where it fits, UInt32 above i32::MAX.
+        b'i' => {
+            let v = raw
+                .parse::<i64>()
+                .map_err(|e| anyhow::anyhow!("invalid i: tag value {:?}: {}", raw, e))?;
+            if let Ok(v) = i32::try_from(v) {
+                Ok(BufValue::Int32(v))
+            } else if let Ok(v) = u32::try_from(v) {
+                Ok(BufValue::UInt32(v))
+            } else {
+                bail!(
+                    "i: tag value {} is outside the BAM integer range ({}..={})",
+                    v,
+                    i32::MIN,
+                    u32::MAX
+                )
+            }
+        }
         b'f' => raw
             .parse::<f32>()
             .map(BufValue::Float)
@@ -946,7 +961,7 @@ fn reject_framing_in_tag_value(text: &str) -> Result<()> {
 /// - Must be unmapped (`is_unmapped()` true; per-record check resolves
 ///   PLAN-REVIEW B-Crit-4 first-record-only contradiction).
 /// - Must NOT be reverse-complemented / secondary / supplementary.
-/// - Sequence must be non-empty; IUPAC codes coerced to N on read, `=` rejected.
+/// - Sequence may be empty (`SEQ = *`); IUPAC codes coerced to N on read, `=` rejected.
 /// - Qual length must match seq length (or be all-`0xFF` / empty — missing).
 fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord> {
     let flags = rec.flags();
@@ -1004,10 +1019,8 @@ fn bam_record_to_fastq(rec: &bam::Record, tags: &[String]) -> Result<FastqRecord
     }
 
     // Sequence — decode each byte (already ASCII per noodles' `Sequence::iter`).
+    // `SEQ = *` decodes as empty and becomes an empty FASTQ read, as the FASTQ path allows.
     let seq_view = rec.sequence();
-    if seq_view.is_empty() {
-        bail!("BAM record has empty sequence");
-    }
     let mut seq = String::with_capacity(seq_view.len());
     let mut iupac_seen = false;
     for base in seq_view.iter() {
@@ -1418,6 +1431,63 @@ mod tests {
             panic!("expected i (BufValue::Int32) variant");
         };
         assert_eq!(*n, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn i_tag_above_i32_max_round_trips_and_out_of_range_rejected() -> Result<()> {
+        // The read side writes a UInt32 tag as `i:`; the writer must take it back.
+        let dir = tempfile::tempdir()?;
+        let out = dir.path().join("uint32_tag.bam");
+        let id = "@read1\tXN:i:3000000000\tXM:i:-2147483648";
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore uint32 test", 33)?;
+        w.write_record(
+            &FastqRecord {
+                id: id.to_string(),
+                seq: "ACGT".to_string(),
+                qual: "IIII".to_string(),
+            },
+            None,
+        )?;
+        w.finish()?;
+        let mut r =
+            BamReader::open(&out)?.with_preserved_tags(&["XN".to_string(), "XM".to_string()]);
+        assert_eq!(r.next_record()?.expect("record missing").id, id);
+
+        for raw in ["4294967296", "-2147483649"] {
+            let err = parse_name_and_data(&format!("@read1\tXN:i:{raw}")).unwrap_err();
+            assert!(
+                format!("{:#}", err).contains("outside the BAM integer range"),
+                "{raw}: {err:#}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn empty_sequence_record_reads_as_empty_fastq_read() -> Result<()> {
+        // `SEQ = *` / `QUAL = *` — a valid SAM record the FASTQ path would accept as `@r\n\n+\n\n`.
+        let dir = tempfile::tempdir()?;
+        let out = dir.path().join("empty_seq.bam");
+        let mut w = BamWriter::create(&out, None, &[], "trim_galore empty test", 33)?;
+        for (id, seq) in [("@empty", ""), ("@next", "ACGT")] {
+            w.write_record(
+                &FastqRecord {
+                    id: id.to_string(),
+                    seq: seq.to_string(),
+                    qual: "I".repeat(seq.len()),
+                },
+                None,
+            )?;
+        }
+        w.finish()?;
+        let mut r = BamReader::open(&out)?;
+        let rec = r.next_record()?.expect("record missing");
+        assert_eq!(
+            (rec.id.as_str(), rec.seq.as_str(), rec.qual.as_str()),
+            ("@empty", "", "")
+        );
+        assert_eq!(r.next_record()?.expect("second record missing").seq, "ACGT");
         Ok(())
     }
 
