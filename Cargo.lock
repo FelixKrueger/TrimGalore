@@ -1715,8 +1715,6 @@ dependencies = [
  "fastqc-rust",
  "flate2",
  "gzp",
- "log",
- "memchr",
  "mimalloc",
  "noodles",
  "serde_json",
