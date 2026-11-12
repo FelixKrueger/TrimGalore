@@ -510,7 +510,10 @@ impl FastqReader {
                         }
                     }
                     Ok(Err(e)) => Err(e),
-                    Err(_) => Ok(None), // channel closed
+                    // Every producer exit sends the empty-batch marker or an
+                    // `Err` first, so a closed channel means the thread died
+                    // (panicked); treating it as EOF would publish short output.
+                    Err(_) => bail!("FASTQ reader thread ended without signalling end of input"),
                 }
             }
         }
@@ -1457,5 +1460,29 @@ mod tests {
         assert_eq!(reader.next_record()?.expect("record").id, "@r1");
         assert!(reader.next_record()?.is_none());
         Ok(())
+    }
+
+    /// A reader thread that dies (panics) drops its sender without the
+    /// empty-batch EOF marker; that must not look like a clean end of file.
+    #[test]
+    fn threaded_reader_closed_without_eof_marker_is_an_error() {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Vec<FastqRecord>>>(1);
+        tx.send(Ok(vec![FastqRecord {
+            id: "@r1".to_string(),
+            seq: "ACGT".to_string(),
+            qual: "IIII".to_string(),
+        }]))
+        .unwrap();
+        drop(tx);
+        let mut reader = FastqReader {
+            source: ReaderSource::Threaded {
+                rx,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                _handle: std::thread::spawn(|| {}),
+            },
+        };
+        assert_eq!(reader.next_record().unwrap().unwrap().id, "@r1");
+        assert!(reader.next_record().is_err());
     }
 }

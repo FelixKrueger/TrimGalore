@@ -498,7 +498,10 @@ impl BamReader {
                         }
                     }
                     Ok(Err(e)) => Err(e),
-                    Err(_) => Ok(None),
+                    // Every producer exit (single and paired) sends the
+                    // empty-batch marker or an `Err` first, so a closed channel
+                    // means the thread died (panicked), not EOF.
+                    Err(_) => bail!("BAM reader thread ended without signalling end of input"),
                 }
             }
         }
@@ -2074,5 +2077,23 @@ mod tests {
             "@PG ID:trim_galore must appear in synthesised header"
         );
         Ok(())
+    }
+
+    /// Same contract as the FASTQ reader: a producer that dies drops its
+    /// sender without the EOF marker, and the consumer must report it.
+    #[test]
+    fn threaded_reader_closed_without_eof_marker_is_an_error() {
+        let (tx, rx) = mpsc::sync_channel::<Result<Vec<FastqRecord>>>(1);
+        drop(tx);
+        let mut reader = BamReader {
+            source: BamReaderSource::Threaded {
+                rx,
+                buffer: Vec::new(),
+                buf_pos: 0,
+                _handle: spawn_noop_joinhandle(),
+            },
+            preserved_tags: Vec::new(),
+        };
+        assert!(reader.next_record().is_err());
     }
 }
