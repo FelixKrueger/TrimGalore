@@ -1,6 +1,6 @@
-//! The paired-end text report's "shorter than the length cutoff" line must
-//! count only length-cutoff removals. Pairs dropped for N content,
-//! `--max_length` or `--discard_untrimmed` are reported on their own lines.
+//! Each removal reason in the paired-end text report is counted under its own
+//! label: the length cutoff, N content and `--max_length` have a line each, and
+//! `--discard_untrimmed` removals appear under none of them.
 
 use std::path::Path;
 use std::process::Command;
@@ -65,6 +65,18 @@ fn pe_report_shorter_line_counts_only_length_removals() {
             report.contains(
                 "Number of sequence pairs removed because at least one read was shorter than the length cutoff (25.00%):\n                                      1\n"
             ),
+            "--cores {cores}:\n{report}"
+        );
+        // The over-length pair is reported on its own line, not under the
+        // length cutoff, and the line is emitted whatever the count.
+        assert!(
+            report.contains(
+                "Number of pairs removed for exceeding the maximum length (25.00%):\n                                      1\n"
+            ),
+            "--cores {cores}:\n{report}"
+        );
+        assert!(
+            report.contains("Number of pairs removed for N content (0.00%):"),
             "--cores {cores}:\n{report}"
         );
 
