@@ -30,8 +30,6 @@ clap = { version = "4", features = ["derive"] }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 gzp = { version = "2.0.3", default-features = false, features = ["deflate_rust"] }
 anyhow = "1"
-memchr = "2"
-log = "0.4"
 env_logger = "0.11"
 # Bundled FastQC integration, tracking Java FastQC 0.13.0. Exact-pinned: the
 # report is a tested output surface, so bumps are deliberate-test events.
