@@ -68,10 +68,10 @@
   ([#562](https://github.com/FelixKrueger/TrimGalore/pull/562)). Both were computed from the removal
   length, which can exceed the adapter, where Cutadapt's level off.
 
-- **The paired-end length-cutoff line counts only length removals**
-  ([#561](https://github.com/FelixKrueger/TrimGalore/pull/561)). It reported every removed pair
-  whatever the reason; the JSON gains `pairs_removed_too_short` beside the other sub-reasons, and
-  `pairs_removed` remains the total.
+- **Each paired-end removal reason is reported under its own label**
+  ([#561](https://github.com/FelixKrueger/TrimGalore/pull/561)). The length-cutoff line counted every
+  removed pair whatever the reason and `--max_length` removals had no line at all; the JSON gains
+  `pairs_removed_too_short` beside the other sub-reasons, and `pairs_removed` remains the total.
 
 - **`Unpaired read N kept` is no longer reported for reads that were never written**
   ([#544](https://github.com/FelixKrueger/TrimGalore/issues/544)). At `--cores >= 2` the parallel

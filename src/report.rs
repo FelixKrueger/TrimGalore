@@ -355,9 +355,9 @@ pub fn write_pair_validation_stats<W: Write>(
         format_number(stats.pairs_removed_too_short)
     )?;
 
-    // PE counterpart to the RUN-STATISTICS unconditional emission (#233).
-    // Always emit so MultiQC parsers see a consistent line shape regardless of
-    // whether N-content filtering rejected any pairs.
+    // PE counterpart to the RUN-STATISTICS unconditional emission (#233). Each
+    // reason is emitted whether or not it rejected a pair, so parsers see a
+    // consistent line shape.
     writeln!(
         w,
         "Number of pairs removed for N content ({:.2}%):",
@@ -367,6 +367,16 @@ pub fn write_pair_validation_stats<W: Write>(
         w,
         "                             {:>10}",
         format_number(stats.pairs_removed_n)
+    )?;
+    writeln!(
+        w,
+        "Number of pairs removed for exceeding the maximum length ({:.2}%):",
+        percentage(stats.pairs_removed_too_long, stats.pairs_analyzed)
+    )?;
+    writeln!(
+        w,
+        "                             {:>10}",
+        format_number(stats.pairs_removed_too_long)
     )?;
 
     if stats.r1_unpaired > 0 || stats.r2_unpaired > 0 {
