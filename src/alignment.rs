@@ -81,18 +81,26 @@ pub fn find_3prime_adapter(
     // dp[i][j] = min edit distance to align adapter[0..i] against some suffix of read[0..j]
     // First row: dp[0][j] = 0 for all j (adapter can start anywhere — free read prefix skip)
     // First column: dp[i][0] = i (aligning i adapter bases to nothing costs i deletions)
-    let mut dp = vec![vec![0usize; n + 1]; m + 1];
-    for (i, row) in dp.iter_mut().enumerate().skip(1) {
-        row[0] = i;
+    // One flat row-major buffer (row stride `w`): a single allocation per
+    // alignment instead of `m + 1` row `Vec`s.
+    let w = n + 1;
+    let mut dp = vec![0usize; (m + 1) * w];
+    for i in 1..=m {
+        dp[i * w] = i;
     }
 
     for i in 1..=m {
+        // Row slices, so the inner loop indexes two short slices rather than
+        // recomputing `i * w + j` into the whole buffer.
+        let (above, rest) = dp.split_at_mut(i * w);
+        let prev = &above[(i - 1) * w..];
+        let cur = &mut rest[..w];
         for j in 1..=n {
             let cost_sub = if adapter[i - 1] == read[j - 1] { 0 } else { 1 };
 
-            dp[i][j] = (dp[i - 1][j - 1] + cost_sub) // match/mismatch
-                .min(dp[i - 1][j] + 1) // deletion (gap in read)
-                .min(dp[i][j - 1] + 1); // insertion (gap in adapter)
+            cur[j] = (prev[j - 1] + cost_sub) // match/mismatch
+                .min(prev[j] + 1) // deletion (gap in read)
+                .min(cur[j - 1] + 1); // insertion (gap in adapter)
         }
     }
 
@@ -111,17 +119,17 @@ pub fn find_3prime_adapter(
     let max_errors_full = ((m as u64 * rate_x_million) / 1_000_000) as usize;
     let mut best_full: Option<AdapterMatch> = None;
     for j in 1..=n {
-        if dp[m][j] <= max_errors_full {
-            let read_start = backtrace_start(&dp, adapter, read, m, j);
+        if dp[m * w + j] <= max_errors_full {
+            let read_start = backtrace_start(&dp, w, adapter, read, m, j);
             // Correct the error count: check the "natural" alignment end
             // (adapter starting at read_start with no net indels)
             let natural_end = read_start + m;
-            let errors = if natural_end <= n && dp[m][natural_end] <= max_errors_full {
-                dp[m][natural_end].min(dp[m][j])
+            let errors = if natural_end <= n && dp[m * w + natural_end] <= max_errors_full {
+                dp[m * w + natural_end].min(dp[m * w + j])
             } else {
-                dp[m][j]
+                dp[m * w + j]
             };
-            let read_end = if natural_end <= n && dp[m][natural_end] <= dp[m][j] {
+            let read_end = if natural_end <= n && dp[m * w + natural_end] <= dp[m * w + j] {
                 natural_end
             } else {
                 j
@@ -141,13 +149,13 @@ pub fn find_3prime_adapter(
     let max_partial = m.min(n);
     for i in (min_overlap..=max_partial).rev() {
         let max_errors = ((i as u64 * rate_x_million) / 1_000_000) as usize;
-        if dp[i][n] <= max_errors {
-            let read_start = backtrace_start(&dp, adapter, read, i, n);
+        if dp[i * w + n] <= max_errors {
+            let read_start = backtrace_start(&dp, w, adapter, read, i, n);
             best_partial = Some(AdapterMatch {
                 read_start,
                 read_end: n,
                 overlap: i,
-                errors: dp[i][n],
+                errors: dp[i * w + n],
             });
             break; // Longest valid = most trimming
         }
@@ -175,7 +183,8 @@ pub fn find_3prime_adapter(
 /// and deletion (gap in read) over insertion (gap in adapter). This gives
 /// the tightest alignment with the earliest start position.
 fn backtrace_start(
-    dp: &[Vec<usize>],
+    dp: &[usize],
+    w: usize,
     adapter: &[u8],
     read: &[u8],
     mut i: usize,
@@ -185,19 +194,19 @@ fn backtrace_start(
         // Prefer diagonal (match/mismatch) first
         if j > 0 {
             let cost = if adapter[i - 1] == read[j - 1] { 0 } else { 1 };
-            if dp[i][j] == dp[i - 1][j - 1] + cost {
+            if dp[i * w + j] == dp[(i - 1) * w + j - 1] + cost {
                 i -= 1;
                 j -= 1;
                 continue;
             }
         }
         // Then deletion (gap in read = adapter base not matched to any read base)
-        if dp[i][j] == dp[i - 1][j] + 1 {
+        if dp[i * w + j] == dp[(i - 1) * w + j] + 1 {
             i -= 1;
             continue;
         }
         // Then insertion (gap in adapter = extra read base consumed)
-        if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
+        if j > 0 && dp[i * w + j] == dp[i * w + j - 1] + 1 {
             j -= 1;
             continue;
         }

@@ -260,11 +260,11 @@ pub fn trim_read(record: &mut FastqRecord, config: &TrimConfig, is_r2: bool) -> 
 
     let mut clip_5prime_applied = false;
     if let Some(n) = clip_5 {
-        let clipped = record.clip_5prime(n);
-        clip_5prime_applied = clipped.is_some();
-        if config.rename
-            && let Some(seq) = clipped
-        {
+        let clipped = config
+            .rename
+            .then(|| record.seq.get(..n).unwrap_or_default().to_string());
+        clip_5prime_applied = record.clip_5prime(n);
+        if clip_5prime_applied && let Some(seq) = clipped {
             record.append_to_id(&format!(":clip5:{}", seq));
         }
     }

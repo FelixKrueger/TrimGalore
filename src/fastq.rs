@@ -105,16 +105,18 @@ impl FastqRecord {
         }
     }
 
-    /// Remove `n` bases from the 5' (left) end.
-    /// Returns the clipped sequence for --rename support.
-    pub fn clip_5prime(&mut self, n: usize) -> Option<String> {
+    /// Remove `n` bases from the 5' (left) end, in place.
+    /// Returns whether anything was clipped. Unlike `clip_3prime` it does not
+    /// return the clipped bases: this runs on every read under `--clip_R1/R2`
+    /// (and every RRBS R2), and only `--rename` needs them, so that caller
+    /// copies the prefix itself.
+    pub fn clip_5prime(&mut self, n: usize) -> bool {
         if n > 0 && self.seq.len() > n {
-            let clipped = self.seq[..n].to_string();
-            self.seq = self.seq[n..].to_string();
-            self.qual = self.qual[n..].to_string();
-            Some(clipped)
+            self.seq.drain(..n);
+            self.qual.drain(..n);
+            true
         } else {
-            None
+            false
         }
     }
 
@@ -1120,8 +1122,7 @@ mod tests {
             seq: "ACGTACGT".to_string(),
             qual: "IIIIIIII".to_string(),
         };
-        let clipped = rec.clip_5prime(3);
-        assert_eq!(clipped, Some("ACG".to_string()));
+        assert!(rec.clip_5prime(3));
         assert_eq!(rec.seq, "TACGT");
         assert_eq!(rec.qual, "IIIII");
     }
@@ -1147,7 +1148,7 @@ mod tests {
             qual: "III".to_string(),
         };
         // Clip amount >= seq length: no clipping
-        assert_eq!(rec.clip_5prime(3), None);
+        assert!(!rec.clip_5prime(3));
         assert_eq!(rec.clip_3prime(3), None);
         assert_eq!(rec.seq, "ACG");
     }
