@@ -300,7 +300,7 @@ pub fn clock(
                 let r1_fix = &r1.seq[8..12];
                 let r2_fix = &r2.seq[8..12];
 
-                // Count reads where fixed sequence is not CAGT
+                // Counted when either read lacks CAGT at the fixed position
                 if r1_fix != "CAGT" || r2_fix != "CAGT" {
                     filtered_count += 1;
                 }
@@ -339,7 +339,7 @@ pub fn clock(
     };
     eprintln!("\nSequences processed in total: {}", count);
     eprintln!(
-        "thereof had fixed sequence CAGT in both R1 and R2: {} ({}%)\n",
+        "thereof lacked the fixed sequence CAGT in R1 or R2: {} ({}%)\n",
         filtered_count, perc
     );
 
