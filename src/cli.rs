@@ -495,18 +495,20 @@ fn parse_sam_tag_name(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
-pub fn rewrite_perl_short_flags<I>(args: I) -> Vec<String>
+pub fn rewrite_perl_short_flags<I>(args: I) -> Vec<std::ffi::OsString>
 where
-    I: IntoIterator<Item = String>,
+    I: IntoIterator<Item = std::ffi::OsString>,
 {
     args.into_iter()
         .map(|a| {
-            if a == "-r1" || a.starts_with("-r1=") {
-                format!("--r1{}", &a[3..])
-            } else if a == "-r2" || a.starts_with("-r2=") {
-                format!("--r2{}", &a[3..])
-            } else if a == "-a2" || a.starts_with("-a2=") {
-                format!("--a2{}", &a[3..])
+            // A non-UTF-8 token can't be one of these flags; pass it on for clap to judge.
+            let Some(s) = a.to_str() else { return a };
+            if s == "-r1" || s.starts_with("-r1=") {
+                format!("--r1{}", &s[3..]).into()
+            } else if s == "-r2" || s.starts_with("-r2=") {
+                format!("--r2{}", &s[3..]).into()
+            } else if s == "-a2" || s.starts_with("-a2=") {
+                format!("--a2{}", &s[3..]).into()
             } else {
                 a
             }
@@ -1583,8 +1585,27 @@ mod tests {
 
     // ── Perl-migration short-flag rewrite (-r1 → --r1, -r2 → --r2) ──
 
-    fn rewrite(args: &[&str]) -> Vec<String> {
-        super::rewrite_perl_short_flags(args.iter().map(|s| s.to_string()))
+    fn rewrite(args: &[&str]) -> Vec<std::ffi::OsString> {
+        super::rewrite_perl_short_flags(args.iter().map(|s| s.into()))
+    }
+
+    /// A token that is not UTF-8 cannot be one of the rewritten flags, and has
+    /// to reach clap with its bytes intact rather than lossily repaired.
+    #[test]
+    #[cfg(unix)]
+    fn test_rewrite_passes_non_utf8_tokens_through_unchanged() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let bad = OsStr::from_bytes(b"\xff.fq").to_os_string();
+        let out = super::rewrite_perl_short_flags(vec![
+            OsStr::from_bytes(b"trim_galore").to_os_string(),
+            OsStr::from_bytes(b"-r1").to_os_string(),
+            bad.clone(),
+        ]);
+        assert_eq!(out[1], std::ffi::OsString::from("--r1"));
+        assert_eq!(out[2], bad);
+        assert_eq!(out[2].as_bytes(), b"\xff.fq");
     }
 
     #[test]
