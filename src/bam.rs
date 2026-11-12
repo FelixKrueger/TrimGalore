@@ -410,6 +410,7 @@ impl BamReader {
                 rx,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: spawn_noop_joinhandle(),
             },
             preserved_tags: preserve_tags.to_vec(),
@@ -476,6 +477,7 @@ impl BamReader {
                 rx,
                 buffer: Vec::new(),
                 buf_pos: 0,
+                eof: false,
                 _handle: spawn_noop_joinhandle(),
             },
             preserved_tags: preserve_tags.to_vec(),
@@ -1107,7 +1109,10 @@ impl BatchEncoder {
 /// uBAM sink for the multithreaded path: batches of already-encoded BAM records are written in
 /// order and compressed to BGZF by a pool of threads (`noodles` multithreaded writer).
 pub struct ParallelBamSink {
+    /// Declared before `pending` so the BGZF stream is closed before the
+    /// temporary is removed on the abandon path.
     inner: bgzf::MultithreadedWriter<BufWriter<File>>,
+    pending: Option<crate::io::PendingOutput>,
     header: Header,
 }
 
@@ -1121,8 +1126,7 @@ impl ParallelBamSink {
     ) -> Result<Self> {
         let path = path.as_ref();
         let header = build_output_header(source_header, command_line)?;
-        let file = File::create(path)
-            .with_context(|| format!("Failed to create uBAM output: {}", path.display()))?;
+        let (pending, file) = crate::io::PendingOutput::create(path)?;
         let workers = std::num::NonZeroUsize::new(workers.max(1)).expect("at least one");
         let mut inner = bgzf::multithreaded_writer::Builder::default()
             .set_worker_count(workers)
@@ -1133,7 +1137,11 @@ impl ParallelBamSink {
             .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
         std::io::Write::write_all(&mut inner, &head.into_inner())
             .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
-        Ok(Self { inner, header })
+        Ok(Self {
+            inner,
+            pending: Some(pending),
+            header,
+        })
     }
 
     pub fn header(&self) -> &Header {
@@ -1145,12 +1153,18 @@ impl ParallelBamSink {
         std::io::Write::write_all(&mut self.inner, bytes).context("failed to write BAM records")
     }
 
-    /// Flush, stop the compression threads and write the BGZF EOF block.
+    /// Flush, stop the compression threads, write the BGZF EOF block and
+    /// publish the file under its final name.
     pub fn finish(mut self) -> Result<()> {
         self.inner
             .finish()
             .context("failed to finalise uBAM output (BGZF EOF marker)")?;
-        Ok(())
+        let pending = self.pending.take();
+        drop(self);
+        match pending {
+            Some(p) => p.commit(),
+            None => Ok(()),
+        }
     }
 }
 
