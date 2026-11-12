@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 
 use crate::bam::{BamWriter, peek_header};
-use crate::fastq::FastqWriter;
+use crate::fastq::{FastqRecord, FastqWriter};
 use crate::format::{InputFormat, detect_input_format};
 use crate::io as naming;
 
@@ -26,6 +26,31 @@ impl HardtrimEnd {
         match self {
             HardtrimEnd::Five => "5prime",
             HardtrimEnd::Three => "3prime",
+        }
+    }
+}
+
+/// Clip one read to `keep` bases from `end`; under `rename`, append the
+/// clipped-off bases to the read ID as `:clip5:`/`:clip3:`.
+fn apply_hardtrim(record: &mut FastqRecord, keep: usize, end: HardtrimEnd, rename: bool) {
+    if record.seq.len() <= keep {
+        return;
+    }
+    match end {
+        HardtrimEnd::Five => {
+            if rename {
+                let clipped = &record.seq[keep..];
+                record.append_to_id(&format!(":clip5:{}", clipped));
+            }
+            record.truncate(keep);
+        }
+        HardtrimEnd::Three => {
+            let start = record.seq.len() - keep;
+            if rename {
+                let clipped = &record.seq[..start];
+                record.append_to_id(&format!(":clip3:{}", clipped));
+            }
+            record.clip_5prime(start);
         }
     }
 }
@@ -56,13 +81,7 @@ pub fn hardtrim5(
 
     while let Some(mut record) = reader.next_record()? {
         count += 1;
-        if record.seq.len() > keep {
-            if rename {
-                let clipped = &record.seq[keep..];
-                record.append_to_id(&format!(":clip5:{}", clipped));
-            }
-            record.truncate(keep);
-        }
+        apply_hardtrim(&mut record, keep, HardtrimEnd::Five, rename);
         writer.write_record(&record)?;
     }
 
@@ -98,14 +117,7 @@ pub fn hardtrim3(
 
     while let Some(mut record) = reader.next_record()? {
         count += 1;
-        if record.seq.len() > keep {
-            let start = record.seq.len() - keep;
-            if rename {
-                let clipped = &record.seq[..start];
-                record.append_to_id(&format!(":clip3:{}", clipped));
-            }
-            record.clip_5prime(start);
-        }
+        apply_hardtrim(&mut record, keep, HardtrimEnd::Three, rename);
         writer.write_record(&record)?;
     }
 
@@ -158,13 +170,7 @@ pub fn hardtrim5_to_bam(
 
     while let Some(mut record) = reader.next_record()? {
         count += 1;
-        if record.seq.len() > keep {
-            if rename {
-                let clipped = &record.seq[keep..];
-                record.append_to_id(&format!(":clip5:{}", clipped));
-            }
-            record.truncate(keep);
-        }
+        apply_hardtrim(&mut record, keep, HardtrimEnd::Five, rename);
         writer.write_record(&record, None)?;
     }
 
@@ -210,14 +216,7 @@ pub fn hardtrim3_to_bam(
 
     while let Some(mut record) = reader.next_record()? {
         count += 1;
-        if record.seq.len() > keep {
-            let start = record.seq.len() - keep;
-            if rename {
-                let clipped = &record.seq[..start];
-                record.append_to_id(&format!(":clip3:{}", clipped));
-            }
-            record.clip_5prime(start);
-        }
+        apply_hardtrim(&mut record, keep, HardtrimEnd::Three, rename);
         writer.write_record(&record, None)?;
     }
 
