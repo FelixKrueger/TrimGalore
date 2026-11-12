@@ -720,257 +720,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if cli.clump_only {
-        warn_below_clumpify_floor(&cli);
-        // --clump_only: lossless reorder-only specialty mode. Feature #353.
-        // v1: FASTQ in/out. v2: uBAM in/out via --output-format ubam.
-        let memory_bytes =
-            clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
-        let basename = cli.basename.as_deref();
-        match cli.output_format {
-            trim_galore::cli::OutputFormat::Fastq => {
-                // v1 FASTQ dispatch, unchanged except for one v2 guard.
-                // Guard against B-C1 PANIC: --clump_only --paired with N=1
-                // (single BAM) reaches `run_specialty_paired`, which does
-                // `chunk[1]` on a length-1 chunk → index-out-of-bounds. The
-                // general N=1 carve-out at the top of main.rs allows this
-                // through because it exists for the trim uBAM path; here it
-                // must be rejected because the FASTQ output arm can't handle
-                // uBAM input (would drop aux tags) and no other N=1 shape
-                // makes sense under --paired.
-                if cli.paired && cli.input.len() == 1 {
-                    anyhow::bail!(
-                        "--clump_only --paired requires two FASTQ input files. \
-                         Single-file interleaved uBAM input needs --output-format ubam \
-                         (add `--output-format ubam` to the command line)."
-                    );
-                }
-                if cli.paired {
-                    run_specialty_paired(
-                        &cli,
-                        "--clump_only",
-                        // #391 — reports carry no _clumped_N discriminator; the hint's
-                        // --no_report_file remedy is the escape hatch when only they collide.
-                        Some(PAIRED_REPORT_HINT),
-                        |r1, r2| {
-                            let (o1, o2) = naming::clumped_paired_output_names(
-                                r1, r2, output_dir, basename, gzip,
-                            );
-                            let src =
-                                naming::OutputSource::Pair(r1.to_path_buf(), r2.to_path_buf());
-                            let mut v = vec![(o1, src.clone()), (o2, src)];
-                            let pair_dir = naming::pair_output_dir(r1, output_dir);
-                            v.extend(clump_report_candidates(
-                                cli.no_report_file,
-                                &[r1, r2],
-                                Some(&pair_dir),
-                            ));
-                            v
-                        },
-                        |r1, r2| {
-                            clump_only::clump_only_paired(
-                                r1,
-                                r2,
-                                output_dir,
-                                basename,
-                                gzip,
-                                cli.cores,
-                                memory_bytes,
-                                cli.compression,
-                                cli.fastqc_requested(),
-                                cli.fastqc_args.as_deref(),
-                                cli.phred64,
-                                cli.no_report_file,
-                            )
-                            .map(|_| ())
-                        },
-                    )?;
-                } else {
-                    // SE FASTQ pre-flight (issues #216, #383).
-                    let mut planned: Vec<naming::PlannedOutput> = cli
-                        .input
-                        .iter()
-                        .map(|input| {
-                            (
-                                naming::clumped_output_name(input, output_dir, basename, gzip),
-                                naming::OutputSource::Input(input.clone()),
-                            )
-                        })
-                        .collect();
-                    // #391 — reports join so the input check covers them too.
-                    planned.extend(clump_report_candidates(
-                        cli.no_report_file,
-                        &cli.input,
-                        output_dir,
-                    ));
-                    naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
-                    for input in &cli.input {
-                        clump_only::clump_only_single(
-                            input,
-                            output_dir,
-                            basename,
-                            gzip,
-                            cli.cores,
-                            memory_bytes,
-                            cli.compression,
-                            cli.fastqc_requested(),
-                            cli.fastqc_args.as_deref(),
-                            cli.phred64,
-                            cli.no_report_file,
-                        )?;
-                    }
-                }
-            }
-            trim_galore::cli::OutputFormat::UBam => {
-                // v2 uBAM dispatch. Format-guards for PE input shapes + explicit
-                // multi-pair iteration + collision pre-flight before opening any
-                // reader. Design details: PLAN_v2_ubam.md §Implementation outline
-                // step 2 + §Behavior "PE steps".
-                if cli.paired {
-                    if cli.input.len() == 1 {
-                        // Shape B: single interleaved uBAM. The "must be BAM"
-                        // check that used to live here was already unreachable —
-                        // its condition is a strict subset of the `--paired`
-                        // N=1 non-BAM guard in main() — and was retired with
-                        // #363. Retained note so the absence is intentional.
-                        let mut planned = vec![(
-                            naming::clumped_paired_bam_output_name(
-                                &cli.input[0],
-                                None,
-                                output_dir,
-                                basename,
-                            ),
-                            naming::OutputSource::Input(cli.input[0].clone()),
-                        )];
-                        // #391 — defensive symmetry: with one input the report (filename
-                        // plus a suffix) can never alias it; the arm keeps its siblings' shape.
-                        planned.extend(clump_report_candidates(
-                            cli.no_report_file,
-                            &cli.input,
-                            output_dir,
-                        ));
-                        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
-                        clump_only::clump_only_paired_to_bam_one_pair(
-                            &cli.input,
-                            output_dir,
-                            basename,
-                            cli.cores,
-                            memory_bytes,
-                            &cli.preserve_tags,
-                            &command_line,
-                            cli.fastqc_requested(),
-                            cli.fastqc_args.as_deref(),
-                            cli.no_report_file,
-                            cli.phred_offset(),
-                        )?;
-                    } else {
-                        // Shape A: two-file paired (multi-pair supported for N=2, 4, 6, …).
-                        // Two-BAM and mixed-format Shape A are rejected by
-                        // `reject_bam_format_mismatch_in_pair` in main(), which
-                        // runs before this dispatch (and before the pre-flight
-                        // below). This branch previously carried its own copy of
-                        // that check — the only one of the three that got the
-                        // two-BAM-vs-mixed distinction right, and the model for
-                        // the shared helper (#363).
-                        // Multi-pair collision pre-flight (case-folded per issue #216).
-                        let mut planned: Vec<naming::PlannedOutput> = Vec::new();
-                        for chunk in cli.input.chunks(2) {
-                            planned.push((
-                                naming::clumped_paired_bam_output_name(
-                                    &chunk[0],
-                                    Some(&chunk[1]),
-                                    output_dir,
-                                    basename,
-                                ),
-                                naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone()),
-                            ));
-                            // #391 — ONE report per pair, keyed on the pair's first input
-                            // (clump_only.rs writes clumping_report_name(inputs[0], …)).
-                            // Keyed on R1 already, so `pair_output_dir` moves nothing here;
-                            // routed through it so every paired site derives alike (#398).
-                            let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
-                            planned.extend(clump_report_candidates(
-                                cli.no_report_file,
-                                std::slice::from_ref(&chunk[0]),
-                                Some(&pair_dir),
-                            ));
-                        }
-                        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
-                        // Per-pair iteration. Mirrors the trim FASTQ multi-pair
-                        // shape (main.rs:651-669) with pair-progress banner +
-                        // per-pair sanity-checks + `.with_context()` error
-                        // wrapping so a failure at pair 3/5 identifies the pair.
-                        let total_pairs = cli.input.len() / 2;
-                        for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
-                            if total_pairs > 1 {
-                                eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
-                            }
-                            // Sanity-check each input before opening any reader.
-                            // R1 of pair 0 was already sanity-checked at main
-                            // entry (main.rs:153); skip that. R2 of pair 0 and
-                            // both files of every later pair need checking.
-                            if pair_idx > 0 {
-                                sanity_check_any(&chunk[0])?;
-                            }
-                            sanity_check_any(&chunk[1])?;
-                            clump_only::clump_only_paired_to_bam_one_pair(
-                                chunk,
-                                output_dir,
-                                basename,
-                                cli.cores,
-                                memory_bytes,
-                                &cli.preserve_tags,
-                                &command_line,
-                                cli.fastqc_requested(),
-                                cli.fastqc_args.as_deref(),
-                                cli.no_report_file,
-                                cli.phred_offset(),
-                            )
-                            .with_context(|| {
-                                format!(
-                                    "pair {} of {} ({} + {})",
-                                    pair_idx + 1,
-                                    total_pairs,
-                                    chunk[0].display(),
-                                    chunk[1].display()
-                                )
-                            })?;
-                        }
-                    }
-                } else {
-                    // SE BAM. Case-folded collision pre-flight across inputs.
-                    let mut planned: Vec<naming::PlannedOutput> = Vec::new();
-                    for input in &cli.input {
-                        planned.push((
-                            naming::clumped_bam_output_name(input, output_dir, basename),
-                            naming::OutputSource::Input(input.clone()),
-                        ));
-                    }
-                    // #391 — reports join so the input check covers them too.
-                    planned.extend(clump_report_candidates(
-                        cli.no_report_file,
-                        &cli.input,
-                        output_dir,
-                    ));
-                    naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
-                    for input in &cli.input {
-                        clump_only::clump_only_single_to_bam(
-                            input,
-                            output_dir,
-                            basename,
-                            cli.cores,
-                            memory_bytes,
-                            &cli.preserve_tags,
-                            &command_line,
-                            cli.fastqc_requested(),
-                            cli.fastqc_args.as_deref(),
-                            cli.no_report_file,
-                            cli.phred_offset(),
-                        )?;
-                    }
-                }
-            }
-        }
-        return Ok(());
+        return run_clump_only(&cli, output_dir, gzip, &command_line);
     }
 
     if cli.discard_untrimmed {
@@ -1028,164 +778,435 @@ fn main() -> Result<()> {
     }
 
     if cli.paired {
-        // Pre-flight across pairs before any I/O; see io::collision_key for the key.
-        let mut planned: Vec<naming::PlannedOutput> = Vec::new();
-        for chunk in cli.input.chunks(2) {
-            let (o1, o2) = naming::paired_end_output_names(
+        run_paired_trim(&cli, output_dir, gzip, &command_line)
+    } else {
+        run_single_end_trim(&cli, output_dir, gzip, &command_line)
+    }
+}
+
+/// `--clump_only` dispatch (FASTQ and uBAM output, SE and PE). Moved out of `main()`;
+/// every format guard and `ensure_output_dir` have already run there.
+fn run_clump_only(
+    cli: &Cli,
+    output_dir: Option<&Path>,
+    gzip: bool,
+    command_line: &str,
+) -> Result<()> {
+    warn_below_clumpify_floor(cli);
+    // --clump_only: lossless reorder-only specialty mode. Feature #353.
+    // v1: FASTQ in/out. v2: uBAM in/out via --output-format ubam.
+    let memory_bytes =
+        clump::parse_memory_size(&cli.memory).map_err(|e| anyhow::anyhow!("--memory: {e}"))?;
+    let basename = cli.basename.as_deref();
+    match cli.output_format {
+        trim_galore::cli::OutputFormat::Fastq => {
+            // v1 FASTQ dispatch, unchanged except for one v2 guard.
+            // Guard against B-C1 PANIC: --clump_only --paired with N=1
+            // (single BAM) reaches `run_specialty_paired`, which does
+            // `chunk[1]` on a length-1 chunk → index-out-of-bounds. The
+            // general N=1 carve-out at the top of main.rs allows this
+            // through because it exists for the trim uBAM path; here it
+            // must be rejected because the FASTQ output arm can't handle
+            // uBAM input (would drop aux tags) and no other N=1 shape
+            // makes sense under --paired.
+            if cli.paired && cli.input.len() == 1 {
+                anyhow::bail!(
+                    "--clump_only --paired requires two FASTQ input files. \
+                     Single-file interleaved uBAM input needs --output-format ubam \
+                     (add `--output-format ubam` to the command line)."
+                );
+            }
+            if cli.paired {
+                run_specialty_paired(
+                    cli,
+                    "--clump_only",
+                    // #391 — reports carry no _clumped_N discriminator; the hint's
+                    // --no_report_file remedy is the escape hatch when only they collide.
+                    Some(PAIRED_REPORT_HINT),
+                    |r1, r2| {
+                        let (o1, o2) =
+                            naming::clumped_paired_output_names(r1, r2, output_dir, basename, gzip);
+                        let src = naming::OutputSource::Pair(r1.to_path_buf(), r2.to_path_buf());
+                        let mut v = vec![(o1, src.clone()), (o2, src)];
+                        let pair_dir = naming::pair_output_dir(r1, output_dir);
+                        v.extend(clump_report_candidates(
+                            cli.no_report_file,
+                            &[r1, r2],
+                            Some(&pair_dir),
+                        ));
+                        v
+                    },
+                    |r1, r2| {
+                        clump_only::clump_only_paired(
+                            r1,
+                            r2,
+                            output_dir,
+                            basename,
+                            gzip,
+                            cli.cores,
+                            memory_bytes,
+                            cli.compression,
+                            cli.fastqc_requested(),
+                            cli.fastqc_args.as_deref(),
+                            cli.phred64,
+                            cli.no_report_file,
+                        )
+                        .map(|_| ())
+                    },
+                )?;
+            } else {
+                // SE FASTQ pre-flight (issues #216, #383).
+                let mut planned: Vec<naming::PlannedOutput> = cli
+                    .input
+                    .iter()
+                    .map(|input| {
+                        (
+                            naming::clumped_output_name(input, output_dir, basename, gzip),
+                            naming::OutputSource::Input(input.clone()),
+                        )
+                    })
+                    .collect();
+                // #391 — reports join so the input check covers them too.
+                planned.extend(clump_report_candidates(
+                    cli.no_report_file,
+                    &cli.input,
+                    output_dir,
+                ));
+                naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                for input in &cli.input {
+                    clump_only::clump_only_single(
+                        input,
+                        output_dir,
+                        basename,
+                        gzip,
+                        cli.cores,
+                        memory_bytes,
+                        cli.compression,
+                        cli.fastqc_requested(),
+                        cli.fastqc_args.as_deref(),
+                        cli.phred64,
+                        cli.no_report_file,
+                    )?;
+                }
+            }
+        }
+        trim_galore::cli::OutputFormat::UBam => {
+            // v2 uBAM dispatch. Format-guards for PE input shapes + explicit
+            // multi-pair iteration + collision pre-flight before opening any
+            // reader. Design details: PLAN_v2_ubam.md §Implementation outline
+            // step 2 + §Behavior "PE steps".
+            if cli.paired {
+                if cli.input.len() == 1 {
+                    // Shape B: single interleaved uBAM. The "must be BAM"
+                    // check that used to live here was already unreachable —
+                    // its condition is a strict subset of the `--paired`
+                    // N=1 non-BAM guard in main() — and was retired with
+                    // #363. Retained note so the absence is intentional.
+                    let mut planned = vec![(
+                        naming::clumped_paired_bam_output_name(
+                            &cli.input[0],
+                            None,
+                            output_dir,
+                            basename,
+                        ),
+                        naming::OutputSource::Input(cli.input[0].clone()),
+                    )];
+                    // #391 — defensive symmetry: with one input the report (filename
+                    // plus a suffix) can never alias it; the arm keeps its siblings' shape.
+                    planned.extend(clump_report_candidates(
+                        cli.no_report_file,
+                        &cli.input,
+                        output_dir,
+                    ));
+                    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                    clump_only::clump_only_paired_to_bam_one_pair(
+                        &cli.input,
+                        output_dir,
+                        basename,
+                        cli.cores,
+                        memory_bytes,
+                        &cli.preserve_tags,
+                        command_line,
+                        cli.fastqc_requested(),
+                        cli.fastqc_args.as_deref(),
+                        cli.no_report_file,
+                        cli.phred_offset(),
+                    )?;
+                } else {
+                    // Shape A: two-file paired (multi-pair supported for N=2, 4, 6, …).
+                    // Two-BAM and mixed-format Shape A are rejected by
+                    // `reject_bam_format_mismatch_in_pair` in main(), which
+                    // runs before this dispatch (and before the pre-flight
+                    // below). This branch previously carried its own copy of
+                    // that check — the only one of the three that got the
+                    // two-BAM-vs-mixed distinction right, and the model for
+                    // the shared helper (#363).
+                    // Multi-pair collision pre-flight (case-folded per issue #216).
+                    let mut planned: Vec<naming::PlannedOutput> = Vec::new();
+                    for chunk in cli.input.chunks(2) {
+                        planned.push((
+                            naming::clumped_paired_bam_output_name(
+                                &chunk[0],
+                                Some(&chunk[1]),
+                                output_dir,
+                                basename,
+                            ),
+                            naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone()),
+                        ));
+                        // #391 — ONE report per pair, keyed on the pair's first input
+                        // (clump_only.rs writes clumping_report_name(inputs[0], …)).
+                        // Keyed on R1 already, so `pair_output_dir` moves nothing here;
+                        // routed through it so every paired site derives alike (#398).
+                        let pair_dir = naming::pair_output_dir(&chunk[0], output_dir);
+                        planned.extend(clump_report_candidates(
+                            cli.no_report_file,
+                            std::slice::from_ref(&chunk[0]),
+                            Some(&pair_dir),
+                        ));
+                    }
+                    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                    // Per-pair iteration. Mirrors the trim FASTQ multi-pair
+                    // shape (main.rs:651-669) with pair-progress banner +
+                    // per-pair sanity-checks + `.with_context()` error
+                    // wrapping so a failure at pair 3/5 identifies the pair.
+                    let total_pairs = cli.input.len() / 2;
+                    for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
+                        if total_pairs > 1 {
+                            eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
+                        }
+                        // Sanity-check each input before opening any reader.
+                        // R1 of pair 0 was already sanity-checked at main
+                        // entry (main.rs:153); skip that. R2 of pair 0 and
+                        // both files of every later pair need checking.
+                        if pair_idx > 0 {
+                            sanity_check_any(&chunk[0])?;
+                        }
+                        sanity_check_any(&chunk[1])?;
+                        clump_only::clump_only_paired_to_bam_one_pair(
+                            chunk,
+                            output_dir,
+                            basename,
+                            cli.cores,
+                            memory_bytes,
+                            &cli.preserve_tags,
+                            command_line,
+                            cli.fastqc_requested(),
+                            cli.fastqc_args.as_deref(),
+                            cli.no_report_file,
+                            cli.phred_offset(),
+                        )
+                        .with_context(|| {
+                            format!(
+                                "pair {} of {} ({} + {})",
+                                pair_idx + 1,
+                                total_pairs,
+                                chunk[0].display(),
+                                chunk[1].display()
+                            )
+                        })?;
+                    }
+                }
+            } else {
+                // SE BAM. Case-folded collision pre-flight across inputs.
+                let mut planned: Vec<naming::PlannedOutput> = Vec::new();
+                for input in &cli.input {
+                    planned.push((
+                        naming::clumped_bam_output_name(input, output_dir, basename),
+                        naming::OutputSource::Input(input.clone()),
+                    ));
+                }
+                // #391 — reports join so the input check covers them too.
+                planned.extend(clump_report_candidates(
+                    cli.no_report_file,
+                    &cli.input,
+                    output_dir,
+                ));
+                naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                for input in &cli.input {
+                    clump_only::clump_only_single_to_bam(
+                        input,
+                        output_dir,
+                        basename,
+                        cli.cores,
+                        memory_bytes,
+                        &cli.preserve_tags,
+                        command_line,
+                        cli.fastqc_requested(),
+                        cli.fastqc_args.as_deref(),
+                        cli.no_report_file,
+                        cli.phred_offset(),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Paired-end FASTQ trim over two-file pairs: collision pre-flight across all pairs,
+/// then per-pair adapter detection and trimming.
+fn run_paired_trim(
+    cli: &Cli,
+    output_dir: Option<&Path>,
+    gzip: bool,
+    command_line: &str,
+) -> Result<()> {
+    // Pre-flight across pairs before any I/O; see io::collision_key for the key.
+    let mut planned: Vec<naming::PlannedOutput> = Vec::new();
+    for chunk in cli.input.chunks(2) {
+        let (o1, o2) = naming::paired_end_output_names(
+            &chunk[0],
+            &chunk[1],
+            output_dir,
+            cli.basename.as_deref(),
+            gzip,
+        );
+        // Uniform Pair for paired primaries (#397 decision C2): _val_1 takes its
+        // stem from R1 but its directory from R1 too, and _val_2 mixes both — naming
+        // one mate would encode a claim about which supplies the directory.
+        let pair_src = naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone());
+        let mut candidates = vec![(o1, pair_src.clone()), (o2, pair_src.clone())];
+        if cli.retain_unpaired {
+            let (u1, u2) = naming::unpaired_output_names(
                 &chunk[0],
                 &chunk[1],
                 output_dir,
                 cli.basename.as_deref(),
                 gzip,
             );
-            // Uniform Pair for paired primaries (#397 decision C2): _val_1 takes its
-            // stem from R1 but its directory from R1 too, and _val_2 mixes both — naming
-            // one mate would encode a claim about which supplies the directory.
-            let pair_src = naming::OutputSource::Pair(chunk[0].clone(), chunk[1].clone());
-            let mut candidates = vec![(o1, pair_src.clone()), (o2, pair_src.clone())];
-            if cli.retain_unpaired {
-                let (u1, u2) = naming::unpaired_output_names(
+            candidates.push((u1, pair_src.clone()));
+            candidates.push((u2, pair_src));
+        }
+        // --passthrough adds a third output path per pair. v1 only
+        // supports a single pair (Cli::validate enforces input.len() == 2
+        // when passthrough is set), so this either contributes zero or
+        // one extra candidate to the collision set.
+        if let Some(ref pt_input) = cli.passthrough {
+            candidates.push((
+                naming::passthrough_output_name(
                     &chunk[0],
-                    &chunk[1],
+                    pt_input,
                     output_dir,
                     cli.basename.as_deref(),
                     gzip,
-                );
-                candidates.push((u1, pair_src.clone()));
-                candidates.push((u2, pair_src));
-            }
-            // --passthrough adds a third output path per pair. v1 only
-            // supports a single pair (Cli::validate enforces input.len() == 2
-            // when passthrough is set), so this either contributes zero or
-            // one extra candidate to the collision set.
-            if let Some(ref pt_input) = cli.passthrough {
-                candidates.push((
-                    naming::passthrough_output_name(
-                        &chunk[0],
-                        pt_input,
-                        output_dir,
-                        cli.basename.as_deref(),
-                        gzip,
-                    ),
-                    naming::OutputSource::Input(pt_input.clone()),
-                ));
-            }
-            // #388 — report names carry no _val_ discriminator, so two inputs
-            // with distinct primaries can still collide on reports.
-            //
-            // `Input`, not `Pair`, even though the directory now comes from R1 (#398):
-            // two distinct sources on one path select the message that says which two
-            // inputs collided, where `Pair` would select the "list each input once"
-            // text — wrong advice when renaming one input does fix it.
-            if !cli.no_report_file {
-                for input in [&chunk[0], &chunk[1]] {
-                    let src = naming::OutputSource::Input(input.clone());
-                    let (txt, json) = naming::paired_report_names(input, &chunk[0], output_dir);
-                    candidates.push((txt, src.clone()));
-                    candidates.push((json, src));
-                }
-            }
-            planned.extend(candidates);
+                ),
+                naming::OutputSource::Input(pt_input.clone()),
+            ));
         }
-        naming::preflight_output_collisions(
-            &planned,
-            &guarded_inputs(&cli),
-            Some(PAIRED_REPORT_HINT),
-        )?;
-
-        // Adapter detection runs PER PAIR — intentional deviation from Perl
-        // v0.6.x (which detected once on $ARGV[0] at trim_galore:2455). Shell-
-        // glob invocations across mixed library types or 2-colour/4-colour
-        // chemistries are common enough that per-pair detection is the safer
-        // default. The header peek is microseconds per sample, so the cost is
-        // negligible on I/O-bound workloads. Symmetrical with the single-end
-        // loop below, which has always detected per file.
-        let total_pairs = cli.input.len() / 2;
-        for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
-            if total_pairs > 1 {
-                eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
+        // #388 — report names carry no _val_ discriminator, so two inputs
+        // with distinct primaries can still collide on reports.
+        //
+        // `Input`, not `Pair`, even though the directory now comes from R1 (#398):
+        // two distinct sources on one path select the message that says which two
+        // inputs collided, where `Pair` would select the "list each input once"
+        // text — wrong advice when renaming one input does fix it.
+        if !cli.no_report_file {
+            for input in [&chunk[0], &chunk[1]] {
+                let src = naming::OutputSource::Input(input.clone());
+                let (txt, json) = naming::paired_report_names(input, &chunk[0], output_dir);
+                candidates.push((txt, src.clone()));
+                candidates.push((json, src));
             }
-            // R1 of pair 0 was already sanity-checked at line 28; skip that.
-            // R2 of pair 0 and both files of every later pair need checking
-            // before setup_trimming reads the header.
-            if pair_idx > 0 {
-                sanity_check_any(&chunk[0])?;
-            }
-            sanity_check_any(&chunk[1])?;
-            // --passthrough: sanity-check the third file once (Cli::validate
-            // already enforces single-pair-only when passthrough is set).
-            // `sanity_check_any`, not `FastqReader::sanity_check`, so the
-            // passthrough path reaches the #379 restartability guard.
-            if pair_idx == 0
-                && let Some(ref pt_path) = cli.passthrough
-            {
-                sanity_check_any(pt_path)?;
-            }
-
-            let (_label, adapters_r1, adapters_r2, config) = setup_trimming(&cli, &chunk[0])?;
-
-            run_paired(
-                &cli,
-                &chunk[0],
-                &chunk[1],
-                &config,
-                gzip,
-                output_dir,
-                cli.basename.as_deref(),
-                &adapters_r1,
-                &adapters_r2,
-                &command_line,
-            )
-            .with_context(|| {
-                format!(
-                    "processing pair {} of {} (R1={}, R2={})",
-                    pair_idx + 1,
-                    total_pairs,
-                    chunk[0].display(),
-                    chunk[1].display()
-                )
-            })?;
         }
-    } else {
-        // Single-end: process each input file independently
-        // (matches Perl TrimGalore behavior of looping over all positional args)
-        // #383 — SE trim was the only trim path without the #216 pre-flight.
-        let planned: Vec<naming::PlannedOutput> = cli
-            .input
-            .iter()
-            .map(|input| {
-                (
-                    naming::single_end_output_name(
-                        input,
-                        output_dir,
-                        cli.basename.as_deref(),
-                        gzip,
-                    ),
-                    naming::OutputSource::Input(input.clone()),
-                )
-            })
-            .collect();
-        let mut planned = planned;
-        planned.extend(planned_secondary_outputs(&cli, output_dir, gzip)?);
-        naming::preflight_output_collisions(&planned, &guarded_inputs(&cli), None)?;
-        for (i, input) in cli.input.iter().enumerate() {
-            if i > 0 {
-                eprintln!("\n--------------------------------------------------");
-                sanity_check_any(input)?;
-            }
-            let (_label, adapters_r1, _, config) = setup_trimming(&cli, input)?;
-            run_single_file(
-                &cli,
-                input,
-                &config,
-                gzip,
-                output_dir,
-                &adapters_r1,
-                &command_line,
-            )?;
-        }
+        planned.extend(candidates);
     }
+    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), Some(PAIRED_REPORT_HINT))?;
 
+    // Adapter detection runs PER PAIR — intentional deviation from Perl
+    // v0.6.x (which detected once on $ARGV[0] at trim_galore:2455). Shell-
+    // glob invocations across mixed library types or 2-colour/4-colour
+    // chemistries are common enough that per-pair detection is the safer
+    // default. The header peek is microseconds per sample, so the cost is
+    // negligible on I/O-bound workloads. Symmetrical with the single-end
+    // loop below, which has always detected per file.
+    let total_pairs = cli.input.len() / 2;
+    for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
+        if total_pairs > 1 {
+            eprintln!("\n=== Pair {} of {} ===", pair_idx + 1, total_pairs);
+        }
+        // R1 of pair 0 was already sanity-checked at line 28; skip that.
+        // R2 of pair 0 and both files of every later pair need checking
+        // before setup_trimming reads the header.
+        if pair_idx > 0 {
+            sanity_check_any(&chunk[0])?;
+        }
+        sanity_check_any(&chunk[1])?;
+        // --passthrough: sanity-check the third file once (Cli::validate
+        // already enforces single-pair-only when passthrough is set).
+        // `sanity_check_any`, not `FastqReader::sanity_check`, so the
+        // passthrough path reaches the #379 restartability guard.
+        if pair_idx == 0
+            && let Some(ref pt_path) = cli.passthrough
+        {
+            sanity_check_any(pt_path)?;
+        }
+
+        let (_label, adapters_r1, adapters_r2, config) = setup_trimming(cli, &chunk[0])?;
+
+        run_paired(
+            cli,
+            &chunk[0],
+            &chunk[1],
+            &config,
+            gzip,
+            output_dir,
+            cli.basename.as_deref(),
+            &adapters_r1,
+            &adapters_r2,
+            command_line,
+        )
+        .with_context(|| {
+            format!(
+                "processing pair {} of {} (R1={}, R2={})",
+                pair_idx + 1,
+                total_pairs,
+                chunk[0].display(),
+                chunk[1].display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// Single-end FASTQ trim: collision pre-flight, then each input independently.
+fn run_single_end_trim(
+    cli: &Cli,
+    output_dir: Option<&Path>,
+    gzip: bool,
+    command_line: &str,
+) -> Result<()> {
+    // Single-end: process each input file independently
+    // (matches Perl TrimGalore behavior of looping over all positional args)
+    // #383 — SE trim was the only trim path without the #216 pre-flight.
+    let planned: Vec<naming::PlannedOutput> = cli
+        .input
+        .iter()
+        .map(|input| {
+            (
+                naming::single_end_output_name(input, output_dir, cli.basename.as_deref(), gzip),
+                naming::OutputSource::Input(input.clone()),
+            )
+        })
+        .collect();
+    let mut planned = planned;
+    planned.extend(planned_secondary_outputs(cli, output_dir, gzip)?);
+    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+    for (i, input) in cli.input.iter().enumerate() {
+        if i > 0 {
+            eprintln!("\n--------------------------------------------------");
+            sanity_check_any(input)?;
+        }
+        let (_label, adapters_r1, _, config) = setup_trimming(cli, input)?;
+        run_single_file(
+            cli,
+            input,
+            &config,
+            gzip,
+            output_dir,
+            &adapters_r1,
+            command_line,
+        )?;
+    }
     Ok(())
 }
 
