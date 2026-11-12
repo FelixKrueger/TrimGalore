@@ -259,9 +259,9 @@ pub fn demultiplex(
 
     eprintln!("Processed sequences from file >{trimmed_name}< in total: {total}");
 
-    // Build sorted summary (descending by count)
+    // Build sorted summary (descending by count, ties by barcode so the file is stable)
     let mut sorted_counts: Vec<_> = counts.iter().collect();
-    sorted_counts.sort_by(|a, b| b.1.cmp(a.1));
+    sorted_counts.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
 
     // Build sample name lookup for display (barcode → sample_name)
     let display_map: HashMap<&str, &str> = barcodes
@@ -356,6 +356,59 @@ mod tests {
                 e.barcode.escape_default()
             );
         }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Summary rows used to tie in `HashMap` order, so identical runs wrote
+    /// different files. Ties now sort by barcode (`NoCode` is a key too).
+    #[test]
+    fn test_demultiplex_summary_ties_sort_by_barcode() {
+        let dir = fresh_tmpdir("tg_demux_summary_order");
+        let trimmed = dir.join("input_trimmed.fq");
+        // One read for TTTT, one unmatched (AAAA) → NoCode; the rest stay at 0.
+        fs::write(
+            &trimmed,
+            "@a\nGGGGTTTT\n+\nIIIIIIII\n@b\nGGGGAAAA\n+\nIIIIIIII\n",
+        )
+        .unwrap();
+        let barcodes: Vec<BarcodeEntry> = [
+            "TTTT", "GGGG", "CCCC", "ACGT", "TGCA", "GATC", "CTAG", "AGCT",
+        ]
+        .iter()
+        .map(|bc| BarcodeEntry {
+            barcode: bc.to_string(),
+            sample_name: format!("s{bc}"),
+        })
+        .collect();
+
+        demultiplex(
+            &trimmed,
+            &barcodes,
+            false,
+            Some(&dir),
+            1,
+            crate::fastq::DEFAULT_GZIP_LEVEL,
+        )
+        .unwrap();
+
+        let summary =
+            fs::read_to_string(dir.join("input_trimmed_demultiplexing_summary.txt")).unwrap();
+        let rows: Vec<&str> = summary.lines().skip(2).take(9).collect();
+        assert_eq!(
+            rows,
+            [
+                "NoCode\tNoCode\t1",
+                "TTTT\tsTTTT\t1",
+                "ACGT\tsACGT\t0",
+                "AGCT\tsAGCT\t0",
+                "CCCC\tsCCCC\t0",
+                "CTAG\tsCTAG\t0",
+                "GATC\tsGATC\t0",
+                "GGGG\tsGGGG\t0",
+                "TGCA\tsTGCA\t0",
+            ]
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }
