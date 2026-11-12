@@ -1,5 +1,5 @@
-//! `--clock` summary line: the count is of pairs WITHOUT the fixed sequence
-//! CAGT in both reads, so the label must say so (Perl 0.6.11 said the opposite).
+//! `--clock` summary line: the count is of pairs lacking CAGT at the fixed
+//! position in R1 or R2.
 
 use std::process::Command;
 
@@ -24,9 +24,7 @@ fn clock_summary_labels_the_count_of_pairs_without_cagt() {
     );
     // 1073 of the 10000 pairs lack CAGT at bases 9-12 of R1 or R2.
     assert!(
-        stderr.contains(
-            "thereof did not have the fixed sequence CAGT in both R1 and R2: 1073 (10.73%)\n"
-        ),
+        stderr.contains("thereof lacked the fixed sequence CAGT in R1 or R2: 1073 (10.73%)\n"),
         "stderr: {stderr}"
     );
 }
