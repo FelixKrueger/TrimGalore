@@ -284,9 +284,8 @@ impl BamReader {
                         if !r1_queue.is_empty() && !r2_queue.is_empty() {
                             let fq1 = r1_queue.pop_front().unwrap();
                             let fq2 = r2_queue.pop_front().unwrap();
-                            // The id is `@QNAME` plus any `\t`-joined --preserve-tags tail.
-                            let name1 = fq1.id.split('\t').next().unwrap_or_default();
-                            let name2 = fq2.id.split('\t').next().unwrap_or_default();
+                            let name1 = qname_of(&fq1.id);
+                            let name2 = qname_of(&fq2.id);
                             if name1 != name2 {
                                 send_pair_err(
                                     &tx_r1,
@@ -298,8 +297,8 @@ impl BamReader {
                                          `samtools collate -O input.bam tmp > interleaved.bam`.",
                                         path_for_thread.display(),
                                         record_idx,
-                                        &name1[1..],
-                                        &name2[1..]
+                                        name1,
+                                        name2
                                     ),
                                 );
                                 return;
@@ -763,6 +762,13 @@ fn build_pg_map(version: &str, command_line: &str) -> Map<Program> {
 /// splitting on either is required for FASTQ-input → uBAM-output to
 /// produce a valid BAM. Remaining tab-separated fields parse as
 /// `TAG:TYPE:VALUE`; only A / Z / i / f scalar types are accepted.
+/// The QNAME alone. A `FastqRecord::id` here is `@QNAME` followed by any
+/// `\t`-joined `--preserve-tags` tail.
+fn qname_of(id: &str) -> &str {
+    let token = id.split('\t').next().unwrap_or_default();
+    token.strip_prefix('@').unwrap_or(token)
+}
+
 fn parse_name_and_data(id: &str) -> Result<(Vec<u8>, Data)> {
     let stripped = id.strip_prefix('@').unwrap_or(id);
     let (name_str, tail) = if let Some(pos) = stripped.find(['\t', ' ']) {
@@ -1741,6 +1747,16 @@ mod tests {
         assert!(r1r.next_record()?.is_none());
         assert!(r2r.next_record()?.is_none());
         Ok(())
+    }
+
+    #[test]
+    fn qname_of_strips_the_at_and_the_tag_tail() {
+        assert_eq!(qname_of("@A"), "A");
+        assert_eq!(qname_of("@A\tXN:i:1\tZZ:Z:x"), "A");
+        // An id that is empty, or carries no `@`, must not index past its end.
+        assert_eq!(qname_of(""), "");
+        assert_eq!(qname_of("@"), "");
+        assert_eq!(qname_of("A\tXN:i:1"), "A");
     }
 
     #[test]
