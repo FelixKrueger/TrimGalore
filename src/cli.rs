@@ -1589,6 +1589,25 @@ mod tests {
         super::rewrite_perl_short_flags(args.iter().map(|s| s.into()))
     }
 
+    /// A token that is not UTF-8 cannot be one of the rewritten flags, and has
+    /// to reach clap with its bytes intact rather than lossily repaired.
+    #[test]
+    #[cfg(unix)]
+    fn test_rewrite_passes_non_utf8_tokens_through_unchanged() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let bad = OsStr::from_bytes(b"\xff.fq").to_os_string();
+        let out = super::rewrite_perl_short_flags(vec![
+            OsStr::from_bytes(b"trim_galore").to_os_string(),
+            OsStr::from_bytes(b"-r1").to_os_string(),
+            bad.clone(),
+        ]);
+        assert_eq!(out[1], std::ffi::OsString::from("--r1"));
+        assert_eq!(out[2], bad);
+        assert_eq!(out[2].as_bytes(), b"\xff.fq");
+    }
+
     #[test]
     fn test_rewrite_r1_bare() {
         assert_eq!(
