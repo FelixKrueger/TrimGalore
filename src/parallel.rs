@@ -22,9 +22,9 @@ use std::sync::mpsc;
 
 use crate::clump::{self, ClumpLayout, MinimizerKey, canonical_minimizer, estimated_record_bytes};
 use crate::fastq::{FastqRecord, RecordSource};
-use crate::filters::{self, FilterResult, PairFilterResult, UnpairedLengths};
+use crate::filters::UnpairedLengths;
 use crate::report::{PairValidationStats, TrimStats};
-use crate::trimmer::{self, TrimConfig, update_adapter_stats};
+use crate::trimmer::{PairOutcome, SingleOutcome, TrimConfig, classify_paired, classify_single};
 
 /// Number of read pairs per batch sent to each worker.
 /// 4096 records × ~300 bytes ≈ 1.2 MB per batch — large enough to amortize
@@ -736,129 +736,6 @@ fn process_paired_batch(
     })
 }
 
-/// Outcome of trim+filter on a single read pair. Stats and the records
-/// themselves are mutated in-place by `classify_paired`; this enum just
-/// tells the caller what to *do* with the (now trimmed) records, so the
-/// inner loop can stay sink-agnostic.
-enum PairOutcome {
-    /// Pair passed all filters — write both records.
-    Pass,
-    /// Pair dropped (discard_untrimmed, too-many-N, too-long, or
-    /// too-short with no rescue side eligible).
-    Discarded,
-    /// Too-short pair with rescue eligibility per side. Caller writes
-    /// only the eligible record(s) to its respective unpaired sink.
-    Unpaired { r1_ok: bool, r2_ok: bool },
-}
-
-/// Trim + filter a single pair, mutating records and stats in place.
-/// Returns what the caller should do with the (now trimmed) records.
-/// Sink-agnostic: callers pick gzip writers, plain temp files, etc.
-#[allow(clippy::too_many_arguments)]
-fn classify_paired(
-    r1: &mut FastqRecord,
-    r2: &mut FastqRecord,
-    config: &TrimConfig,
-    stats_r1: &mut TrimStats,
-    stats_r2: &mut TrimStats,
-    pair_stats: &mut PairValidationStats,
-    unpaired: UnpairedLengths,
-) -> PairOutcome {
-    stats_r1.total_reads += 1;
-    stats_r2.total_reads += 1;
-    stats_r1.total_bp_processed += r1.seq.len();
-    stats_r2.total_bp_processed += r2.seq.len();
-    pair_stats.pairs_analyzed += 1;
-
-    let res_r1 = trimmer::trim_read(r1, config, false);
-    let res_r2 = trimmer::trim_read(r2, config, true);
-
-    stats_r1.bases_quality_trimmed += res_r1.quality_trimmed_bp;
-    stats_r2.bases_quality_trimmed += res_r2.quality_trimmed_bp;
-    update_adapter_stats(stats_r1, &res_r1);
-    update_adapter_stats(stats_r2, &res_r2);
-    if res_r1.rrbs_trimmed_3prime {
-        stats_r1.rrbs_trimmed_3prime += 1;
-    }
-    if res_r1.rrbs_trimmed_5prime {
-        stats_r1.rrbs_trimmed_5prime += 1;
-    }
-    if res_r2.rrbs_trimmed_3prime {
-        stats_r2.rrbs_trimmed_3prime += 1;
-    }
-    if res_r2.rrbs_trimmed_5prime {
-        stats_r2.rrbs_trimmed_5prime += 1;
-    }
-    if config.rrbs && res_r2.clip_5prime_applied {
-        stats_r2.rrbs_r2_clipped_5prime += 1;
-    }
-    if res_r1.poly_a_trimmed > 0 {
-        stats_r1.poly_a_trimmed += 1;
-        stats_r1.poly_a_bases_trimmed += res_r1.poly_a_trimmed;
-    }
-    if res_r2.poly_a_trimmed > 0 {
-        stats_r2.poly_a_trimmed += 1;
-        stats_r2.poly_a_bases_trimmed += res_r2.poly_a_trimmed;
-    }
-    if res_r1.poly_g_trimmed > 0 {
-        stats_r1.poly_g_trimmed += 1;
-        stats_r1.poly_g_bases_trimmed += res_r1.poly_g_trimmed;
-    }
-    if res_r2.poly_g_trimmed > 0 {
-        stats_r2.poly_g_trimmed += 1;
-        stats_r2.poly_g_bases_trimmed += res_r2.poly_g_trimmed;
-    }
-
-    if config.discard_untrimmed && !res_r1.had_adapter && !res_r2.had_adapter {
-        stats_r1.discarded_untrimmed += 1;
-        stats_r2.discarded_untrimmed += 1;
-        pair_stats.pairs_removed += 1;
-        return PairOutcome::Discarded;
-    }
-
-    // Post-adapter length, before RRBS/poly-X/N-trim/clipping, matching Perl v0.6.x (#232).
-    stats_r1.total_bp_after_trim += res_r1.bp_after_cutadapt;
-    stats_r2.total_bp_after_trim += res_r2.bp_after_cutadapt;
-
-    match filters::filter_paired_end(
-        r1,
-        r2,
-        config.length_cutoff,
-        config.max_length,
-        config.max_n.clone(),
-        unpaired,
-    ) {
-        PairFilterResult::Pass => {
-            stats_r1.total_bp_written += r1.seq.len();
-            stats_r2.total_bp_written += r2.seq.len();
-            stats_r1.reads_written += 1;
-            stats_r2.reads_written += 1;
-            PairOutcome::Pass
-        }
-        PairFilterResult::TooManyN => {
-            pair_stats.pairs_removed += 1;
-            pair_stats.pairs_removed_n += 1;
-            stats_r1.too_many_n += 1;
-            stats_r2.too_many_n += 1;
-            PairOutcome::Discarded
-        }
-        PairFilterResult::TooShort { r1_ok, r2_ok } => {
-            pair_stats.pairs_removed += 1;
-            pair_stats.pairs_removed_too_short += 1;
-            stats_r1.too_short += 1;
-            stats_r2.too_short += 1;
-            PairOutcome::Unpaired { r1_ok, r2_ok }
-        }
-        PairFilterResult::TooLong => {
-            pair_stats.pairs_removed += 1;
-            pair_stats.pairs_removed_too_long += 1;
-            stats_r1.too_long += 1;
-            stats_r2.too_long += 1;
-            PairOutcome::Discarded
-        }
-    }
-}
-
 /// Inner loop: trim + filter + write each read pair in a batch via
 /// `Write` sinks (gzip encoder or `Vec<u8>` for plain output).
 ///
@@ -1380,77 +1257,6 @@ fn process_single_batch(
         compressed: buf,
         stats,
     })
-}
-
-/// Outcome of trim+filter on a single single-end read. Like
-/// `PairOutcome` but unary — `Pass` means write the (trimmed) record,
-/// `Discarded` means drop it. Stats and the record are mutated in place
-/// by `classify_single`.
-enum SingleOutcome {
-    Pass,
-    Discarded,
-}
-
-/// Trim + filter a single record, mutating it and stats in place.
-/// Returns whether the caller should write it. Sink-agnostic.
-fn classify_single(
-    record: &mut FastqRecord,
-    config: &TrimConfig,
-    stats: &mut TrimStats,
-) -> SingleOutcome {
-    stats.total_reads += 1;
-    stats.total_bp_processed += record.seq.len();
-
-    let result = trimmer::trim_read(record, config, false);
-    stats.bases_quality_trimmed += result.quality_trimmed_bp;
-    update_adapter_stats(stats, &result);
-    if result.rrbs_trimmed_3prime {
-        stats.rrbs_trimmed_3prime += 1;
-    }
-    if result.rrbs_trimmed_5prime {
-        stats.rrbs_trimmed_5prime += 1;
-    }
-    if result.poly_a_trimmed > 0 {
-        stats.poly_a_trimmed += 1;
-        stats.poly_a_bases_trimmed += result.poly_a_trimmed;
-    }
-    if result.poly_g_trimmed > 0 {
-        stats.poly_g_trimmed += 1;
-        stats.poly_g_bases_trimmed += result.poly_g_trimmed;
-    }
-
-    if config.discard_untrimmed && !result.had_adapter {
-        stats.discarded_untrimmed += 1;
-        return SingleOutcome::Discarded;
-    }
-
-    // Post-adapter length, before RRBS/poly-X/N-trim/clipping, matching Perl v0.6.x (#232).
-    stats.total_bp_after_trim += result.bp_after_cutadapt;
-
-    match filters::filter_single_end(
-        record,
-        config.length_cutoff,
-        config.max_length,
-        config.max_n.clone(),
-    ) {
-        FilterResult::Pass => {
-            stats.total_bp_written += record.seq.len();
-            stats.reads_written += 1;
-            SingleOutcome::Pass
-        }
-        FilterResult::TooShort => {
-            stats.too_short += 1;
-            SingleOutcome::Discarded
-        }
-        FilterResult::TooLong => {
-            stats.too_long += 1;
-            SingleOutcome::Discarded
-        }
-        FilterResult::TooManyN => {
-            stats.too_many_n += 1;
-            SingleOutcome::Discarded
-        }
-    }
 }
 
 /// Inner loop: trim + filter + write each read in a batch via a
