@@ -414,7 +414,6 @@ mod tests {
             &barcodes,
             false,
             Some(&dir),
-            1,
             crate::fastq::DEFAULT_GZIP_LEVEL,
         )
         .unwrap();
