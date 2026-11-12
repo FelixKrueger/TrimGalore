@@ -327,7 +327,7 @@ impl FastqReader {
         let (tx, rx) = std::sync::mpsc::sync_channel(READER_CHANNEL_BATCHES);
 
         let handle = std::thread::spawn(move || {
-            let mut reader = match Self::open_direct(&path, is_gzip) {
+            let (mut reader, mut line_buf) = match Self::open_direct(&path, is_gzip) {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = tx.send(Err(e));
@@ -336,7 +336,7 @@ impl FastqReader {
             };
             let mut batch = Vec::with_capacity(READER_BATCH_SIZE);
             loop {
-                match Self::read_next_direct(&mut reader) {
+                match Self::read_next_direct(reader.as_mut(), &mut line_buf) {
                     Ok(Some(record)) => {
                         batch.push(record);
                         if batch.len() >= READER_BATCH_SIZE {
@@ -401,18 +401,30 @@ impl FastqReader {
         Ok((reader, String::with_capacity(512)))
     }
 
-    /// Internal: read one record from a direct reader (used by both Direct mode and threads).
+    /// Internal: read one record from a direct reader. The only FASTQ parser:
+    /// both Direct mode and the reader thread call it.
+    ///
+    /// Rejects anything that is not one 4-line record: the header must start
+    /// with '@', the third line with '+', and sequence and quality must be
+    /// ASCII and of equal length. The ASCII rule is what lets `clip_5prime`
+    /// and `--hardtrim5` slice by byte offset.
     fn read_next_direct(
-        state: &mut (Box<dyn BufRead + Send>, String),
+        reader: &mut dyn BufRead,
+        line_buf: &mut String,
     ) -> Result<Option<FastqRecord>> {
-        let (reader, line_buf) = state;
-
         // Line 1: ID (starts with @)
         line_buf.clear();
         if reader.read_line(line_buf)? == 0 {
             return Ok(None); // EOF
         }
         let id = line_buf.trim_end_matches(['\n', '\r']).to_string();
+        if !id.starts_with('@') {
+            bail!(
+                "Invalid FASTQ: expected a record header starting with '@', found '{}' \
+                 (multi-line FASTQ is not supported)",
+                id
+            );
+        }
 
         // Line 2: Sequence
         line_buf.clear();
@@ -426,6 +438,13 @@ impl FastqReader {
         if reader.read_line(line_buf)? == 0 {
             bail!("Truncated FASTQ: missing '+' line after {}", id);
         }
+        if !line_buf.starts_with('+') {
+            bail!(
+                "Invalid FASTQ: third line of record {} doesn't start with '+' \
+                 (multi-line FASTQ is not supported)",
+                id
+            );
+        }
 
         // Line 4: Quality
         line_buf.clear();
@@ -433,6 +452,17 @@ impl FastqReader {
             bail!("Truncated FASTQ: missing quality line after {}", id);
         }
         let qual = line_buf.trim_end_matches(['\n', '\r']).to_string();
+        if seq.len() != qual.len() {
+            bail!(
+                "Invalid FASTQ: record {} has {} sequence characters but {} quality characters",
+                id,
+                seq.len(),
+                qual.len()
+            );
+        }
+        if !seq.is_ascii() || !qual.is_ascii() {
+            bail!("Invalid FASTQ: record {} contains non-ASCII characters", id);
+        }
 
         Ok(Some(FastqRecord { id, seq, qual }))
     }
@@ -441,34 +471,7 @@ impl FastqReader {
     pub fn next_record(&mut self) -> Result<Option<FastqRecord>> {
         match &mut self.source {
             ReaderSource::Direct { reader, line_buf } => {
-                // Line 1: ID (starts with @)
-                line_buf.clear();
-                if reader.read_line(line_buf)? == 0 {
-                    return Ok(None); // EOF
-                }
-                let id = line_buf.trim_end_matches(['\n', '\r']).to_string();
-
-                // Line 2: Sequence
-                line_buf.clear();
-                if reader.read_line(line_buf)? == 0 {
-                    bail!("Truncated FASTQ: missing sequence line after {}", id);
-                }
-                let seq = line_buf.trim_end_matches(['\n', '\r']).to_string();
-
-                // Line 3: Plus line (discard)
-                line_buf.clear();
-                if reader.read_line(line_buf)? == 0 {
-                    bail!("Truncated FASTQ: missing '+' line after {}", id);
-                }
-
-                // Line 4: Quality
-                line_buf.clear();
-                if reader.read_line(line_buf)? == 0 {
-                    bail!("Truncated FASTQ: missing quality line after {}", id);
-                }
-                let qual = line_buf.trim_end_matches(['\n', '\r']).to_string();
-
-                Ok(Some(FastqRecord { id, seq, qual }))
+                Self::read_next_direct(reader.as_mut(), line_buf)
             }
             ReaderSource::Threaded {
                 rx,
@@ -547,20 +550,18 @@ impl FastqReader {
         let path = path.as_ref();
         let mut reader = FastqReader::open_with(path, is_gzip)?;
 
-        match reader.next_record()? {
+        let first = reader.next_record().with_context(|| {
+            format!(
+                "Failed to read the first record of input file '{}'",
+                path.display()
+            )
+        })?;
+        match first {
             None => bail!(
                 "Input file '{}' seems to be completely empty. Consider respecifying!",
                 path.display()
             ),
             Some(record) => {
-                // Check FASTQ format
-                if !record.id.starts_with('@') {
-                    bail!(
-                        "Input file '{}' doesn't seem to be in FastQ format (first line doesn't start with '@')",
-                        path.display()
-                    );
-                }
-
                 // Check for colorspace (digits in sequence = SOLiD format)
                 if record.seq.bytes().any(|b| b.is_ascii_digit()) {
                     bail!(
@@ -1519,5 +1520,66 @@ mod tests {
         assert_eq!(reader.next_record().unwrap().unwrap().id, "@r1");
         assert!(reader.next_record().unwrap().is_none());
         assert!(reader.next_record().unwrap().is_none());
+    }
+
+    /// Reads `content` to the end and returns the first error's message.
+    fn first_read_error(content: &[u8]) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("bad.fq");
+        std::fs::write(&p, content).unwrap();
+        let mut reader = FastqReader::open_with(&p, false).unwrap();
+        loop {
+            match reader.next_record() {
+                Ok(Some(_)) => continue,
+                Ok(None) => panic!("malformed FASTQ was read to EOF without an error"),
+                Err(e) => return format!("{e:#}"),
+            }
+        }
+    }
+
+    /// A wrapped (multi-line) FASTQ is caught by the '+' check, which lands on
+    /// a second sequence line.
+    #[test]
+    fn wrapped_fastq_is_rejected() {
+        let err = first_read_error(b"@r1\nACGT\nACGT\n+\nIIII\nIIII\n");
+        assert!(err.contains("doesn't start with '+'"), "{err}");
+        assert!(err.contains("@r1"), "error must name the record: {err}");
+    }
+
+    #[test]
+    fn header_without_at_is_rejected() {
+        let err = first_read_error(b"@r1\nACGT\n+\nIIII\nr2\nACGT\n+\nIIII\n");
+        assert!(
+            err.contains("starting with '@'") && err.contains("'r2'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn seq_qual_length_mismatch_is_rejected() {
+        let err = first_read_error(b"@r1\nACGTACGTAC\n+\nIIIIIII\n");
+        assert!(
+            err.contains("@r1 has 10 sequence characters but 7 quality"),
+            "{err}"
+        );
+    }
+
+    /// `é` is 2 bytes, so byte lengths can match ("AéT" vs "IIII") while the
+    /// sequence is not ASCII, and a byte-offset clip would split a character.
+    #[test]
+    fn non_ascii_sequence_is_rejected() {
+        let err = first_read_error("@r1\nA\u{e9}T\n+\nIIII\n".as_bytes());
+        assert!(err.contains("@r1 contains non-ASCII"), "{err}");
+    }
+
+    /// The reader thread runs the same parser and forwards its error.
+    #[test]
+    fn threaded_reader_rejects_malformed_record() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let p = dir.path().join("bad.fq");
+        std::fs::write(&p, b"@r1\nACGT\n+\nIII\n")?;
+        let mut reader = FastqReader::open_threaded_with(&p, false)?;
+        assert!(reader.next_record().is_err());
+        Ok(())
     }
 }
