@@ -18,7 +18,9 @@
 - **`--cores` now applies to uBAM input and output**
   ([#529](https://github.com/FelixKrueger/TrimGalore/pull/529)). Both directions ran single-threaded
   whatever the flag said; decoding, aux-tag extraction and BGZF compression now run on the worker
-  pool, at 4-5.4x wall-clock for 11-20% more CPU, with the output records in input order.
+  pool, at 4-5.4x wall-clock for 11-20% more CPU, with the output records in input order. uBAM
+  input converts its records on a pool of its own, so it runs 2N+4 threads at `--cores N` rather
+  than FASTQ input's N+4 ([#568](https://github.com/FelixKrueger/TrimGalore/issues/568)).
 
 - **A duplicate barcode in a `--demux` sample sheet is now refused**
   ([#553](https://github.com/FelixKrueger/TrimGalore/pull/553)). The second entry replaced the

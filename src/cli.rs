@@ -356,8 +356,10 @@ pub struct Cli {
 
     /// Number of worker threads for parallel processing (default: 1).
     /// At --cores 1 the worker-pool is bypassed (single thread, ~5 MB RAM).
-    /// From --cores 2 upward, an N+4 thread model applies: N workers + 2
-    /// decompressors + 1 batcher + 1 writer. Wall-clock speedup is near-linear
+    /// From --cores 2 upward, FASTQ input follows an N+4 thread model: N
+    /// workers + 2 decompressors + 1 batcher + 1 writer. uBAM input uses 2N+4:
+    /// its records are converted on N more threads, and a reader and a reorderer
+    /// take the place of the decompressors. Wall-clock speedup is near-linear
     /// up to --cores 8 for paired-end runs; beyond that, gzip-output I/O on
     /// the storage layer typically becomes binding before workers run out of
     /// useful per-read work, so additional cores help progressively less.
