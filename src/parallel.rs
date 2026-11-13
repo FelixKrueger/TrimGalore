@@ -338,11 +338,11 @@ pub fn run_paired_end_parallel(
 }
 // ─────────────────────── Paired-end, uBAM output ───────────────────────
 
-/// Result of one batch for the uBAM path: the BGZF-compressed BAM records of the pairs
+/// Result of one batch for the uBAM path: the encoded (uncompressed) BAM records of the pairs
 /// that passed, and the batch statistics.
 struct BamBatchResult {
     seq: u64,
-    bytes: Vec<u8>,
+    bytes: crate::bam::BgzfBlocks,
     stats_r1: TrimStats,
     stats_r2: TrimStats,
     pair_stats: PairValidationStats,
@@ -351,9 +351,8 @@ struct BamBatchResult {
 /// Paired-end trimming with uBAM output on `cores` worker threads.
 ///
 /// The workers trim, filter, encode and BGZF-compress the records of a batch. The main thread
-/// hands the compressed batches to the sink in input order, and the sink only appends them, so
-/// an I/O error comes back as `Err` (issue #542). The output has the same records, in the same order, as the
-/// serial `trimmer::run_paired_end_to_bam`.
+/// appends the batches to the sink in input order. The output has the same records, in the same
+/// order, as the serial `trimmer::run_paired_end_to_bam`.
 pub fn run_paired_end_parallel_to_bam(
     reader_r1: Box<dyn RecordSource>,
     reader_r2: Box<dyn RecordSource>,
@@ -419,7 +418,7 @@ pub fn run_paired_end_parallel_to_bam(
                 Ok(batch) => {
                     pending.insert(batch.seq, batch);
                     while let Some(r) = pending.remove(&expected) {
-                        if let Err(e) = sink.write_encoded(&r.bytes) {
+                        if let Err(e) = sink.write_compressed(&r.bytes) {
                             first_error = Some(e);
                             break 'outer;
                         }
@@ -453,13 +452,13 @@ pub fn run_paired_end_parallel_to_bam(
 /// Result of one batch of single-end reads for the uBAM path.
 struct SingleBamBatchResult {
     seq: u64,
-    bytes: Vec<u8>,
+    bytes: crate::bam::BgzfBlocks,
     stats: TrimStats,
 }
 
 /// Single-end trimming with uBAM output on `cores` worker threads. Same design as
 /// [`run_paired_end_parallel_to_bam`]: the workers trim, filter, encode and compress the batches,
-/// and the main thread hands them to the sink, which appends them in input order.
+/// and the main thread appends them to the sink in input order.
 pub fn run_single_end_parallel_to_bam(
     reader: Box<dyn RecordSource>,
     sink: &mut crate::bam::ParallelBamSink,
@@ -522,7 +521,7 @@ pub fn run_single_end_parallel_to_bam(
                 Ok(batch) => {
                     pending.insert(batch.seq, batch);
                     while let Some(r) = pending.remove(&expected) {
-                        if let Err(e) = sink.write_encoded(&r.bytes) {
+                        if let Err(e) = sink.write_compressed(&r.bytes) {
                             first_error = Some(e);
                             break 'outer;
                         }
@@ -566,7 +565,7 @@ fn process_single_batch_bam(
     }
     Ok(SingleBamBatchResult {
         seq: batch_seq,
-        bytes: enc.into_bgzf_blocks()?,
+        bytes: enc.into_bgzf()?,
         stats,
     })
 }
@@ -607,7 +606,7 @@ fn process_paired_batch_bam(
 
     Ok(BamBatchResult {
         seq: batch_seq,
-        bytes: enc.into_bgzf_blocks()?,
+        bytes: enc.into_bgzf()?,
         stats_r1,
         stats_r2,
         pair_stats,

@@ -5,6 +5,11 @@
 
 #### Changes
 
+- **A write error on the parallel uBAM output path is now reported instead of aborting the process**
+  ([#542](https://github.com/FelixKrueger/TrimGalore/issues/542)). The trim workers now compress
+  their own batches, taking a `--cores 8` single-end run from 29 threads to 20 at a cost of about
+  15% wall-clock at `--cores 4`.
+
 - **Breaking: `--basename` is now refused by the modes whose output naming ignores it**
   ([#558](https://github.com/FelixKrueger/TrimGalore/pull/558)). `--hardtrim5`, `--hardtrim3`,
   `--clock`, `--implicon` and paired interleaved uBAM input name their output after the input file
@@ -52,12 +57,6 @@
   in-place clip cut about 10% off single-core wall-clock on 150 bp reads, with byte-identical output.
 
 #### Bug fixes
-
-- **A write error on multithreaded uBAM output is now reported instead of aborting the run**
-  ([#542](https://github.com/FelixKrueger/TrimGalore/issues/542)). With `--output-format ubam
-  --cores N`, a full disk or a closed pipe panicked inside `noodles`' multithreaded BGZF writer, and
-  the panic during unwinding aborted the process. The workers now compress their own batches, and the
-  output is published only after every write, the EOF block and the flush have succeeded.
 
 - **A reader thread that dies is no longer read as end of input**
   ([#565](https://github.com/FelixKrueger/TrimGalore/pull/565)). The run finished successfully on a
