@@ -1071,8 +1071,18 @@ fn build_record_buf(
         .build())
 }
 
-/// Encodes the records of one batch into uncompressed BAM bytes, so that a worker thread can
-/// do the record building and encoding and leave only the BGZF framing to the sink.
+/// Compress `raw` into complete BGZF blocks with no EOF marker, so the result can be appended
+/// to a BGZF stream (issue #542). Same `bgzf::Writer` and default level as [`BamWriter`].
+fn bgzf_blocks(raw: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut w = bgzf::Writer::new(Vec::with_capacity(raw.len() / 2));
+    std::io::Write::write_all(&mut w, raw)?;
+    // `flush` emits the tail block; `into_inner` then skips the EOF that `Drop` would append.
+    std::io::Write::flush(&mut w)?;
+    Ok(w.into_inner())
+}
+
+/// Encodes the records of one batch into BAM and compresses them to BGZF blocks, so that a
+/// worker thread does all the work and the sink only appends bytes in order.
 pub struct BatchEncoder {
     inner: bam::io::Writer<Vec<u8>>,
     /// ASCII offset of the incoming `FastqRecord.qual`, as for [`BamWriter::create`].
@@ -1101,41 +1111,40 @@ impl BatchEncoder {
         Ok(())
     }
 
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.inner.into_inner()
+    /// The batch as BGZF blocks (no EOF marker), ready for [`ParallelBamSink::write_encoded`].
+    pub fn into_bgzf_blocks(self) -> Result<Vec<u8>> {
+        bgzf_blocks(&self.inner.into_inner()).context("failed to BGZF-compress BAM records")
     }
 }
 
-/// uBAM sink for the multithreaded path: batches of already-encoded BAM records are written in
-/// order and compressed to BGZF by a pool of threads (`noodles` multithreaded writer).
+/// uBAM sink for the multithreaded path: appends, in order, the BGZF blocks the workers
+/// compressed ([`BatchEncoder::into_bgzf_blocks`]). It owns no threads, and every write and
+/// the final EOF block return their I/O error rather than panicking (issue #542).
 pub struct ParallelBamSink {
-    /// Declared before `pending` so the BGZF stream is closed before the
+    /// Declared before `pending` so the file is closed before the
     /// temporary is removed on the abandon path.
-    inner: bgzf::MultithreadedWriter<BufWriter<File>>,
+    inner: BufWriter<File>,
     pending: Option<crate::io::PendingOutput>,
     header: Header,
 }
 
 impl ParallelBamSink {
-    /// Same header rules as [`BamWriter::create`]; `workers` is the number of compression threads.
+    /// Same header rules as [`BamWriter::create`].
     pub fn create<P: AsRef<Path>>(
         path: P,
         source_header: Option<&Header>,
         command_line: &str,
-        workers: usize,
     ) -> Result<Self> {
         let path = path.as_ref();
         let header = build_output_header(source_header, command_line)?;
         let (pending, file) = crate::io::PendingOutput::create(path)?;
-        let workers = std::num::NonZeroUsize::new(workers.max(1)).expect("at least one");
-        let mut inner = bgzf::multithreaded_writer::Builder::default()
-            .set_worker_count(workers)
-            .build_from_writer(BufWriter::new(file));
-        // the header, written through a plain (uncompressed) BAM writer into the BGZF stream
+        let mut inner = BufWriter::new(file);
+        // the header, encoded by a plain (uncompressed) BAM writer, then framed as BGZF
         let mut head = bam::io::Writer::from(Vec::new());
         head.write_header(&header)
             .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
-        std::io::Write::write_all(&mut inner, &head.into_inner())
+        bgzf_blocks(&head.into_inner())
+            .and_then(|blocks| std::io::Write::write_all(&mut inner, &blocks))
             .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
         Ok(Self {
             inner,
@@ -1148,16 +1157,18 @@ impl ParallelBamSink {
         &self.header
     }
 
-    /// Append encoded BAM records (the bytes of a [`BatchEncoder`]).
-    pub fn write_encoded(&mut self, bytes: &[u8]) -> Result<()> {
-        std::io::Write::write_all(&mut self.inner, bytes).context("failed to write BAM records")
+    /// Append BGZF blocks (from [`BatchEncoder::into_bgzf_blocks`]).
+    pub fn write_encoded(&mut self, blocks: &[u8]) -> Result<()> {
+        std::io::Write::write_all(&mut self.inner, blocks).context("failed to write BAM records")
     }
 
-    /// Flush, stop the compression threads, write the BGZF EOF block and
-    /// publish the file under its final name.
+    /// Write the BGZF EOF block, flush, and publish the file under its final
+    /// name. On error the temporary is removed and nothing is published.
     pub fn finish(mut self) -> Result<()> {
-        self.inner
+        // an empty writer's `finish` writes only the EOF block (`BGZF_EOF` is crate-private)
+        bgzf::Writer::new(&mut self.inner)
             .finish()
+            .and_then(std::io::Write::flush)
             .context("failed to finalise uBAM output (BGZF EOF marker)")?;
         let pending = self.pending.take();
         drop(self);
@@ -2730,10 +2741,10 @@ mod tests {
                 seq: "ACGT".to_string(),
                 qual: qual.to_string(),
             };
-            let mut sink = ParallelBamSink::create(&out, None, "trim_galore offset test", 2)?;
+            let mut sink = ParallelBamSink::create(&out, None, "trim_galore offset test")?;
             let mut enc = BatchEncoder::with_capacity(256, input_phred_offset);
             enc.push(sink.header(), &rec, None)?;
-            sink.write_encoded(&enc.into_bytes())?;
+            sink.write_encoded(&enc.into_bgzf_blocks()?)?;
             sink.finish()?;
 
             let file = File::open(&out)?;
@@ -2746,6 +2757,49 @@ mod tests {
 
         assert_eq!(stored_qual("hhhh", 64, "p64")?, vec![40u8; 4]);
         assert_eq!(stored_qual("IIII", 33, "p33")?, vec![40u8; 4]);
+        Ok(())
+    }
+
+    /// Issue #542: an I/O error on the parallel sink must come back as `Err` — from
+    /// `write_encoded` and from `finish` — never as a panic, and must publish no output. The
+    /// output's temporary is a FIFO whose reader has already gone, so every write hits `EPIPE`.
+    #[cfg(unix)]
+    #[test]
+    fn parallel_sink_returns_write_and_finish_errors() -> Result<()> {
+        fn broken_sink(dir: &Path, name: &str) -> Result<(ParallelBamSink, std::path::PathBuf)> {
+            let out = dir.join(format!("{name}.bam"));
+            let fifo = crate::io::partial_output_name(&out);
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(&fifo)
+                    .status()?
+                    .success()
+            );
+            // opening a FIFO blocks until both ends are open; the reader closes at once
+            let reader = std::thread::spawn(move || drop(File::open(fifo)));
+            let sink = ParallelBamSink::create(&out, None, "trim_galore #542 test")?;
+            reader.join().unwrap();
+            Ok((sink, out))
+        }
+        let dir = tempfile::tempdir()?;
+
+        // small enough to sit in the BufWriter, so `finish` hits the error
+        let (sink, out) = broken_sink(dir.path(), "finish")?;
+        let err = sink.finish().expect_err("finish must report EPIPE");
+        assert!(format!("{err:#}").contains("BGZF EOF"), "{err:#}");
+        assert!(!out.exists() && !crate::io::partial_output_name(&out).exists());
+
+        // larger than the BufWriter, so `write_encoded` hits the error
+        let (mut sink, out) = broken_sink(dir.path(), "write")?;
+        let err = sink
+            .write_encoded(&vec![0u8; 1 << 20])
+            .expect_err("write_encoded must report EPIPE");
+        assert!(
+            format!("{err:#}").contains("failed to write BAM records"),
+            "{err:#}"
+        );
+        drop(sink);
+        assert!(!out.exists() && !crate::io::partial_output_name(&out).exists());
         Ok(())
     }
 

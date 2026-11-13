@@ -2382,7 +2382,6 @@ fn run_ubam_output_single(
             &output_path,
             source_header.as_ref(),
             command_line,
-            cli.cores,
         )?;
         let out = parallel::run_single_end_parallel_to_bam(reader, &mut sink, config, cli.cores)?;
         sink.finish()?;
@@ -2557,7 +2556,6 @@ fn run_ubam_output_paired_two_files(
             &output_path,
             source_header.as_ref(),
             command_line,
-            cli.cores,
         )?;
         let out = parallel::run_paired_end_parallel_to_bam(
             reader_r1, reader_r2, &mut sink, config, cli.cores,
@@ -2697,14 +2695,13 @@ fn run_ubam_output_paired_single_file(
 
     let source_header = trim_galore::bam::peek_header(input)?;
     let (stats_r1, stats_r2, pair_stats) = if cli.cores > 1 {
-        // N threads convert the input records, N workers trim and encode, N threads compress
+        // N threads convert the input records, N workers trim, encode and compress
         let (r1, r2) =
             BamReader::open_paired_interleaved_pooled(input, &cli.preserve_tags, cli.cores)?;
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             Some(&source_header),
             command_line,
-            cli.cores,
         )?;
         let out = parallel::run_paired_end_parallel_to_bam(
             Box::new(r1),

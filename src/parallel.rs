@@ -338,7 +338,7 @@ pub fn run_paired_end_parallel(
 }
 // ─────────────────────── Paired-end, uBAM output ───────────────────────
 
-/// Result of one batch for the uBAM path: the encoded (uncompressed) BAM records of the pairs
+/// Result of one batch for the uBAM path: the BGZF-compressed BAM records of the pairs
 /// that passed, and the batch statistics.
 struct BamBatchResult {
     seq: u64,
@@ -350,9 +350,9 @@ struct BamBatchResult {
 
 /// Paired-end trimming with uBAM output on `cores` worker threads.
 ///
-/// The workers trim, filter and encode the records of a batch into uncompressed BAM bytes. The
-/// main thread hands the batches to the sink in input order; the sink compresses them to BGZF
-/// on its own pool of `cores` threads. The output has the same records, in the same order, as the
+/// The workers trim, filter, encode and BGZF-compress the records of a batch. The main thread
+/// hands the compressed batches to the sink in input order, and the sink only appends them, so
+/// an I/O error comes back as `Err` (issue #542). The output has the same records, in the same order, as the
 /// serial `trimmer::run_paired_end_to_bam`.
 pub fn run_paired_end_parallel_to_bam(
     reader_r1: Box<dyn RecordSource>,
@@ -458,8 +458,8 @@ struct SingleBamBatchResult {
 }
 
 /// Single-end trimming with uBAM output on `cores` worker threads. Same design as
-/// [`run_paired_end_parallel_to_bam`]: the workers trim, filter and encode the batches, the main
-/// thread hands them to the sink in input order, and the sink compresses on `cores` threads.
+/// [`run_paired_end_parallel_to_bam`]: the workers trim, filter, encode and compress the batches,
+/// and the main thread hands them to the sink, which appends them in input order.
 pub fn run_single_end_parallel_to_bam(
     reader: Box<dyn RecordSource>,
     sink: &mut crate::bam::ParallelBamSink,
@@ -566,7 +566,7 @@ fn process_single_batch_bam(
     }
     Ok(SingleBamBatchResult {
         seq: batch_seq,
-        bytes: enc.into_bytes(),
+        bytes: enc.into_bgzf_blocks()?,
         stats,
     })
 }
@@ -607,7 +607,7 @@ fn process_paired_batch_bam(
 
     Ok(BamBatchResult {
         seq: batch_seq,
-        bytes: enc.into_bytes(),
+        bytes: enc.into_bgzf_blocks()?,
         stats_r1,
         stats_r2,
         pair_stats,
@@ -2858,7 +2858,7 @@ mod tests {
 
         let par_out = dir.join("parallel.bam");
         let (p1, p2, pp) = {
-            let mut sink = crate::bam::ParallelBamSink::create(&par_out, None, cmd, 4)?;
+            let mut sink = crate::bam::ParallelBamSink::create(&par_out, None, cmd)?;
             let out = run_paired_end_parallel_to_bam(
                 open_fq(&in1),
                 open_fq(&in2),
@@ -2934,7 +2934,7 @@ mod tests {
 
         let par_out = dir.join("parallel.bam");
         let p_stats = {
-            let mut sink = crate::bam::ParallelBamSink::create(&par_out, None, cmd, 4)?;
+            let mut sink = crate::bam::ParallelBamSink::create(&par_out, None, cmd)?;
             let out = run_single_end_parallel_to_bam(open_fq(&input), &mut sink, &config, 4)?;
             sink.finish()?;
             out

@@ -53,6 +53,12 @@
 
 #### Bug fixes
 
+- **A write error on multithreaded uBAM output is now reported instead of aborting the run**
+  ([#542](https://github.com/FelixKrueger/TrimGalore/issues/542)). With `--output-format ubam
+  --cores N`, a full disk or a closed pipe panicked inside `noodles`' multithreaded BGZF writer, and
+  the panic during unwinding aborted the process. The workers now compress their own batches, and the
+  output is published only after every write, the EOF block and the flush have succeeded.
+
 - **A reader thread that dies is no longer read as end of input**
   ([#565](https://github.com/FelixKrueger/TrimGalore/pull/565)). The run finished successfully on a
   truncated file and published the output, because nothing had reported a failure.
