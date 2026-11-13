@@ -3167,4 +3167,40 @@ mod tests {
         );
         Ok(())
     }
+
+    /// The same finish failure end to end, on a real `ParallelBamSink`: its temporary is a FIFO
+    /// whose reader has already gone, so the final flush hits `EPIPE`. `finish` must return the
+    /// error and publish nothing, neither the final file nor the `.partial`.
+    #[cfg(unix)]
+    #[test]
+    fn parallel_sink_finish_error_publishes_nothing() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let out = dir.path().join("broken_pipe.bam");
+        let partial = crate::io::partial_output_name(&out);
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&partial)
+                .status()?
+                .success()
+        );
+        // opening a FIFO blocks until both ends are open; the reader closes at once
+        let fifo = partial.clone();
+        let reader = std::thread::spawn(move || drop(File::open(fifo)));
+        let sink = ParallelBamSink::create(&out, None, "trim_galore broken pipe")?;
+        reader.join().unwrap();
+
+        // header and terminator both fit the `BufWriter`, so the error comes from the flush
+        let err = sink.finish().expect_err("finish must report EPIPE");
+        assert!(
+            format!("{err:#}").contains("failed to flush uBAM output"),
+            "{err:#}"
+        );
+        assert!(!out.exists(), "a failed finish published {}", out.display());
+        assert!(
+            !partial.exists(),
+            "a failed finish left {}",
+            partial.display()
+        );
+        Ok(())
+    }
 }
