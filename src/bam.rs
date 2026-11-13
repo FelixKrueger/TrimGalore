@@ -1104,67 +1104,130 @@ impl BatchEncoder {
     pub fn into_bytes(self) -> Vec<u8> {
         self.inner.into_inner()
     }
+
+    /// Encode, then compress to BGZF members for [`BgzfSink::write_compressed`].
+    pub fn into_bgzf(self) -> Result<BgzfBlocks> {
+        let raw = self.into_bytes();
+        Ok(BgzfBlocks(
+            bgzf_members(&raw).context("failed to compress BAM records to BGZF")?,
+        ))
+    }
 }
 
-/// uBAM sink for the multithreaded path: batches of already-encoded BAM records are written in
-/// order and compressed to BGZF by a pool of threads (`noodles` multithreaded writer).
-pub struct ParallelBamSink {
-    /// Declared before `pending` so the BGZF stream is closed before the
-    /// temporary is removed on the abandon path.
-    inner: bgzf::MultithreadedWriter<BufWriter<File>>,
-    pending: Option<crate::io::PendingOutput>,
+/// BGZF-compressed bytes: whole members, no end-of-file block.
+///
+/// [`BgzfSink::write_compressed`] appends these verbatim.
+pub struct BgzfBlocks(Vec<u8>);
+
+impl BgzfBlocks {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The compressed bytes, for tests that inspect the framing.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// Compress `raw` into whole BGZF members. Never emits the end-of-file block.
+fn bgzf_members(raw: &[u8]) -> std::io::Result<Vec<u8>> {
+    use std::io::Write as _;
+    let mut w = bgzf::Writer::new(Vec::with_capacity(raw.len() / 2 + 64));
+    w.write_all(raw)?;
+    // `flush` emits the staged tail block; `into_inner` then takes the buffer, terminator unwritten.
+    w.flush()?;
+    Ok(w.into_inner())
+}
+
+/// Append the BGZF end-of-file block to `w`, and nothing else.
+fn bgzf_terminator<W: std::io::Write>(w: &mut W) -> std::io::Result<()> {
+    let mut term = bgzf::Writer::new(w);
+    term.try_finish()?;
+    let _ = term.into_inner();
+    Ok(())
+}
+
+/// The BGZF layer of the uBAM sink: header member, ordered appends, terminator.
+///
+/// Generic over the writer so a test can inject one that fails;
+/// [`ParallelBamSink::create`] builds its own `File` from a `Path`.
+pub struct BgzfSink<W: std::io::Write> {
+    inner: W,
     header: Header,
 }
 
-impl ParallelBamSink {
-    /// Same header rules as [`BamWriter::create`]; `workers` is the number of compression threads.
-    pub fn create<P: AsRef<Path>>(
-        path: P,
-        source_header: Option<&Header>,
-        command_line: &str,
-        workers: usize,
-    ) -> Result<Self> {
-        let path = path.as_ref();
-        let header = build_output_header(source_header, command_line)?;
-        let (pending, file) = crate::io::PendingOutput::create(path)?;
-        let workers = std::num::NonZeroUsize::new(workers.max(1)).expect("at least one");
-        let mut inner = bgzf::multithreaded_writer::Builder::default()
-            .set_worker_count(workers)
-            .build_from_writer(BufWriter::new(file));
-        // the header, written through a plain (uncompressed) BAM writer into the BGZF stream
+impl<W: std::io::Write> BgzfSink<W> {
+    /// Writes `header` as its own BGZF member.
+    pub fn new(mut inner: W, header: Header) -> Result<Self> {
         let mut head = bam::io::Writer::from(Vec::new());
         head.write_header(&header)
-            .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
-        std::io::Write::write_all(&mut inner, &head.into_inner())
-            .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
-        Ok(Self {
-            inner,
-            pending: Some(pending),
-            header,
-        })
+            .context("Failed to encode the BAM header")?;
+        let compressed = bgzf_members(&head.into_inner()).context("Failed to write BAM header")?;
+        inner
+            .write_all(&compressed)
+            .context("Failed to write BAM header")?;
+        Ok(Self { inner, header })
     }
 
     pub fn header(&self) -> &Header {
         &self.header
     }
 
-    /// Append encoded BAM records (the bytes of a [`BatchEncoder`]).
-    pub fn write_encoded(&mut self, bytes: &[u8]) -> Result<()> {
-        std::io::Write::write_all(&mut self.inner, bytes).context("failed to write BAM records")
+    /// Append one batch's BGZF members. Callers must append in input order.
+    pub fn write_compressed(&mut self, blocks: &BgzfBlocks) -> Result<()> {
+        self.inner
+            .write_all(blocks.as_bytes())
+            .context("failed to write BAM records")
     }
 
-    /// Flush, stop the compression threads, write the BGZF EOF block and
-    /// publish the file under its final name.
-    pub fn finish(mut self) -> Result<()> {
-        self.inner
-            .finish()
+    /// Terminate the BGZF stream and flush. Publication is the caller's job.
+    pub fn finish(mut self) -> Result<W> {
+        bgzf_terminator(&mut self.inner)
             .context("failed to finalise uBAM output (BGZF EOF marker)")?;
-        let pending = self.pending.take();
-        drop(self);
-        match pending {
-            Some(p) => p.commit(),
-            None => Ok(()),
-        }
+        self.inner.flush().context("failed to flush uBAM output")?;
+        Ok(self.inner)
+    }
+}
+
+/// uBAM sink for the multithreaded path: batches arrive already encoded and compressed, and are
+/// appended in order.
+pub struct ParallelBamSink {
+    /// Declared before `pending` so the writer is flushed before the temporary is removed on the
+    /// abandon path.
+    inner: BgzfSink<BufWriter<File>>,
+    pending: crate::io::PendingOutput,
+}
+
+impl ParallelBamSink {
+    /// Same header rules as [`BamWriter::create`].
+    pub fn create<P: AsRef<Path>>(
+        path: P,
+        source_header: Option<&Header>,
+        command_line: &str,
+    ) -> Result<Self> {
+        let path = path.as_ref();
+        let header = build_output_header(source_header, command_line)?;
+        let (pending, file) = crate::io::PendingOutput::create(path)?;
+        let inner = BgzfSink::new(BufWriter::new(file), header)
+            .with_context(|| format!("Failed to write BAM header to {}", path.display()))?;
+        Ok(Self { inner, pending })
+    }
+
+    pub fn header(&self) -> &Header {
+        self.inner.header()
+    }
+
+    /// Append encoded, compressed BAM records (the output of [`BatchEncoder::into_bgzf`]).
+    pub fn write_compressed(&mut self, blocks: &BgzfBlocks) -> Result<()> {
+        self.inner.write_compressed(blocks)
+    }
+
+    /// Terminate the BGZF stream, then publish the file under its final name.
+    pub fn finish(self) -> Result<()> {
+        let Self { inner, pending } = self;
+        inner.finish()?;
+        pending.commit()
     }
 }
 
@@ -2730,10 +2793,10 @@ mod tests {
                 seq: "ACGT".to_string(),
                 qual: qual.to_string(),
             };
-            let mut sink = ParallelBamSink::create(&out, None, "trim_galore offset test", 2)?;
+            let mut sink = ParallelBamSink::create(&out, None, "trim_galore offset test")?;
             let mut enc = BatchEncoder::with_capacity(256, input_phred_offset);
             enc.push(sink.header(), &rec, None)?;
-            sink.write_encoded(&enc.into_bytes())?;
+            sink.write_compressed(&enc.into_bgzf()?)?;
             sink.finish()?;
 
             let file = File::open(&out)?;
@@ -2909,5 +2972,199 @@ mod tests {
         assert_eq!(reader.next_record().unwrap().unwrap().id, "@r1");
         assert!(reader.next_record().unwrap().is_none());
         assert!(reader.next_record().unwrap().is_none());
+    }
+
+    /// The BGZF end-of-file block. A batch must never carry one; the finished file carries one.
+    const BGZF_EOF_BLOCK: &[u8] = &[
+        0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02,
+        0x00, 0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    fn probe_record(name: &str) -> FastqRecord {
+        FastqRecord {
+            id: format!("@{name}"),
+            seq: "ACGTACGTAC".to_string(),
+            qual: "IIIIIIIIII".to_string(),
+        }
+    }
+
+    /// A batch under 64 KiB — below the size at which `bgzf::Writer` flushes a block on its own —
+    /// must round-trip. Asserted positively: an unflushed buffer is empty, and every negated
+    /// assertion about its contents holds vacuously.
+    #[test]
+    fn into_bgzf_round_trips_a_small_batch() -> Result<()> {
+        use std::io::Read as _;
+
+        let header = build_output_header(None, "trim_galore bgzf round-trip test")?;
+        let mut enc = BatchEncoder::with_capacity(1024, 33);
+        for i in 0..3 {
+            enc.push(&header, &probe_record(&format!("r{i}")), None)?;
+        }
+        let blocks = enc.into_bgzf()?;
+
+        assert!(
+            !blocks.is_empty(),
+            "a batch of 3 records compressed to 0 bytes — the staging buffer was never flushed"
+        );
+
+        let mut inflated = Vec::new();
+        bgzf::Reader::new(blocks.as_bytes()).read_to_end(&mut inflated)?;
+
+        let mut expected = BatchEncoder::with_capacity(1024, 33);
+        for i in 0..3 {
+            expected.push(&header, &probe_record(&format!("r{i}")), None)?;
+        }
+        assert_eq!(
+            inflated,
+            expected.into_bytes(),
+            "the inflated batch does not match the records that went in"
+        );
+        Ok(())
+    }
+
+    /// No batch may carry a terminator.
+    #[test]
+    fn into_bgzf_emits_no_terminator() -> Result<()> {
+        let header = build_output_header(None, "trim_galore bgzf terminator test")?;
+        let mut enc = BatchEncoder::with_capacity(1024, 33);
+        enc.push(&header, &probe_record("r0"), None)?;
+        let blocks = enc.into_bgzf()?;
+
+        assert!(!blocks.is_empty(), "batch compressed to 0 bytes");
+        assert!(
+            !blocks
+                .as_bytes()
+                .windows(BGZF_EOF_BLOCK.len())
+                .any(|w| w == BGZF_EOF_BLOCK),
+            "a batch carries a BGZF end-of-file block"
+        );
+        Ok(())
+    }
+
+    /// The finished file is terminated exactly once. `ParallelBamSink` only: the serial
+    /// `BamWriter` emits two terminators.
+    #[test]
+    fn parallel_sink_terminates_the_file_exactly_once() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let out = dir.path().join("terminator.bam");
+        let mut sink = ParallelBamSink::create(&out, None, "trim_galore terminator count")?;
+        let mut enc = BatchEncoder::with_capacity(1024, 33);
+        enc.push(sink.header(), &probe_record("r0"), None)?;
+        sink.write_compressed(&enc.into_bgzf()?)?;
+        sink.finish()?;
+
+        let bytes = std::fs::read(&out)?;
+        let count = bytes
+            .windows(BGZF_EOF_BLOCK.len())
+            .filter(|w| *w == BGZF_EOF_BLOCK)
+            .count();
+        assert_eq!(count, 1, "expected exactly one BGZF end-of-file block");
+        assert!(
+            bytes.ends_with(BGZF_EOF_BLOCK),
+            "the end-of-file block is not at the end"
+        );
+        Ok(())
+    }
+
+    /// A writer that accepts `budget` bytes and then fails, so the sink's write-error path can be
+    /// exercised without a full disk.
+    struct FailingWriter {
+        budget: usize,
+    }
+
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.budget == 0 {
+                return Err(std::io::Error::other("simulated device failure"));
+            }
+            let n = buf.len().min(self.budget);
+            self.budget -= n;
+            Ok(n)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A write failure must surface as an error rather than a panic.
+    #[test]
+    fn write_error_is_returned_not_panicked() -> Result<()> {
+        let header = build_output_header(None, "trim_galore write failure")?;
+        // Enough for the header member, nothing for the records.
+        let mut sink = BgzfSink::new(FailingWriter { budget: 4096 }, header.clone())?;
+
+        let mut enc = BatchEncoder::with_capacity(64 * 1024, 33);
+        for i in 0..2000 {
+            enc.push(&header, &probe_record(&format!("read{i}")), None)?;
+        }
+        let blocks = enc.into_bgzf()?;
+
+        let err = sink
+            .write_compressed(&blocks)
+            .expect_err("a failing writer must produce an error");
+        assert!(
+            format!("{err:#}").contains("simulated device failure"),
+            "the underlying io error was swallowed: {err:#}"
+        );
+        Ok(())
+    }
+
+    /// A run that does not reach `finish` leaves neither the final file nor its temporary.
+    #[test]
+    fn a_failed_run_publishes_nothing() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let out = dir.path().join("unpublished.bam");
+        let partial = crate::io::partial_output_name(&out);
+        {
+            let sink = ParallelBamSink::create(&out, None, "trim_galore abandon")?;
+            assert!(
+                partial.exists(),
+                "the temporary was never created, so its removal proves nothing"
+            );
+            // Dropped without `finish`, as an error path does.
+            drop(sink);
+        }
+        assert!(
+            !out.exists(),
+            "an abandoned run published {}",
+            out.display()
+        );
+        assert!(
+            !partial.exists(),
+            "an abandoned run left {} behind",
+            partial.display()
+        );
+        Ok(())
+    }
+
+    /// A writer that accepts every write and fails only when flushed, so the finalisation path can
+    /// be exercised separately from the write path.
+    #[derive(Debug)]
+    struct FlushFailsWriter;
+
+    impl std::io::Write for FlushFailsWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("simulated flush failure"))
+        }
+    }
+
+    /// A failure while finalising must surface as an error, not be discarded.
+    #[test]
+    fn finish_error_is_returned() -> Result<()> {
+        let header = build_output_header(None, "trim_galore finish failure")?;
+        let sink = BgzfSink::new(FlushFailsWriter, header)?;
+        let err = sink
+            .finish()
+            .expect_err("a writer that fails to flush must produce an error");
+        assert!(
+            format!("{err:#}").contains("simulated flush failure"),
+            "the underlying io error was swallowed: {err:#}"
+        );
+        Ok(())
     }
 }

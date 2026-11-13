@@ -1277,6 +1277,34 @@ jobs:
           }
           echo "SE uBAM-out content-tuple parity: PASS"
 
+      - name: Validate parallel uBAM-out — htslib reads the worker-compressed framing
+        # The parallel sink compresses each batch into its own BGZF member, so the framing
+        # differs from the serial path while the records must not. Nothing else in CI runs
+        # `--output-format ubam` with `--cores > 1` on the trimming path.
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p /tmp/ubam_par/c1 /tmp/ubam_par/c4
+          gzip -dc test_files/BS-seq_10K_R1.fastq.gz > /tmp/ubam_par/in.fq
+          ./target/release/trim_galore --output-format ubam --cores 1 \
+            -o /tmp/ubam_par/c1 /tmp/ubam_par/in.fq
+          ./target/release/trim_galore --output-format ubam --cores 4 \
+            -o /tmp/ubam_par/c4 /tmp/ubam_par/in.fq
+          # `samtools view` decoding at all proves htslib accepts the per-batch members;
+          # `quickcheck` cannot be used here, as it rejects every unaligned BAM for having
+          # no @SQ lines.
+          n1=$(samtools view -c /tmp/ubam_par/c1/in_trimmed.bam)
+          n4=$(samtools view -c /tmp/ubam_par/c4/in_trimmed.bam)
+          echo "records: --cores 1 = $n1, --cores 4 = $n4"
+          [ "$n1" -gt 0 ] || { echo "no records decoded from the serial output"; exit 1; }
+          [ "$n1" -eq "$n4" ] || { echo "MISMATCH: record counts differ by --cores"; exit 1; }
+          md1=$(samtools view /tmp/ubam_par/c1/in_trimmed.bam | md5sum | cut -d' ' -f1)
+          md4=$(samtools view /tmp/ubam_par/c4/in_trimmed.bam | md5sum | cut -d' ' -f1)
+          echo "record-body md5: --cores 1 = $md1, --cores 4 = $md4"
+          [ "$md1" = "$md4" ] || { echo "MISMATCH: record bodies differ by --cores"; exit 1; }
+          # Exactly one terminator, at the end. The serial writer emits two; this path must not.
+          python3 -c 'import sys; eof = bytes.fromhex("1f8b08040000000000ff0600424302001b0003000000000000000000"); data = open(sys.argv[1], "rb").read(); n = data.count(eof); assert data.endswith(eof), "BGZF EOF block is not at the end of the file"; assert n == 1, f"expected exactly 1 BGZF EOF block, found {n}"; print("terminator count: 1, at end of file")' /tmp/ubam_par/c4/in_trimmed.bam
+          echo "parallel uBAM-out framing: PASS"
+
       - name: Validate PE uBAM-out — interleaved flag-bit counts
         if: ${{ !cancelled() }}
         run: |

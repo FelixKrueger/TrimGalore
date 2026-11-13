@@ -5,6 +5,11 @@
 
 #### Changes
 
+- **A write error on the parallel uBAM output path is now reported instead of aborting the process**
+  ([#542](https://github.com/FelixKrueger/TrimGalore/issues/542)). The trim workers now compress
+  their own batches, taking a `--cores 8` single-end run from 29 threads to 20 at a cost of about
+  15% wall-clock at `--cores 4`.
+
 - **Breaking: `--basename` is now refused by the modes whose output naming ignores it**
   ([#558](https://github.com/FelixKrueger/TrimGalore/pull/558)). `--hardtrim5`, `--hardtrim3`,
   `--clock`, `--implicon` and paired interleaved uBAM input name their output after the input file
