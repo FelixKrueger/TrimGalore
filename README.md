@@ -16,7 +16,7 @@ Consistent quality and adapter trimming for next-generation sequencing data, wit
 <h3 align="center"><a href="https://www.trimgalore.com/">https://www.trimgalore.com/</a></h3>
 
 > [!NOTE]
-> **Trim Galore v2.0** is a faithful Rust rewrite — a single binary with zero external dependencies, designed as a drop-in replacement for v0.6.x scripts and pipelines. Same CLI, same output filenames, same report format. Adds poly-G auto-detection and trimming for 2-colour instruments, a generic poly-A trimmer, per-pair adapter auto-detection, and cleaner multi-adapter invocation (repeatable `-a`/`-a2` instead of Perl's embedded-string syntax) — among other extensions. For details on what changed, benchmarks, and migration notes, see the [v2.0 migration notes](https://www.trimgalore.com/reference/migration/).
+> **Trim Galore v2.x** is a single static binary with no external dependencies — no Java, Python, Cutadapt or FastQC install. Adapter detection and trimming, quality trimming, filtering and compression run in one pass over the data, with optional FastQC reporting from a bundled library afterwards; input and output can be either FASTQ or unaligned BAM. Existing v0.6.x command lines and output filenames carry over, and CI checks the core flag paths byte-for-byte against Perl 0.6.11. For the deliberate departures, the capabilities the Perl version did not have, and benchmarks, see the [migration notes](https://www.trimgalore.com/reference/migration/).
 
 ## Features
 
@@ -77,7 +77,7 @@ To install the latest unreleased changes directly from the development branch:
 cargo install --git https://github.com/FelixKrueger/TrimGalore --branch dev trim-galore --force
 ```
 
-The `--force` flag overwrites any existing `trim_galore` binary (e.g. a v2.0.0 install from crates.io).
+The `--force` flag overwrites any existing `trim_galore` binary (e.g. an earlier install from crates.io).
 
 ### Docker
 
@@ -192,7 +192,7 @@ Full documentation is published at [https://www.trimgalore.com/](https://www.tri
 
 - [User Guide](https://www.trimgalore.com/guide/overview/) — full reference for all options and modes
 - [RRBS Guide](https://www.trimgalore.com/rrbs/guide/) — bisulfite sequencing and RRBS-specific guidance
-- [v2.0 migration notes](https://www.trimgalore.com/reference/migration/) — what changed in the Rust rewrite
+- [Migration notes](https://www.trimgalore.com/reference/migration/) — what changed in the Rust rewrite
 - [Benchmarks](https://www.trimgalore.com/performance/benchmarks/)
 
 ## Credits

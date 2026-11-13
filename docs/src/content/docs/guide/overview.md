@@ -7,10 +7,10 @@ Trim Galore reads FASTQ (or unaligned BAM, auto-detected from content), applies 
 
 ## Adaptive quality and adapter trimming with Trim Galore
 
-Trim Galore handles quality trimming, adapter detection, adapter removal, length filtering, and specialty modes in a single pass over the data, with optional post-trimming quality reporting via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library (FastQC 0.13.0-compatible HTML + ZIP, no Java required). Input format (FASTQ vs unaligned BAM) is auto-detected from file content, not extension; output is FASTQ by default and can be uBAM via `--output-format ubam`, with aux tags round-tripping through `--preserve-tags`. Originally a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/en/stable/) and an external [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) install, v2.x is a faithful Rust rewrite that consolidates those passes while preserving the CLI and output filename conventions.
+Trim Galore handles quality trimming, adapter detection, adapter removal, length filtering, and specialty modes in a single pass over the data, with optional post-trimming quality reporting via the bundled [fastqc-rust](https://crates.io/crates/fastqc-rust) library (FastQC 0.13.0-compatible HTML + ZIP, no Java required). Input format (FASTQ vs unaligned BAM) is auto-detected from file content, not extension; output is FASTQ by default and can be uBAM via `--output-format ubam`, with aux tags round-tripping through `--preserve-tags`. Originally a Perl wrapper around [Cutadapt](https://cutadapt.readthedocs.io/en/stable/) and an external [FastQC](http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) install, v2.x consolidates those passes into one binary, keeping the output filename conventions and all but a few of the v0.6.x flags.
 
 :::note
-Trim Galore v2.x is a faithful Rust rewrite designed as a drop-in replacement for v0.6.x. All of the trimming steps below happen in a single pass over the data rather than as sequential Cutadapt invocations. Outputs match v0.6.x for the core feature set; newer capabilities (e.g. `--poly_g` auto-detection, a generic `--poly_a` trimmer) extend beyond the Perl version.
+Every step below happens in a single pass over the data rather than as sequential Cutadapt invocations. Outputs match v0.6.x for the core flag set, which CI checks byte-for-byte against Perl 0.6.11; newer capabilities such as `--poly_g` auto-detection and the generic `--poly_a` trimmer extend beyond it.
 :::
 
 The pipeline runs in this order:
