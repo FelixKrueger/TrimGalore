@@ -16,6 +16,11 @@ The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.
   `--clock`, `--implicon` and paired interleaved uBAM input name their output after the input file
   and accepted the flag silently; `--clump_only`, whose namer honours it, still takes it.
 
+- **`--cores` now applies to uBAM input and output**
+  ([#529](https://github.com/FelixKrueger/TrimGalore/pull/529)). Both directions ran single-threaded
+  whatever the flag said; decoding, aux-tag extraction and BGZF compression now run on the worker
+  pool, at 4-5.4x wall-clock for 11-20% more CPU, with the output records in input order.
+
 - **A duplicate barcode in a `--demux` sample sheet is now refused**
   ([#553](https://github.com/FelixKrueger/TrimGalore/pull/553)). The second entry replaced the
   first's writer, so the first sample's reads were written into the second and its own file was left
