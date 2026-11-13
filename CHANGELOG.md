@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Unreleased
+### Version 2.5.0 (Release on 13 November 2026)
 
 #### Changes
 
@@ -14,6 +14,10 @@
   ([#558](https://github.com/FelixKrueger/TrimGalore/pull/558)). `--hardtrim5`, `--hardtrim3`,
   `--clock`, `--implicon` and paired interleaved uBAM input name their output after the input file
   and accepted the flag silently; `--clump_only`, whose namer honours it, still takes it.
+
+- **Breaking: the library's `ParallelBamSink` API changed**
+  ([#542](https://github.com/FelixKrueger/TrimGalore/issues/542)). `create` no longer takes a
+  `workers` argument and `write_encoded` is now `write_compressed`; the binary is unaffected.
 
 - **`--cores` now applies to uBAM input and output**
   ([#529](https://github.com/FelixKrueger/TrimGalore/pull/529)). Both directions ran single-threaded
