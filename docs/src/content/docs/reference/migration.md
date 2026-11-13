@@ -20,7 +20,7 @@ Trim Galore v2 is a Rust rewrite of the Perl wrapper, built as a drop-in replace
 | Architecture | Wrapper around Cutadapt and pigz | Single process, single binary |
 | Dependencies | Perl, Python, Cutadapt, Java, igzip, pigz, external FastQC | None (FastQC bundled via fastqc-rust) |
 | Paired-end | Two sequential Cutadapt runs + pair validation | Single pass |
-| Threads | Up to ~3N+3 (Cutadapt + pigz + pigz/igzip) | Exactly N+4 |
+| Threads | Up to ~3N+3 (Cutadapt + pigz + pigz/igzip) | Exactly N+4 (FASTQ input); 2N+4 for uBAM input |
 | Adapter auto-detection | Once per invocation | Per pair (handles mixed-library globs) |
 | BGI/DNBSEQ adapter | `--bgiseq` only | Auto-detected too |
 | Multi-adapter syntax | Embedded-string only | Repeatable `-a` / `-a2`, plus embedded and FASTA |

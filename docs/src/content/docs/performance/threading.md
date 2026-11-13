@@ -1,6 +1,6 @@
 ---
 title: Threading model
-description: Why the Rust rewrite is faster. Single-pass paired-end, worker-pool parallelism, and a fixed +4 thread infrastructure cost.
+description: Why the Rust rewrite is faster. Single-pass paired-end, worker-pool parallelism, and a fixed +4 thread infrastructure cost for FASTQ input.
 ---
 
 ## Why the speedup is larger than "Rust is faster"
@@ -19,10 +19,10 @@ Each worker independently handles trimming **and** gzip compression for its batc
 
 ## 3. Fewer threads, more work per thread
 
-v2.x uses a single process with a fixed infrastructure cost of +4 threads:
+v2.x uses a single process with a fixed infrastructure cost of +4 threads for FASTQ input:
 
 ```
---cores N thread breakdown:
+--cores N thread breakdown (FASTQ input):
   N worker threads (each: trim + gzip compress -> independent gzip block)
   2 decompression threads (one per input file)
   1 batcher thread (creates numbered batches of 4096 reads)
@@ -32,7 +32,7 @@ v2.x uses a single process with a fixed infrastructure cost of +4 threads:
 
 Legacy Perl Trim Galore (v0.6.x) instead orchestrated three subprocesses (Cutadapt + pigz compress + pigz/igzip decompress) that each spawned their own threads, peaking around `3N+3` and forcing the nf-core module to reserve `task.cpus - 4` cores for the `-j` flag. See the [migration guide](/reference/migration/#whats-new-in-v2) for the full v0.6.x → v2 contrast.
 
-At `--cores 1`, the worker-pool is bypassed entirely: a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). From `--cores 2` upward the **N+4 model** applies — each added core is exactly 1 worker thread plus ~10 MB of memory on top of the 4 fixed-cost threads (2 decompressors + 1 batcher + 1 writer). Wall-clock speedup is **near-linear up to `--cores 8` for paired-end runs**; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so each additional core helps progressively less.
+At `--cores 1`, the worker-pool is bypassed entirely: a single thread does everything with zero parallelism overhead (1 thread, 5 MB RAM). From `--cores 2` upward the **N+4 model** applies to FASTQ input ([uBAM input](#ubam-input) uses 2N+4) — each added core is exactly 1 worker thread plus ~10 MB of memory on top of the 4 fixed-cost threads (2 decompressors + 1 batcher + 1 writer). Wall-clock speedup is **near-linear up to `--cores 8` for paired-end runs**; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so each additional core helps progressively less.
 
 For reference, the contrast against the legacy Perl 0.6.x model at the same `-j N` / `--cores N` setting:
 
@@ -43,9 +43,31 @@ For reference, the contrast against the legacy Perl 0.6.x model at the same `-j 
 | 8 | up to ~27 | 12 |
 | 16 | not measured | 20 |
 
+The comparison is for FASTQ input, the only input Perl 0.6.x accepted.
+
 At Perl `-j 8` vs v2.x `--cores 8`: up to ~27 vs exactly 12 threads, yet **4.54× faster** wall and **5.93× less CPU** on the 84M-read Buckberry fixture (v2.1.0-beta.7).
 
 Parallel efficiency at Buckberry scale: 100% (cores=1) → 72% (cores=8) → 34% (cores=16) → 22% (cores=24). Scaling is near-linear up to `--cores 8`; beyond that, gzip-output I/O on the storage layer typically becomes binding before workers run out of useful per-read work, so adding cores helps progressively less. **`--cores 8` is the recommended setting for nf-core / Snakemake / CWL workflows**, and is also the saturation point.
+
+### uBAM input
+
+uBAM input does not fit the N+4 model. Each BAM record is converted into a FASTQ record before trimming, and that conversion runs on a pool of its own, sized by the same `--cores N`:
+
+```
+--cores N thread breakdown (uBAM input, single-end or paired interleaved):
+  N worker threads (trim + compress, as for FASTQ)
+  N conversion threads (BAM record -> FASTQ record, aux tags included)
+  1 reader thread (BGZF decompression + record framing; pairs the mates
+    of an interleaved file)
+  1 reorder thread (hands converted batches on in input order)
+  1 batcher thread
+  1 main thread (writer)
+                                                       = 2N+4 total
+```
+
+Paired uBAM input is always a single interleaved file (two BAM files, or a BAM paired with a FASTQ, are refused), and several single-end inputs are processed one after another, so only one conversion pool exists at a time: **2N+4 is the peak for any uBAM-input run**, whatever the number of input files. At `--cores 8` that is 20 threads rather than 12. At `--cores 1` there is no pool; a paired interleaved uBAM uses 2 threads (one de-interleaves), a single-end one uses 1.
+
+Budget for 2N+4 when a scheduler counts threads. A uBAM-input step that passes `--cores task.cpus` runs about two threads per allocated CPU; passing half the allocation (`--cores 6` for 12 CPUs) gives the same thread count as a FASTQ run at `--cores 12`.
 
 ## Memory profile
 
@@ -88,7 +110,7 @@ The pipeline is comfortably under disk-bandwidth limits at every reasonable core
 
 Trim Galore v2.x can use the **full CPU allocation directly**: no need to subtract cores for subprocess overhead, since everything runs in a single process. If a Nextflow process has 12 CPUs, just pass `--cores 12`.
 
-For the historical nf-core pattern of `task.cpus - 4`, the equivalent v2.x invocation is `--cores task.cpus`, with the fixed `+4` thread cost matching the existing CPU budget without manual subtraction.
+For the historical nf-core pattern of `task.cpus - 4`, the equivalent v2.x invocation is `--cores task.cpus`, with the fixed `+4` thread cost matching the existing CPU budget without manual subtraction. uBAM input is the exception: it runs 2N+4 threads, so pass half the allocation for it (see [uBAM input](#ubam-input)).
 
 ## Reproducibility
 
