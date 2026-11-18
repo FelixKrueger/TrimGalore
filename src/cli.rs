@@ -345,7 +345,17 @@ pub struct Cli {
     #[clap(long = "fastqc")]
     pub fastqc: bool,
 
-    /// Additional arguments to pass to FastQC. Implies --fastqc.
+    /// Run FastQC on the input files, before trimming, in addition to any
+    /// post-trim report. Reports are named `*_raw_fastqc.html` / `*_raw_fastqc.zip`
+    /// so they stay distinct from the trimmed set in MultiQC. Accepted with the
+    /// specialty modes that reject --fastqc, because the input is always present.
+    /// Costs one extra pass over each input, run before trimming starts.
+    #[clap(long = "fastqc_raw", alias = "fastqc-raw")]
+    pub fastqc_raw: bool,
+
+    /// Additional arguments to pass to FastQC. Applies to every FastQC run the
+    /// invocation asks for. Implies --fastqc on its own; with --fastqc_raw it
+    /// configures that run instead, so it does not add a post-trim report.
     /// Common flags are translated to the bundled engine: --nogroup, --expgroup,
     /// --quiet, --png, --nano, --nofilter, --casava, -t/--threads, -o/--outdir.
     /// --png embeds PNG charts in the HTML instead of SVG; both image sets are
@@ -607,7 +617,10 @@ impl Cli {
     /// `--fastqc_args`' "Implies --fastqc" is doc text, not a clap `requires`, so `fastqc`
     /// alone is false on an args-only run.
     pub fn fastqc_requested(&self) -> bool {
-        self.fastqc || self.fastqc_args.is_some()
+        // `--fastqc_args` implies `--fastqc` only when there is no other FastQC run
+        // to configure. With `--fastqc_raw` it configures that one, so it must not
+        // conjure a post-trim report the modes in §421 cannot produce.
+        self.fastqc || (self.fastqc_args.is_some() && !self.fastqc_raw)
     }
 
     /// Validate CLI arguments after parsing.
@@ -1148,6 +1161,20 @@ impl Cli {
                      interleaved uBAM — add --output-format ubam, which does produce a report"
                 );
             }
+        }
+
+        // `apply_fastqc_args` overwrites `config.output_dir` after trim-galore has
+        // set it, so an `-o` here would move the raw reports off the path the
+        // `*_raw_fastqc.*` contract promises.
+        if self.fastqc_raw
+            && let Some(args) = self.fastqc_args.as_deref()
+            && crate::fastqc::args_set_outdir(args)
+        {
+            anyhow::bail!(
+                "--fastqc_raw cannot be combined with -o/--outdir inside --fastqc_args: \
+                 the raw reports are written beside the trimmed output. Use --output_dir \
+                 to move both, or drop the -o from --fastqc_args"
+            );
         }
 
         // The specialty arms return before setup_trimming, so no preset reaches a clip site.
@@ -2768,6 +2795,113 @@ mod tests {
         Cli::parse_from(["trim_galore", "--hardtrim5", "20", "--clip_R1", "3", R1])
             .validate()
             .expect("--clip_R1 under --hardtrim5 warns, it does not fail");
+    }
+
+    // ── --fastqc_raw: analyses the input, so the #421 arms do not apply ──
+
+    #[test]
+    fn fastqc_raw_does_not_imply_fastqc() {
+        let cli = Cli::parse_from(["trim_galore", "--fastqc_raw", R1]);
+        assert!(cli.fastqc_raw);
+        assert!(
+            !cli.fastqc,
+            "--fastqc_raw must not turn on the post-trim report"
+        );
+        assert!(
+            !cli.fastqc_requested(),
+            "fastqc_requested() gates the post-trim sites and the #421 refusals; \
+             --fastqc_raw must leave it false"
+        );
+    }
+
+    #[test]
+    fn fastqc_raw_accepted_with_every_specialty_mode() {
+        // The twins of the #421 refusals above: those modes write no post-trim
+        // report, but the input is present and analysable in all of them.
+        for args in [
+            vec!["trim_galore", "--hardtrim5", "20", "--fastqc_raw", R1],
+            vec!["trim_galore", "--hardtrim3", "20", "--fastqc_raw", R1],
+            vec!["trim_galore", "--clock", "--paired", "--fastqc_raw", R1, R2],
+            // `--implicon` is `require_equals`, so `--implicon 8` would make 8 a
+            // positional input rather than the UMI length.
+            vec![
+                "trim_galore",
+                "--implicon=8",
+                "--paired",
+                "--fastqc_raw",
+                R1,
+                R2,
+            ],
+        ] {
+            let label = args.join(" ");
+            let cli = Cli::parse_from(args);
+            assert!(
+                cli.validate().is_ok(),
+                "--fastqc_raw must be accepted: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn fastqc_still_refused_in_specialty_modes_alongside_fastqc_raw() {
+        // Guards the decision not to widen `fastqc_requested()`: adding
+        // --fastqc_raw must not smuggle --fastqc past the #421 refusals.
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--hardtrim5",
+            "20",
+            "--fastqc_raw",
+            "--fastqc",
+            R1,
+        ]);
+        let err = cli.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("--fastqc") && err.contains("--hardtrim5"),
+            "expected the #421 refusal to still fire, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fastqc_raw_refuses_outdir_inside_fastqc_args() {
+        // `apply_fastqc_args` overwrites output_dir after trim-galore sets it,
+        // so an -o here would silently move the raw reports.
+        for flag in ["-o", "--outdir"] {
+            let cli = Cli::parse_from([
+                "trim_galore",
+                "--fastqc_raw",
+                "--fastqc_args",
+                &format!("{flag} elsewhere"),
+                R1,
+            ]);
+            let err = cli.validate().unwrap_err().to_string();
+            assert!(
+                err.contains("--fastqc_raw") && err.contains("--fastqc_args"),
+                "expected {flag} refusal, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn fastqc_raw_allows_fastqc_args_without_outdir() {
+        let cli = Cli::parse_from([
+            "trim_galore",
+            "--fastqc_raw",
+            "--fastqc_args",
+            "--nogroup",
+            R1,
+        ]);
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn bare_outdir_with_no_value_is_not_refused() {
+        // `apply_fastqc_args` ignores a trailing -o with no value, so the guard
+        // must ignore it too or it refuses a command that would have worked.
+        let cli = Cli::parse_from(["trim_galore", "--fastqc_raw", "--fastqc_args", "-o", R1]);
+        assert!(
+            cli.validate().is_ok(),
+            "a valueless -o is a no-op in apply_fastqc_args"
+        );
     }
 
     // ── #421 acceptance twins: these arms do reach `fastqc::run` ──
