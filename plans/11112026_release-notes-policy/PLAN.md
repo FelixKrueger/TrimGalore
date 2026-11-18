@@ -81,7 +81,11 @@ In order, nothing else:
    ([#NNN](url)) — one sentence.` Selected as "a user would change what they do because of this".
    Dependency bumps, CI, docs and internal refactors are never highlights.
 3. **A link to the CHANGELOG section** for the full record.
-4. **An install block** — cargo, conda and docker lines. **Note these do not exist to copy.**
+4. **Contributor acknowledgements**, when the release has first-time contributors, under GitHub's
+   own `## New Contributors` heading and wording. **Added in the 2026-11-18 code review** (§15) —
+   revision 3 shipped a four-component policy that had no slot for them, and `--generate-notes`
+   was supplying this section for free. See §15 for why the list cannot be regenerated later.
+5. **An install block** — cargo, conda and docker lines. **Note these do not exist to copy.**
    Revision 1 said "the existing ... lines"; no prior release body has any, because every one is pure
    `--generate-notes` output. The cargo line nearest to canonical is `README.md:46`. Step 1's
    `README.md` must therefore *define* this block, not reference it.
@@ -130,8 +134,8 @@ No Rust changes. Three files, plus one per release thereafter:
 
 ### Step 1 — `.github/release-notes/README.md`
 
-The policy from §3 ("what a GA body contains"), the four-part shape, and one worked example. Short:
-this is a rule, not an essay.
+The policy from §3 ("what a GA body contains"), the five-part shape (four as revision 3 had it;
+§15 added the fifth), and one worked example. Short: this is a rule, not an essay.
 
 It must also state the **mechanism**, not only the prose shape: that `check-release` fails a GA
 dispatch when the file is missing or blank, and that the error names the path to create. There is no
@@ -607,3 +611,75 @@ job 4 that *looks* present is. `release.yml` was restored byte-identically after
 Step 3 still has no CI coverage and cannot acquire any — see §5 Step 3. §8.2 stays unverified: that
 `gh release create --notes-file` rejects a missing file is only testable by making a real release,
 and it is a weak fallback regardless, firing after the tag push.
+
+## 15. Code review, 2026-11-18
+
+Dual code review (`CODE_REVIEW_A.md`, `CODE_REVIEW_B.md`) plus a Mode B coverage audit
+(`COVERAGE.md`), all three in fresh contexts against commit `8f984ac`.
+
+**Both reviewers cleared the mechanism.** A traced five dispatch shapes, B traced nine; neither found
+a path this commit introduces to "tag pushed, no release". Both confirmed job-0 placement, the eight
+direct `needs: check-release` edges and the absence of status functions. All five mutations §14
+claims do genuinely fail. B credits one benefit the commit did not claim: `--generate-notes`
+recomputes "changes since the previous tag" at run time, so a committed file makes a re-dispatch
+deterministic.
+
+### Taken: the fifth policy component
+
+All three reports converged on it, and A put it best — the missing acknowledgements in `v2.4.0.md`
+are not a backfill slip but a **policy gap every future GA inherits**, because `--generate-notes`
+appended `## New Contributors` automatically and `--notes-file` does not. §3 now has a fifth
+component; `.github/release-notes/README.md` states it; `v2.4.0.md` carries the three lines
+byte-identically to the published body, so no wording anyone was credited with changes.
+
+**The list cannot be regenerated later, which is the part worth keeping.** Asking the
+`releases/generate-notes` API for v2.4.0 in November 2026 returns **two** of the three contributors
+its published body credits — with or without an explicit `previous_tag_name` — because someone who
+was a first-time contributor then is not one now. A policy that said "regenerate it" would have
+dropped a contributor, which is the failure this component exists to prevent. So the README says to
+capture the list at release time and treats the published body as the only authoritative record for
+past releases.
+
+Also worth noting against §5 Step 4's framing: deferring `gh release edit` was about
+*authorisation*, not content. The file was already in the state it would have been applied in, and
+§14 did not record the acknowledgements as outstanding — which is exactly how this would have been
+lost, since the remaining step was described as needing only go-ahead.
+
+### Outstanding — reported, not yet taken
+
+**Test hardening.** Five mutations escape the suite. `is_job_header` filters job names to `[a-z-]`,
+so a job named `gate_notes` or `publish-crate-2` is absorbed into the preceding block: the relocation
+mutation §14 calls *the* hazard has a one-character bypass, and `every_other_job_needs_check_release`
+is vacuous for such a name — verified here, including a job with no `needs:` at all passing all four
+tests. Also uncovered: `continue-on-error`, `always ()` written with a space (which actionlint
+accepts too), and deletion of the `echo "notes_path=$NOTES"` line. Block-form `needs:` would produce
+a false failure whose message is untrue.
+
+**§8.2 assumption 2 is now verified, and its framing corrected.** `gh` 2.92.0 rejects a *missing*
+`--notes-file` path at the file read, before any API call — no real release needed to establish it.
+But `--notes-file ""` passes argument parsing and reaches the API, producing a release with an empty
+body and exit 0. For the empty-path case the assumption's "a louder way to fail" is wrong: it is
+silent. What prevents it today is the notes step's `if:` being the exact complement of `Create
+release`'s branch — correct, and untested.
+
+**Two comments in `release.yml`.** The `# Interpolation only: a shell variable here would expand to
+empty` comment is wrong as written — a *defined* variable expands fine, the hazard was an *undefined*
+one — and it contradicts `Detect release` twenty lines above, which is built entirely from shell
+variables. Both new comments also restate commit-message paragraphs in source, against CLAUDE.md.
+
+**Docs.** Step 1's worked example is still missing (the README has templates but no example body and
+never points at `v2.4.0.md`). The README's highlight template says `/pull/NNN` where the backfill and
+`CHANGELOG.md` both use `/issues/NNN` for those six numbers. The CHANGELOG link lands on the page
+root rather than the `#version-240-release-on-9-november-2026` anchor. The README says the CI test
+asserts two properties; it asserts three.
+
+**`release.yml:3-33`'s "Release invariant" preamble is the release checklist in practice** and was
+not updated, so its canonical sequence now walks into the job-0 refusal unwarned. §8.5's premise
+(no `CONTRIBUTING.md`, no docs page) is otherwise intact.
+
+### Process note
+
+Both reviewers were given the same working tree, so A found `release.yml` mid-mutation from B's
+harness. A worked from `git show 8f984ac:...` in `$TMPDIR` and touched nothing; B restored
+byte-identically and its sha256 matched. Concurrent reviewers that mutate a shared tree want
+worktrees or a pinned copy.

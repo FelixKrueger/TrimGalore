@@ -36,6 +36,25 @@ CI, docs and internal refactors never qualify, however much work they were.
 
 **A link to the CHANGELOG section** for the full record.
 
+**Contributor acknowledgements, when the release has first-time contributors.** GitHub's own
+heading and wording, so the credit reads the same as it always has:
+
+```
+## New Contributors
+* @handle made their first contribution in https://github.com/FelixKrueger/TrimGalore/pull/NNN
+```
+
+This is the one component a curated body can lose by accident. `--generate-notes` appended it
+automatically; `--notes-file` does not, so it has to be carried deliberately or the release page
+simply stops crediting people.
+
+Take the list from the auto-generated notes **at release time** — the preview GitHub shows when
+drafting a release, or `gh api -X POST repos/FelixKrueger/TrimGalore/releases/generate-notes -f
+tag_name=vX.Y.Z`. Do not regenerate it later to reconstruct an old release: the computation is not
+stable over time. Regenerating v2.4.0's list in November 2026 returns two of the three contributors
+its published body credits, because someone who was a first-time contributor then is not one now.
+For past releases the published body is the only authoritative record.
+
 **An install block.** Define it here rather than copying a previous release, because no previous
 release body has one:
 
