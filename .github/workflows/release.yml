@@ -329,6 +329,8 @@ jobs:
         if: needs.check-release.outputs.is_dry_run != 'true'
         working-directory: /tmp/digests
         run: |
+          # Both expansions must word-split into separate arguments.
+          # shellcheck disable=SC2046
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)

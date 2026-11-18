@@ -84,9 +84,12 @@ jobs:
           # <git-hash> — <os>/<arch> — built <ISO-8601-UTC>. The em-dash is literal.
           ./target/release/trim_galore --version \
             | grep -qE '^[0-9a-f]{7,40} — [a-z0-9_]+/[a-z0-9_]+ — built [0-9T:Z-]+$'
-          # -V must NOT carry the provenance line (stays the short form).
-          ! ./target/release/trim_galore -V \
-            | grep -qE '^[0-9a-f]{7,40} — '
+          # A bare `!` is exempt from errexit, so this must be an explicit test.
+          if ./target/release/trim_galore -V \
+               | grep -qE '^[0-9a-f]{7,40} — '; then
+            echo "::error::-V must not carry the provenance line"
+            exit 1
+          fi
 
   reproducibility:
     name: Reproducibility (SOURCE_DATE_EPOCH)
@@ -155,6 +158,30 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy (release, all targets, -D warnings)
         run: cargo clippy --all-targets --release -- -D warnings
+
+  # Separate from `lint` so that job's status-check name stays as branch
+  # protection has it.
+  actions-lint:
+    name: Lint (workflows)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: actionlint
+        # Excluded by code, never by severity: SC2251 catches a `!` that is
+        # exempt from errexit, and it is only info-level.
+        env:
+          SHELLCHECK_OPTS: -e SC2086 -e SC2012 -e SC2129
+        run: |
+          shopt -s nullglob
+          files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          # Bare `actionlint` exits 0 when discovery finds nothing.
+          test "${#files[@]}" -gt 0
+          actionlint -color "${files[@]}"
 
   # docs.yml builds the same site to deploy it; this builds it to gate PRs.
   docs-build:
@@ -394,7 +421,7 @@ jobs:
             pred_mib=$(sed -n 's/.*predicted peak ≈ \([0-9][0-9]*\) of \([0-9][0-9]*\) MiB budget.*/\1/p' "$log" | head -1)
             budget_mib=$(sed -n 's/.*predicted peak ≈ \([0-9][0-9]*\) of \([0-9][0-9]*\) MiB budget.*/\2/p' "$log" | head -1)
             case "${peak_kb}:${pred_mib}:${budget_mib}" in
-              ''|*::*|:*) echo "::error::$label: parse produced an empty field (peak=$peak_kb pred=$pred_mib budget=$budget_mib)"; fail=1; return;;
+              *::*|:*|*:) echo "::error::$label: parse produced an empty field (peak=$peak_kb pred=$pred_mib budget=$budget_mib)"; fail=1; return;;
             esac
 
             # Compare in KiB on both sides: a second truncation to MiB is where
@@ -762,7 +789,11 @@ jobs:
           #      so a green run here proves the bundled library is doing
           #      the work — not an accidental shell-out.
           rm -rf /tmp/rust_fastqc; mkdir -p /tmp/rust_fastqc
-          ! command -v fastqc  # confirm no external fastqc on PATH
+          # A bare `!` is exempt from errexit, so this must be an explicit test.
+          if command -v fastqc; then
+            echo "::error::an external fastqc is on PATH; a green run would not prove the bundled library did the work"
+            exit 1
+          fi
           ./target/release/trim_galore --fastqc -o /tmp/rust_fastqc \
             test_files/illumina_10K.fastq.gz
           test -f /tmp/rust_fastqc/illumina_10K_trimmed_fastqc.html
