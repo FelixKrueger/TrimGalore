@@ -353,7 +353,9 @@ pub struct Cli {
     #[clap(long = "fastqc_raw", alias = "fastqc-raw")]
     pub fastqc_raw: bool,
 
-    /// Additional arguments to pass to FastQC. Implies --fastqc.
+    /// Additional arguments to pass to FastQC. Applies to every FastQC run the
+    /// invocation asks for. Implies --fastqc on its own; with --fastqc_raw it
+    /// configures that run instead, so it does not add a post-trim report.
     /// Common flags are translated to the bundled engine: --nogroup, --expgroup,
     /// --quiet, --png, --nano, --nofilter, --casava, -t/--threads, -o/--outdir.
     /// --png embeds PNG charts in the HTML instead of SVG; both image sets are
@@ -615,7 +617,10 @@ impl Cli {
     /// `--fastqc_args`' "Implies --fastqc" is doc text, not a clap `requires`, so `fastqc`
     /// alone is false on an args-only run.
     pub fn fastqc_requested(&self) -> bool {
-        self.fastqc || self.fastqc_args.is_some()
+        // `--fastqc_args` implies `--fastqc` only when there is no other FastQC run
+        // to configure. With `--fastqc_raw` it configures that one, so it must not
+        // conjure a post-trim report the modes in §421 cannot produce.
+        self.fastqc || (self.fastqc_args.is_some() && !self.fastqc_raw)
     }
 
     /// Validate CLI arguments after parsing.

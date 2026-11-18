@@ -93,12 +93,15 @@ TG already knows each input's format: `input_formats` is computed at `main.rs:34
 | `--fastqc_raw` | yes | no |
 | `--fastqc` | no | yes (today's behaviour) |
 | `--fastqc_raw --fastqc` | yes | yes |
-| `--fastqc_args X` alone | no | yes — `--fastqc_args` implies `--fastqc` (`cli.rs:610`) |
-| `--fastqc_raw --fastqc_args X` | yes | **yes** — the implication still fires |
+| `--fastqc_args X` alone | no | yes — `--fastqc_args` implies `--fastqc` |
+| `--fastqc_raw --fastqc_args X` | yes | no — the args configure the raw run |
 
-The last row is a deliberate, documented consequence, not an oversight: `--fastqc_args` implies
-`--fastqc`, so asking for raw QC *and* passing engine args also turns on trimmed QC. Documented in
-`--help`; see §10 Open-1 for the alternative.
+**Revised at code review.** Revision 2 documented the last row as "both sets", accepting that
+`--fastqc_args` implies `--fastqc` unconditionally. That was wrong in a way the plan did not see: it
+made `--fastqc_raw --fastqc_args X` refuse on all four specialty modes, with an error naming
+`--fastqc` — a flag the user never passed — falsifying this flag's own help text. `fastqc_requested()`
+now reads `self.fastqc || (self.fastqc_args.is_some() && !self.fastqc_raw)`: the args configure
+whichever run was asked for, and conjure no report the mode cannot produce.
 
 ### 3.2 Naming — a `_raw`-suffixed symlink, reports written flat
 
@@ -122,9 +125,15 @@ Suffix placement: inserted before the full extension, so `sample.fastq.gz` → `
 `fastqc-rust` strips known extensions when naming the report (`runner.rs`, tested at `:1070`), giving
 `sample_raw_fastqc.*`.
 
-**Reports are written flat, into `--output_dir` (or the working directory) — no subdirectory.** With
-distinct filenames the separation a subdirectory bought is no longer needed, and flat output is what
-the existing nf-core globs already collect (§7).
+**Reports are written flat — no subdirectory — into `--output_dir`, or beside their own input when
+none is given**, exactly as `single_end_output_name` and the report namers do (`io.rs`, #398). With
+distinct filenames the separation a subdirectory bought is unnecessary, and flat output is what the
+existing nf-core globs already collect (§7).
+
+**The per-input directory is load-bearing, not cosmetic.** Pinning one directory for the whole run —
+which revision 2 did — pools every input's reports together, so two inputs sharing a basename across
+directories write the same report and one silently wins while the run exits 0. The trimmed outputs do
+not collide in that shape, so the pre-flight has nothing to object to. See §13.
 
 ### 3.3 Format is declared, not inferred
 
@@ -521,3 +530,56 @@ skip the raw pass or run it before the refusal, which is the whole invariant.
 - §10's Open-1, Open-3 and Open-5 are unchanged and unaddressed, as planned.
 - Portability (§10 Open-2) is untested: `std::os::unix::fs::symlink` is used directly, so this will
   not compile for a Windows target. No CI job covers one.
+
+---
+
+## 14. Code review round 1 — findings and fixes
+
+Dual independent code review (`CODE_REVIEW_A.md`, `CODE_REVIEW_B.md`) plus a coverage audit
+(`COVERAGE.md`, verdict **INCOMPLETE**). Both reviewers and the audit independently found the same
+Critical. **904 tests pass** (896 before, +8), fmt and clippy clean.
+
+### Fixed
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| **C1** | **Raw reports silently overwrite each other.** `run_pretrim_fastqc` pinned the directory to `output_dir.unwrap_or(".")` for the whole run. Two inputs sharing a basename across directories → distinct trimmed outputs (pre-flight passes), **one** raw report, exit 0. Reproduced SE and PE. | `io::raw_alias_name` now places the alias in `--output_dir` or beside its own input, like every other namer. Reports follow the alias. |
+| **C2** | The raw reports were never pre-flight candidates — §3.6/§5 step 7 specified this and it was not built. | `io::raw_report_names` builds both artifacts as `PlannedOutput`s; `preflight_then_raw_qc` extends the candidate list with them. |
+| **H1** | `--fastqc_raw` was outside the pre-flight tripwire entirely — two new writers per input on all 13 arms, none guarded. | `fastqc_active` knows the flag; three cases added, including `pe_trim_fastqc_raw_split_dirs`. |
+| **H2** | `--fastqc_raw --fastqc_args X` refused on all four specialty modes, naming `--fastqc`. | `fastqc_requested()` narrowed (§3.1). |
+| **M1** | The `_raw` alias can *be* another input — `s.fastq.gz` + `s_raw.fastq.gz` destroys input #2. §3.8 had dismissed this row as "non-colliding", which was wrong. | Checked against `guarded_inputs` before staging; refusal names the alias, the input it is for, and the clashing input. |
+| **M2** | No unwind-safe cleanup: a panic inside fastqc-rust strands the alias and blocks every later run. | `AliasGuard`, a `Drop` guard. |
+| **M3** | TOCTOU between the occupancy check and `symlink()`. | The check is gone; `symlink()`'s own `EEXIST` is mapped to the curated message. Atomic. |
+| **M5** | `raw_alias_name` untested. | Four unit tests in `io.rs`, pinning extensions, the non-FASTQ fallback, the per-input directory, and both report names. |
+| — | `exists()` missed a *dangling* symlink — the exact state a killed run leaves. | `symlink_metadata`, then subsumed by M3's atomic approach. |
+| — | Two comments asserted pre-flight behaviour that does not exist, and `pub fn run` shipped undocumented because my insertion orphaned its rustdoc onto `resolved_threads`. | Corrected. |
+
+### Deliberately not changed
+
+**M4 — `--passthrough` carriers get no raw report.** §10 Open-3's decision stands: a carrier is copied,
+not trimmed. Noted as an inconsistency with `guarded_inputs` and the `--phred64` pre-flight, which do
+treat it as an input. Revisit if anyone asks for QC on a Multiome I1 read.
+
+### The recurring failure, now four deep
+
+Three validations in the plan could not fail on the mistake they named (caught at plan review), V7
+could not either (caught by the audit), and `raw_and_trimmed_reports_coexist_with_distinct_sample_names`
+asserted `assert_ne!` between a raw and a trimmed `Filename` — which differ under *any* scheme,
+alias or not. Now pins both literal values.
+
+**The fifth was nearly added while fixing the fourth.** The three new tripwire cases do not catch C1:
+`raw_report_names` predicts candidates *through* `raw_alias_name`, so mutating that function moves
+the prediction and the behaviour together and the tripwire stays green. Verified by mutation — the
+tripwire passed with the bug restored. The guard that does discriminate is
+`raw_reports_land_beside_each_input_not_pooled_in_the_cwd`, which spells the expected paths out
+literally instead of deriving them; it fails (exit 101) under the same mutation. **A prediction
+derived from the code under test cannot test that code** — the tripwire cases are still worth having
+for the rest of the output set, but they are not C1's regression guard.
+
+### Still open
+
+MultiQC's own parsing remains unverified — all three agents said so independently. What is proven is
+that the report's `Filename` field carries `_raw` (V2, asserted inside the zip). What is not proven
+is that MultiQC reads that field into a distinct sample, and `fn_clean_exts` not stripping `_raw`
+is read from config, not observed. **That is the one thing standing between this and an nf-core
+module bump**, and no further code review will produce it.

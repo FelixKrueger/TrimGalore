@@ -232,7 +232,7 @@ fn is_fastqc_artifact(path: &Path) -> bool {
 /// source of truth for it.
 fn fastqc_active(args: &[&str]) -> bool {
     args.iter()
-        .any(|a| *a == "--fastqc" || *a == "--fastqc_args")
+        .any(|a| *a == "--fastqc" || *a == "--fastqc_args" || *a == "--fastqc_raw")
 }
 
 struct Tripwire<'a> {
@@ -506,6 +506,50 @@ fn se_trim_output_dir() {
 #[test]
 fn se_trim_fastqc() {
     Tripwire::new("se_trim_fastqc", &["--fastqc", "a.fastq"], &["a.fastq"]).run(stage_se);
+}
+
+#[test]
+fn se_trim_fastqc_raw() {
+    // `--fastqc_raw` adds two report writers per input plus a transient alias. Without
+    // a case here the whole surface sits outside the exact-set assertion, which is how
+    // the raw reports came to be pooled in the CWD and silently overwrite each other.
+    Tripwire::new(
+        "se_trim_fastqc_raw",
+        &["--fastqc_raw", "a.fastq"],
+        &["a.fastq"],
+    )
+    .run(stage_se);
+}
+
+#[test]
+fn pe_trim_fastqc_raw_both_sets() {
+    // Both report sets at once: the raw pass must not disturb the post-trim one.
+    Tripwire::new(
+        "pe_trim_fastqc_raw_both_sets",
+        &[
+            "--fastqc_raw",
+            "--fastqc",
+            "--paired",
+            "s_R1.fastq",
+            "s_R2.fastq",
+        ],
+        &["s_R1.fastq", "s_R2.fastq"],
+    )
+    .run(stage_pair);
+}
+
+#[test]
+fn pe_trim_fastqc_raw_split_dirs() {
+    // The case that discriminates. With both mates in the case root, "the CWD" and
+    // "beside the input" are the same directory, so the two cases above pass either
+    // way. Split them and a raw report pooled in the CWD lands outside its input's
+    // directory, failing T1 — #398's shape, which this flag reintroduced.
+    Tripwire::new(
+        "pe_trim_fastqc_raw_split_dirs",
+        &["--fastqc_raw", "--paired", "r1/s_R1.fastq", "r2/s_R2.fastq"],
+        &["r1/s_R1.fastq", "r2/s_R2.fastq"],
+    )
+    .run(stage_pair_split);
 }
 
 #[test]
@@ -1227,7 +1271,7 @@ fn the_site_inventory_is_complete() {
          count — do not just update the count."
     );
     assert_eq!(
-        src.matches("naming::preflight_output_collisions(").count(),
+        src.matches("preflight_output_collisions(").count(),
         1,
         "the pre-flight must be reached only through preflight_then_raw_qc: a direct \
          call would skip the --fastqc_raw pass, or run it before the refusal"

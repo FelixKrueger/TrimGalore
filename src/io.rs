@@ -305,6 +305,47 @@ pub fn single_end_output_name(
     }
 }
 
+/// `<stem>_raw<ext>` — the path FastQC is pointed at for a `--fastqc_raw` report.
+///
+/// The extension is kept so a gzipped FASTQ is still recognised as one. Sits in
+/// `--output_dir`, else beside its input, like every other namer here (#398).
+pub fn raw_alias_name(input: &Path, output_dir: Option<&Path>) -> PathBuf {
+    let name = input.file_name().unwrap_or_default().to_string_lossy();
+    let stem = strip_fastq_extensions(input);
+    // A content-detected uBAM may carry any name, so fall back to the last dot.
+    let (base, ext) = if stem.len() < name.len() {
+        (stem.as_str(), &name[stem.len()..])
+    } else {
+        match name.rfind('.') {
+            Some(i) => (&name[..i], &name[i..]),
+            None => (name.as_ref(), ""),
+        }
+    };
+    let filename = format!("{base}_raw{ext}");
+    match output_dir {
+        Some(dir) => dir.join(&filename),
+        None => input.parent().unwrap_or(Path::new(".")).join(&filename),
+    }
+}
+
+/// The two report artifacts a `--fastqc_raw` pass writes for `input`.
+///
+/// fastqc-rust names them after the alias, minus its extension.
+pub fn raw_report_names(input: &Path, output_dir: Option<&Path>) -> Vec<PlannedOutput> {
+    let alias = raw_alias_name(input, output_dir);
+    let stem = strip_fastq_extensions(&alias);
+    let dir = alias.parent().unwrap_or(Path::new(".")).to_path_buf();
+    ["html", "zip"]
+        .iter()
+        .map(|ext| {
+            (
+                dir.join(format!("{stem}_fastqc.{ext}")),
+                OutputSource::Input(input.to_path_buf()),
+            )
+        })
+        .collect()
+}
+
 /// Generate the trimmed output filename for single-end mode, uBAM variant.
 ///
 /// `<stem>_trimmed.bam` — compression is implicit (BGZF, always on for BAM).
@@ -934,6 +975,80 @@ impl Drop for PendingOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── `--fastqc_raw`'s alias namer, pinned to literal paths ─────────────
+    //
+    // The report's own `Filename` field is this name, and MultiQC keys its sample
+    // name on that field — so these strings are a user-visible surface, not an
+    // internal detail.
+
+    #[test]
+    fn raw_alias_keeps_the_extension_so_gzip_is_still_recognised() {
+        for (input, want) in [
+            ("s.fastq.gz", "s_raw.fastq.gz"),
+            ("s.fq.gz", "s_raw.fq.gz"),
+            ("s.fastq", "s_raw.fastq"),
+            ("s.fq", "s_raw.fq"),
+            ("s.fq.bgz", "s_raw.fq.bgz"),
+        ] {
+            assert_eq!(
+                raw_alias_name(Path::new(input), None),
+                PathBuf::from(want),
+                "input {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_alias_falls_back_to_the_last_dot_for_non_fastq_names() {
+        // A content-detected uBAM may carry any name; the suffix must not land
+        // after the extension (`reads.bam_raw`), which is the naive split.
+        for (input, want) in [
+            ("reads.bam", "reads_raw.bam"),
+            ("reads.dat", "reads_raw.dat"),
+            ("a.b.c", "a.b_raw.c"),
+            ("noext", "noext_raw"),
+        ] {
+            assert_eq!(
+                raw_alias_name(Path::new(input), None),
+                PathBuf::from(want),
+                "input {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_alias_sits_beside_its_input_unless_output_dir_is_given() {
+        // Pinning the defect review found: one directory for the whole run meant two
+        // inputs sharing a basename across directories wrote the same report.
+        assert_eq!(
+            raw_alias_name(Path::new("a/s.fastq.gz"), None),
+            PathBuf::from("a/s_raw.fastq.gz")
+        );
+        assert_eq!(
+            raw_alias_name(Path::new("b/s.fastq.gz"), None),
+            PathBuf::from("b/s_raw.fastq.gz")
+        );
+        assert_eq!(
+            raw_alias_name(Path::new("a/s.fastq.gz"), Some(Path::new("out"))),
+            PathBuf::from("out/s_raw.fastq.gz")
+        );
+    }
+
+    #[test]
+    fn raw_report_names_are_the_two_artifacts_beside_the_alias() {
+        let got: Vec<_> = raw_report_names(Path::new("a/s.fastq.gz"), None)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("a/s_raw_fastqc.html"),
+                PathBuf::from("a/s_raw_fastqc.zip"),
+            ]
+        );
+    }
 
     // ─── #423: the paired report namers, pinned to literal paths ───────────
     //

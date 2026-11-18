@@ -20,23 +20,6 @@ use std::path::Path;
 use anyhow::Result;
 use fastqc_rust::{config::FastQCConfig, runner};
 
-/// Run FastQC on a single trimmed output file.
-///
-/// `output_path` — the trimmed output to analyse (FASTQ, or BAM when
-///                 `--output-format ubam` is in effect).
-/// `fastqc_args` — raw user-supplied `--fastqc_args` string. A subset
-///                 of common FastQC CLI flags is translated to
-///                 [`FastQCConfig`] mutations; unknown flags emit a
-///                 warning and are ignored.
-/// `output_dir`  — where the `*_fastqc.html` / `*_fastqc.zip` artifacts
-///                 land. `None` falls back to the analysed file's parent
-///                 directory (fastqc-rust's default).
-/// `cores`       — threading budget for `fastqc-rust`'s internal rayon
-///                 pool. Always at least 1.
-/// `phred64`     — declares Phred+64 input for the FASTQ output path. BAM
-///                 declares its own encoding, so pass `false` there.
-/// Threads `run` will give FastQC: `--fastqc_args -t N` overrides `cores`.
-/// The memory model charges this, not `--cores`.
 /// A format declared to the engine, overriding its filename-extension sniffing.
 ///
 /// fastqc-rust reads `.bam`/`.ubam` as BAM, `.sam` as SAM, `.fast5` as Fast5 and
@@ -70,6 +53,8 @@ pub fn args_set_outdir(raw: &str) -> bool {
         .any(|(i, tok)| matches!(*tok, "-o" | "--outdir") && tokens.get(i + 1).is_some())
 }
 
+/// Threads `run` will give FastQC: `--fastqc_args -t N` overrides `cores`.
+/// The memory model charges this, not `--cores`.
 pub fn resolved_threads(fastqc_args: Option<&str>, cores: usize) -> usize {
     let mut threads = cores.max(1);
     if let Some(raw) = fastqc_args {
@@ -85,6 +70,23 @@ pub fn resolved_threads(fastqc_args: Option<&str>, cores: usize) -> usize {
     threads
 }
 
+/// Run FastQC on a single file.
+///
+/// `output_path` — the file to analyse (FASTQ, or BAM when
+///                 `--output-format ubam` is in effect).
+/// `fastqc_args` — raw user-supplied `--fastqc_args` string. A subset
+///                 of common FastQC CLI flags is translated to
+///                 [`FastQCConfig`] mutations; unknown flags emit a
+///                 warning and are ignored.
+/// `output_dir`  — where the `*_fastqc.html` / `*_fastqc.zip` artifacts
+///                 land. `None` falls back to the analysed file's parent
+///                 directory (fastqc-rust's default).
+/// `cores`       — threading budget for `fastqc-rust`'s internal rayon
+///                 pool. Always at least 1.
+/// `phred64`     — declares Phred+64 input for the FASTQ output path. BAM
+///                 declares its own encoding, so pass `false` there.
+/// `sequence_format` — declared format; `None` leaves the engine to sniff
+///                 the extension.
 pub fn run(
     output_path: &Path,
     fastqc_args: Option<&str>,

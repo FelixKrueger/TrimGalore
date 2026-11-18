@@ -83,19 +83,14 @@ fn sanity_check_any(path: &std::path::Path) -> Result<()> {
 /// `<stem>_raw<ext>` beside `dir` — the name FastQC is pointed at for a raw report.
 ///
 /// The extension is kept so a gzipped FASTQ is still recognised as one.
-fn raw_alias_path(input: &Path, dir: &Path) -> std::path::PathBuf {
-    let name = input.file_name().unwrap_or_default().to_string_lossy();
-    let stem = naming::strip_fastq_extensions(input);
-    let (base, ext) = if stem.len() < name.len() {
-        (stem.as_str(), &name[stem.len()..])
-    } else {
-        // Not a FASTQ-family name — a content-detected uBAM may be called anything.
-        match name.rfind('.') {
-            Some(i) => (&name[..i], &name[i..]),
-            None => (name.as_ref(), ""),
-        }
-    };
-    dir.join(format!("{base}_raw{ext}"))
+/// Removes the staged alias on every exit from the raw pass, including a panic
+/// inside fastqc-rust — a stranded one blocks every later run.
+struct AliasGuard(std::path::PathBuf);
+
+impl Drop for AliasGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Run the bundled FastQC on each input, before trimming.
@@ -117,7 +112,6 @@ fn run_pretrim_fastqc(cli: &Cli) -> Result<()> {
 
     let output_dir = cli.output_dir.as_deref();
     naming::ensure_output_dir(output_dir)?;
-    let dir = output_dir.unwrap_or_else(|| Path::new("."));
 
     for input in &cli.input {
         let format = match detect_input_format(input)? {
@@ -125,36 +119,57 @@ fn run_pretrim_fastqc(cli: &Cli) -> Result<()> {
             InputFormat::FastqPlain | InputFormat::FastqGz => fastqc::SeqFormat::Fastq,
         };
 
-        let alias = raw_alias_path(input, dir);
-        if alias.exists() {
+        let alias = naming::raw_alias_name(input, output_dir);
+
+        // An input of this run may already occupy the alias name — `s.fastq.gz`
+        // alongside `s_raw.fastq.gz`. Staging over it would destroy an input.
+        if let Some(clash) = guarded_inputs(cli)
+            .iter()
+            .find(|p| naming::path_identity_key(p) == naming::path_identity_key(&alias))
+        {
             anyhow::bail!(
-                "Cannot stage the raw-FastQC input alias '{}': a file is already there. \
-                 Remove it, or rename the input.",
-                alias.display()
+                "--fastqc_raw needs to stage '{}' to analyse '{}', but that name is already \
+                 an input to this run ('{}'). Rename one of them, or pass --output_dir to \
+                 move the raw reports elsewhere.",
+                alias.display(),
+                input.display(),
+                clash.display()
             );
         }
+
         let target = std::fs::canonicalize(input)
             .with_context(|| format!("Failed to resolve input path: {}", input.display()))?;
-        std::os::unix::fs::symlink(&target, &alias).with_context(|| {
-            format!(
-                "Failed to create the raw-FastQC input alias '{}'",
-                alias.display()
-            )
-        })?;
 
-        let result = fastqc::run(
+        // `symlink` itself fails with EEXIST, so there is no check-then-create gap;
+        // `exists()` would also miss a dangling link, which is what a killed run leaves.
+        if let Err(e) = std::os::unix::fs::symlink(&target, &alias) {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                anyhow::bail!(
+                    "Cannot stage the raw-FastQC input alias '{}': a file is already there. \
+                     Remove it, or pass --output_dir.",
+                    alias.display()
+                );
+            }
+            return Err(e).with_context(|| {
+                format!(
+                    "Failed to create the raw-FastQC input alias '{}'",
+                    alias.display()
+                )
+            });
+        }
+        let _guard = AliasGuard(alias.clone());
+
+        // Reports land beside the alias, so that `--output_dir`-less runs keep the
+        // raw set with its input rather than pooling every input's in the CWD.
+        let report_dir = alias.parent().filter(|p| !p.as_os_str().is_empty());
+        fastqc::run(
             &alias,
             cli.fastqc_args.as_deref(),
-            output_dir,
+            report_dir,
             cli.cores,
             cli.phred64,
             Some(format),
-        );
-
-        // Remove the alias on both paths: a stranded symlink would trip the next
-        // run's output-collision pre-flight.
-        let _ = std::fs::remove_file(&alias);
-        result?;
+        )?;
     }
 
     Ok(())
@@ -180,7 +195,15 @@ fn preflight_then_raw_qc(
     inputs: &[std::path::PathBuf],
     hint: Option<&str>,
 ) -> Result<()> {
-    naming::preflight_output_collisions(planned, inputs, hint)?;
+    // The raw reports are candidates like any other output, so a collision between
+    // them is refused by this mechanism rather than a parallel one.
+    let mut planned = planned.to_vec();
+    if cli.fastqc_raw {
+        for input in &cli.input {
+            planned.extend(naming::raw_report_names(input, cli.output_dir.as_deref()));
+        }
+    }
+    naming::preflight_output_collisions(&planned, inputs, hint)?;
     if cli.fastqc_raw {
         static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !DONE.swap(true, std::sync::atomic::Ordering::SeqCst) {

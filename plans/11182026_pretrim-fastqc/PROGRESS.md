@@ -1,6 +1,6 @@
 # Progress: `--fastqc_raw` — FastQC on the input, before trimming
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-18 (code review round 1 applied)
 
 ## Status
 
@@ -10,8 +10,8 @@
 | Plan Review | ✅ Complete | `PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md` — agreed findings folded in |
 | Impl Plan | 📋 Planned | — |
 | Implementation | 📋 Planned | Nothing blocking — the symlink mechanism is verified (PLAN §8.9) |
-| Code Review | 📋 Planned | — |
-| Coverage | 📋 Planned | — |
+| Code Review | ✅ Complete | `CODE_REVIEW_A.md`, `CODE_REVIEW_B.md` — 2 Critical + 2 High + 5 Medium; all fixed bar M4 (PLAN §14) |
+| Coverage | ✅ Complete | `COVERAGE.md` — was INCOMPLETE; the code gap and 4 of 5 missing validations now closed |
 
 ## Notes
 
@@ -50,6 +50,10 @@
   only: no symlinks means a hard error, covered by V9.
 
 ## History
+
+- 2026-11-18: Code Review + Coverage → ✅ (both reports + audit; C1/C2/H1/H2/M1/M2/M3/M5 fixed,
+  M4 deliberately unchanged, 904 tests). Both reviewers and the audit independently found the same
+  Critical: raw reports pooled into one directory and silently overwrote each other at exit 0.
 
 - 2026-11-18: Plan → ✅ **Revision 2** (two design reversals, one invariant fix, 9 citations corrected,
   3 unfailable validations rewritten + V2/V9/V10/V11 added)

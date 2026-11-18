@@ -87,8 +87,8 @@ fn the_staged_alias_does_not_survive_the_run() {
     assert!(out.status.success());
     assert!(
         !dir.path().join("illumina_10K_raw.fastq.gz").exists(),
-        "the staged alias must be removed; a stranded symlink would trip the \
-         next run's output-collision pre-flight"
+        "the staged alias must be removed; it carries a FASTQ name, so a stranded \
+         one is picked up as an input by the next glob over the directory"
     );
 }
 
@@ -145,10 +145,17 @@ fn raw_and_trimmed_reports_coexist_with_distinct_sample_names() {
         "both sets must be written"
     );
 
-    // Distinct in the field MultiQC reads — the point of the whole feature.
-    assert_ne!(
+    // Pin both values, not merely that they differ. `assert_ne!` here could not fail:
+    // the trimmed report always carries `_trimmed`, so the two names differ under any
+    // naming scheme, alias or no alias.
+    assert_eq!(
         basic_stat(&raw, "illumina_10K_raw", "Filename"),
+        "illumina_10K_raw.fastq.gz",
+        "the raw report must name the alias, which is what carries the marker"
+    );
+    assert_eq!(
         basic_stat(&trimmed, "illumina_10K_trimmed", "Filename"),
+        "illumina_10K_trimmed.fq.gz"
     );
 }
 
@@ -243,5 +250,50 @@ fn mid_file_truncation_surfaces_from_the_qc_pass() {
         "R1 is reported on before R2's truncation is discoverable; if this ever \
          stops being true the guard has genuinely widened and the comment above \
          is stale"
+    );
+}
+
+#[test]
+fn raw_reports_land_beside_each_input_not_pooled_in_the_cwd() {
+    // The regression guard for the defect review found: the raw pass once pinned one
+    // directory for the whole run, so two inputs sharing a basename across directories
+    // wrote the same report and one silently won.
+    //
+    // The expected paths are spelled out rather than derived from `raw_alias_name`.
+    // The pre-flight tripwire predicts its candidates *through* that same function, so
+    // mutating it moves prediction and behaviour together and the tripwire stays green.
+    let dir = tempdir().unwrap();
+    let a = dir.path().join("a");
+    let b = dir.path().join("b");
+    for sub in [&a, &b] {
+        std::fs::create_dir_all(sub).unwrap();
+        std::fs::copy("test_files/illumina_10K.fastq.gz", sub.join("s.fastq.gz")).unwrap();
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_trim_galore"))
+        .current_dir(dir.path())
+        .args([
+            "--fastqc_raw",
+            a.join("s.fastq.gz").to_str().unwrap(),
+            b.join("s.fastq.gz").to_str().unwrap(),
+        ])
+        .output()
+        .expect("trim_galore runs");
+    assert!(
+        out.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    for sub in [&a, &b] {
+        assert!(
+            sub.join("s_raw_fastqc.zip").exists(),
+            "no raw report beside {}",
+            sub.display()
+        );
+    }
+    assert!(
+        !dir.path().join("s_raw_fastqc.zip").exists(),
+        "a raw report was pooled in the working directory, where the two inputs collide"
     );
 }
