@@ -5,8 +5,10 @@
 **Date:** 2026-11-11, manual review 2026-11-13
 **Decision taken:** curated highlights only — drop `--generate-notes` in favour of a committed
 notes file. Chosen over "highlights + folded full list" and "filter the auto list".
-**Status:** **Revision 2** — dual agent review complete (`PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md`),
-findings folded in; see §11. Awaiting re-review or an implementation trigger. No implementation.
+**Status:** **Revision 3** — dual agent review complete (`PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md`),
+findings folded in; see §11. Revision 3 settles §12's three open questions (§13) and corrects one
+claim the plan made twice about `actionlint`. Awaiting re-review or an implementation trigger. No
+implementation.
 
 ---
 
@@ -205,10 +207,19 @@ that validated it:
 keeping it would mean two sources for the same decision.
 
 **This step has no dry-run coverage and cannot acquire any** (§5 step 5), so it is the one piece of
-new shell that reaches production unexercised. Mitigations, all cheap: the interpolation-only form
-above has nothing to be undefined; `actionlint` in CI would catch the class outright (there is no
-linter in `.github/` today — see §10 Open-6); and a GA is always dispatched by hand, so the first
-real use is watched.
+new shell that reaches production unexercised. Two mitigations, not three: the interpolation-only
+form above has nothing to be undefined, and a GA is always dispatched by hand, so the first real use
+is watched.
+
+**The third — `actionlint` — does not exist.** The claim that it "would catch the class outright"
+was tested in the 2026-11-18 session and is false. `actionlint` prepends a preamble declaring the
+environment before handing a `run:` block to shellcheck, so SC2154 (*referenced but not assigned*),
+the check that would flag `$VERSION`/`$SHA`/`$TITLE`, can never fire on workflow shell. Verified both
+ways: shellcheck reports five SC2154 hits on the revision-1 snippet as a standalone script and none
+on the same snippet inside a workflow, with `-o all`, while a sibling optional check (SC2250) fires
+in both — so the suppression is specific to SC2154 and is not a configuration oversight. Nothing in
+CI covers this step. The interpolation-only form carrying no variables is the entire defence, which
+is a reason to keep it that way.
 
 ### Step 4 — backfill v2.4.0
 
@@ -405,6 +416,8 @@ creates a real release. It now matters less, since it was demoted from a guard t
 
 ## 12. Open questions after review
 
+**All three resolved in the 2026-11-18 session — see §13.** Kept here as the record of what was asked.
+
 **Open-5 — 5b versus §7's single-commit convention.** Writing the version bump and the notes file in
 one commit makes the "absent" arm unreachable forever. Either the prep is two commits, or 5b is
 dropped and 5a carries the proof alone. 5a is the stronger evidence either way.
@@ -417,3 +430,120 @@ review; worth its own issue.
 between `:376` and `:389`, producing the v2.3.0 shape with nobody making a mistake. Older than this
 plan and independent of it, but its hazard analysis is where one would notice. Probably wants
 `concurrency` scoped to exclude release dispatches.
+
+## 13. Resolutions, 2026-11-18
+
+**Line numbers.** Every `release.yml:` citation above this section predates the `actions-lint`
+commit, which added two lines at `:333`. Anything the plan cites beyond that point has moved by two:
+the tag push is now `:378` (was `:376`) and `gh release create` is now `:391` (was `:389`).
+Citations below `:333` are unchanged.
+
+### Open-5 — **drop 5b. 5a carries the proof. §7's single-commit convention stands.**
+
+The plan framed this as a choice between two commits and dropping 5b, and said "5a is the stronger
+evidence either way". Taking that at its word settles it, and two things decide which way:
+
+**5b asks a real GA prep to pass through a deliberately invalid state.** The absent arm is only
+reachable by dispatching the release workflow *between* the version bump and the notes file, which
+means a failed release run sits in `master`'s history for every future audit of that release to
+recognise and discount. The project has already been bitten once by a release whose history had to
+be reconstructed after the fact (v2.3.0); adding a run that is *supposed* to be red is the wrong
+direction.
+
+**The two arms fail in opposite directions.** The arm 5a proves — the check sits in `check-release`,
+so nothing can run past it — fails *dangerously*: a check in job 4 ships a tag with no release. The
+arm 5b proves — the check fires when the file is missing — fails *safely*: the worst case is a GA
+whose body is blank, which is embarrassing and immediately visible, not a partial ship. Spending
+release-prep choreography on the safe arm while the dangerous one is covered statically is backwards.
+
+So: 5a as specified, 5b dropped, and the version bump, CHANGELOG section and notes file stay one
+commit as §7 says.
+
+**Follow-up, not a requirement.** If the absent arm's *message* is later judged worth guarding, the
+way to do it is to lift Step 2's condition into a script with its own test, which covers both arms on
+every PR and needs no release-prep choreography at all. That is strictly better than 5b and can be
+added whenever, so it is not a reason to hold the plan.
+
+### Open-6 — **`actionlint` added. Its premise was wrong, and the plan said so twice.**
+
+Added in the 2026-11-18 session as a separate `actions-lint` job in `ci.yml` — separate rather than
+folded into `lint` so that job's status-check name stays as branch protection has it.
+
+**It does not catch Step 3's defect.** See §5 Step 3 for the correction and the evidence; the short
+version is that `actionlint` declares the environment to shellcheck before linting a `run:` block, so
+SC2154 can never fire there. The sentence in Step 3 and the sentence in Open-6 were the same claim,
+and both were wrong. Nothing in CI covers Step 3.
+
+**What it does catch, on this repository, today.** Twenty-four findings, of which three were real and
+twenty-one were quoting and style noise. The three:
+
+| Where | What |
+| --- | --- |
+| `ci.yml:88` | `! ./trim_galore -V \| grep -q …` — a bare `!` is exempt from errexit, so the guard that `-V` carries no provenance line could not fail |
+| `ci.yml:765` | `! command -v fastqc` — same defect, in the guard CLAUDE.md names as the proof that the bundled FastQC library did the work |
+| `ci.yml:396` | a `case` arm `''` that cannot match a word holding two literal colons; the arm was also missing the trailing field |
+
+Both inert guards were mutation-tested before and after: under the condition each exists to catch,
+the current form exits 0 and the fix exits 1. The gate itself was mutation-tested the same way.
+
+Two caveats worth keeping. **`actionlint` reported `ci.yml:765` but not `ci.yml:88`** — SC2251 fires
+on the simple-command form and not the pipeline form, so the second was found by grepping for the
+pattern the first revealed; the tool narrowed the search, it did not complete it. And **bare
+`actionlint` exits 0 when discovery finds nothing**, which is a vacuous pass one wrong working
+directory away, so the job globs the files explicitly and asserts the list is non-empty.
+
+The configuration excludes `SC2086`, `SC2012` and `SC2129` **by code and never by severity**:
+`SC2251`, which found the first inert guard, is only info-level, so any severity floor would have
+hidden the one finding that justified the job.
+
+No issue filed: the defects are fixed in the same session, and §Open-6's "worth its own issue" was
+premised on actionlint being out of scope here, which it no longer is.
+
+### Open-7 — **real, verified, and the exposure is wider than the plan's two line numbers.**
+
+`release.yml:49-51` is `group: release-${{ github.ref }}` with `cancel-in-progress: true`. A
+`workflow_dispatch` and a `push` on the same branch produce the same `github.ref`, hence the same
+group, so a push cancels an in-flight release run on that branch. Confirmed by reading the trigger
+block: `on.push.branches` is `[dev, master]`.
+
+Three corrections to the plan's framing:
+
+1. **The window is not `:376`–`:389`** (now `:378`–`:391`). It opens at the tag push and stays open through
+   `upload-binaries` and `publish-crate`, the last job. A cancellation anywhere in that span leaves
+   the tag on the remote with some channels unshipped. (`docker-merge` pushes to GHCR *before* the
+   tag, so a cancellation before the tag leaves images without a tag — untidy, not a partial ship.)
+2. **#333's idempotency does not recover it.** The push that cancelled the run also moved the branch,
+   so a re-dispatch sees `TAG_SHA != HEAD_SHA` and hits the hard error at `:120-122` by design. Recovery
+   needs the tag deleted by hand. This is the same shape §5 Step 3 describes for its own defect.
+3. **The sharp case is a prerelease, not a GA.** GA is dispatched from `master`, which receives one
+   FF per release. Prereleases are dispatched from `dev`, which takes routine merges, and the run is
+   long — three binary targets, two Docker platforms, two smoke-test jobs. A merge to `dev` during a
+   prerelease is an ordinary day, and it silently kills the release.
+
+What the push-triggered run does in the meantime is nothing: `check-release` sets `is_release=false`
+for any event that is not a `workflow_dispatch`, so every later job is skipped. A no-op run cancels a
+publishing one.
+
+**Remedy — applied, 2026-11-18.** Two changes, because the group alone leaves the defect reachable
+from the second direction:
+
+```yaml
+concurrency:
+  group: release-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+```
+
+The group keeps a push out of a dispatch's group. The predicate keeps a *second dispatch* from
+cancelling a publishing first one — the group fix does nothing about that, and a double-dispatch when
+nothing seems to be happening is an ordinary mistake with the same partial-ship outcome. Together a
+dispatched release becomes uncancellable, while push-triggered runs still collapse redundantly, which
+is the only thing `cancel-in-progress` was ever doing here.
+
+A second dispatch now queues instead of cancelling. It then finds the tag at the same commit, takes
+#333's idempotency path, and fails at `gh release create` because the release exists — a safe
+failure against an already-complete release, not a partial one.
+
+`actionlint` type-checks `concurrency.cancel-in-progress`, so the expression is validated in CI;
+confirmed by mutation (a bogus `github.*` property is reported at that line).
+
+No issue filed: fixed in the same session as Open-6.
