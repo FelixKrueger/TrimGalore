@@ -5,17 +5,39 @@
 //! release, so a check that failed there would leave a tag with no release
 //! behind it — the v2.3.0 partial ship.
 //!
-//! Nothing can run after a failed job 0 as long as two things hold: every other
-//! job needs `check-release`, and the workflow has no status functions. Both are
-//! properties of the file, so they are asserted here rather than by a dispatch.
+//! Nothing can run after a failed job 0 as long as three things hold: every
+//! other job needs `check-release`, no status function appears, and no
+//! `continue-on-error` appears. All are properties of the file, so they are
+//! asserted here rather than by a dispatch.
+//!
+//! A fourth property is not about job order: `Create release` reads the notes
+//! path from a job-0 output, and an empty path is not refused by `gh` — it
+//! posts an empty body and exits 0. So the link from the check to that flag is
+//! pinned too.
 
 use std::path::PathBuf;
 
-/// The step name Step 2 of `plans/11112026_release-notes-policy/` installs.
+/// The step name that validates the GA notes file.
 const NOTES_STEP: &str = "Require curated GA release notes";
 
-/// `always()` and friends would let a dependent job run after job 0 failed.
-const STATUS_FUNCTIONS: [&str; 4] = ["always()", "cancelled()", "success()", "failure()"];
+/// Every job the workflow is known to have.
+///
+/// Spelled out rather than counted: a new job has to be audited for `needs:`,
+/// and failing here is how that audit gets requested.
+const EXPECTED_JOBS: [&str; 9] = [
+    "check-release",
+    "build-binaries",
+    "smoke-test-binaries",
+    "docker-build",
+    "docker-merge",
+    "smoke-test-docker",
+    "create-tag-and-release",
+    "upload-binaries",
+    "publish-crate",
+];
+
+/// Calls that would let a dependent job run after job 0 failed.
+const STATUS_FUNCTIONS: [&str; 4] = ["always", "cancelled", "success", "failure"];
 
 fn workflow() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -25,10 +47,32 @@ fn workflow() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
+/// Whether `src` calls `name` as a function, with any spacing inside the call.
+///
+/// `always ()` is accepted by both GitHub and actionlint, so matching the
+/// literal `always()` would miss it.
+fn calls(src: &str, name: &str) -> bool {
+    let mut from = 0;
+    while let Some(i) = src[from..].find(name) {
+        let start = from + i;
+        let after = src[start + name.len()..].trim_start();
+        if let Some(rest) = after.strip_prefix('(')
+            && rest.trim_start().starts_with(')')
+        {
+            return true;
+        }
+        from = start + name.len();
+    }
+    false
+}
+
 /// Job name → its block, as `(name, lines)`, in file order.
 ///
-/// Anchored to the `jobs:` mapping: `on:` has two-space keys of its own
-/// (`push:`), and treating one as a job would make every span wrong.
+/// Anchored to the `jobs:` mapping, because `on:` has two-space keys of its own
+/// (`push:`) and treating one as a job would make every span wrong. A header is
+/// any two-space key: GitHub allows `-`, `_` and digits in a job id, and
+/// filtering on a narrower character set silently merges such a job into the
+/// block above it, which makes the assertions below pass without reading it.
 fn jobs(src: &str) -> Vec<(String, Vec<&str>)> {
     let lines: Vec<&str> = src.lines().collect();
     let start = lines
@@ -39,11 +83,8 @@ fn jobs(src: &str) -> Vec<(String, Vec<&str>)> {
     let is_job_header = |l: &str| {
         l.starts_with("  ")
             && !l.starts_with("   ")
+            && !l.trim_start().starts_with('#')
             && l.trim_end().ends_with(':')
-            && l.trim()
-                .trim_end_matches(':')
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c == '-')
     };
 
     let headers: Vec<usize> = (start + 1..lines.len())
@@ -61,6 +102,27 @@ fn jobs(src: &str) -> Vec<(String, Vec<&str>)> {
         .collect()
 }
 
+/// A job's `needs:` value, inline (`[a, b]`) or block (`- a` lines).
+fn needs_of(body: &[&str]) -> Option<String> {
+    let at = body
+        .iter()
+        .position(|l| l.trim_start().starts_with("needs:"))?;
+    let mut value = body[at]
+        .trim_start()
+        .trim_start_matches("needs:")
+        .to_string();
+    for line in &body[at + 1..] {
+        let t = line.trim_start();
+        if t.starts_with('-') {
+            value.push(' ');
+            value.push_str(t.trim_start_matches('-').trim());
+        } else if !t.is_empty() && !t.starts_with('#') {
+            break;
+        }
+    }
+    Some(value)
+}
+
 #[test]
 fn ga_notes_check_lives_in_check_release() {
     let src = workflow();
@@ -69,10 +131,7 @@ fn ga_notes_check_lives_in_check_release() {
         "the GA release-notes check is gone from release.yml entirely"
     );
 
-    let jobs = jobs(&src);
-    assert!(jobs.len() > 1, "job parsing found {} jobs", jobs.len());
-
-    for (name, body) in &jobs {
+    for (name, body) in jobs(&src) {
         let here = body.iter().any(|l| l.contains(NOTES_STEP));
         if name == "check-release" {
             assert!(
@@ -90,15 +149,19 @@ fn ga_notes_check_lives_in_check_release() {
 }
 
 #[test]
-fn release_workflow_has_no_status_functions() {
+fn release_workflow_cannot_run_past_a_failed_job_zero() {
     let src = workflow();
     for f in STATUS_FUNCTIONS {
         assert!(
-            !src.contains(f),
-            "release.yml uses `{f}`, which can let a job run after `check-release` failed; \
-             the no-status-function property is what makes the job-0 check sufficient"
+            !calls(&src, f),
+            "release.yml calls `{f}()`, which can let a job run after `check-release` failed"
         );
     }
+    assert!(
+        !src.contains("continue-on-error"),
+        "release.yml uses `continue-on-error`: on a job it lets dependents run after a failure, \
+         on a step it makes that step's `exit 1` inert"
+    );
 }
 
 #[test]
@@ -108,35 +171,55 @@ fn every_other_job_needs_check_release() {
         if name == "check-release" {
             continue;
         }
-        let needs = body
-            .iter()
-            .find(|l| l.trim_start().starts_with("needs:"))
-            .unwrap_or_else(|| {
-                panic!("job `{name}` has no `needs:`, so a failed job 0 cannot stop it")
-            });
+        let needs = needs_of(&body).unwrap_or_else(|| {
+            panic!("job `{name}` has no `needs:`, so a failed job 0 cannot stop it")
+        });
         assert!(
             needs.contains("check-release"),
-            "job `{name}` does not need `check-release`: {}",
-            needs.trim()
+            "job `{name}` does not need `check-release`; its needs are:{needs}"
         );
     }
 }
 
 #[test]
-fn job_parsing_sees_the_real_jobs() {
-    // The two assertions above are vacuous if this mis-parses, and `on:` has
-    // two-space keys that look like job headers.
+fn the_notes_path_reaches_create_release() {
+    // `gh release create --notes-file ""` is not refused — it posts an empty
+    // body and exits 0 — and it would do so after the tag push. Each link in
+    // the chain from the check to the flag is pinned.
+    let src = workflow();
+    for fragment in [
+        "notes_path: ${{ steps.notes.outputs.notes_path }}",
+        // Line-exact: `id: notes` is a prefix of `id: notes_check`.
+        "\n        id: notes\n",
+        "echo \"notes_path=$NOTES\" >> \"$GITHUB_OUTPUT\"",
+        "--notes-file \"${{ needs.check-release.outputs.notes_path }}\"",
+    ] {
+        assert!(
+            src.contains(fragment),
+            "release.yml no longer contains `{fragment}`, so the GA body can reach \
+             `--notes-file \"\"` after the tag push"
+        );
+    }
+
+    // The check runs on exactly the dispatches that take the --notes-file arm.
+    assert!(
+        src.contains("steps.check.outputs.is_prerelease == 'false'"),
+        "the notes check must be gated on the GA case, or a prerelease demands a notes file"
+    );
+    assert!(
+        src.contains("--generate-notes --prerelease"),
+        "the prerelease arm must keep --generate-notes"
+    );
+}
+
+#[test]
+fn job_parsing_sees_every_job() {
+    // The assertions above are vacuous if this mis-parses: a job absorbed into
+    // the block above it is never read, so it is never audited.
     let names: Vec<String> = jobs(&workflow()).into_iter().map(|(n, _)| n).collect();
-    assert!(
-        names.contains(&"check-release".to_string()),
-        "parsed jobs {names:?} do not include check-release"
-    );
-    assert!(
-        names.contains(&"create-tag-and-release".to_string()),
-        "parsed jobs {names:?} do not include create-tag-and-release"
-    );
-    assert!(
-        !names.contains(&"push".to_string()),
-        "`on:` key parsed as a job: {names:?}"
+    assert_eq!(
+        names, EXPECTED_JOBS,
+        "release.yml's jobs are not the set this test audits. If a job was added, add it to \
+         EXPECTED_JOBS and make sure it needs `check-release`."
     );
 }

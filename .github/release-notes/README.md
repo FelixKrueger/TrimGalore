@@ -12,8 +12,11 @@ to create.
 That placement is the point. `create-tag-and-release` pushes the tag before it creates the release,
 so a check that failed *there* would leave a tag on the remote with no release behind it — the shape
 of the v2.3.0 partial ship. Validating in job 0 means that by the time anything is published the
-file's existence is already proven. A CI test asserts the check stays in `check-release` and that the
-workflow contains no status functions, either of which would let a later job run after job 0 failed.
+file's existence is already proven. `tests/integration_release_workflow.rs` asserts the properties
+that make this sufficient: the check is in `check-release`, every other job names it in `needs`, the
+workflow has no status function and no `continue-on-error`, and the validated path still reaches
+`--notes-file`. Any one of those failing would let a later job run, or publish an empty body, after
+job 0 was supposed to have settled it.
 
 Write the file on the release-prep branch, in the same commit as the version bump and the CHANGELOG
 section. It is a trimmed restatement of that CHANGELOG section, so the material already exists.
@@ -28,7 +31,7 @@ In order, nothing else.
 **Three to six highlights.** One sentence each, in the CHANGELOG's voice:
 
 ```
-- **Headline** ([#NNN](https://github.com/FelixKrueger/TrimGalore/pull/NNN)) — one sentence.
+- **Headline** ([#NNN](https://github.com/FelixKrueger/TrimGalore/issues/NNN)) — one sentence.
 ```
 
 The test for a highlight is whether a user would change what they do because of it. Dependency bumps,
@@ -78,6 +81,14 @@ asking the same question — *does this upgrade affect me?* — and a body that 
 characters has not answered it.
 
 A finished body lands near 1,500–2,500 characters. That is a sanity range, not a gate.
+
+## The worked example
+
+`v2.4.0.md` in this directory is the example to copy: all five components in order, six highlights,
+2,400 characters against the 16,084 that `--generate-notes` produced for the same release.
+
+Link each highlight the way the CHANGELOG entry it restates links — for v2.4.0 that is `/issues/NNN`,
+because those entries cite the issue rather than the PR that closed it. GitHub resolves either.
 
 ## What these files are not
 

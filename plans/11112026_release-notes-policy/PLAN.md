@@ -645,28 +645,14 @@ Also worth noting against §5 Step 4's framing: deferring `gh release edit` was 
 §14 did not record the acknowledgements as outstanding — which is exactly how this would have been
 lost, since the remaining step was described as needing only go-ahead.
 
-### Outstanding — reported, not yet taken
-
-**Test hardening.** Five mutations escape the suite. `is_job_header` filters job names to `[a-z-]`,
-so a job named `gate_notes` or `publish-crate-2` is absorbed into the preceding block: the relocation
-mutation §14 calls *the* hazard has a one-character bypass, and `every_other_job_needs_check_release`
-is vacuous for such a name — verified here, including a job with no `needs:` at all passing all four
-tests. Also uncovered: `continue-on-error`, `always ()` written with a space (which actionlint
-accepts too), and deletion of the `echo "notes_path=$NOTES"` line. Block-form `needs:` would produce
-a false failure whose message is untrue.
+### Findings that changed the record
 
 **§8.2 assumption 2 is now verified, and its framing corrected.** `gh` 2.92.0 rejects a *missing*
 `--notes-file` path at the file read, before any API call — no real release needed to establish it.
 But `--notes-file ""` passes argument parsing and reaches the API, producing a release with an empty
 body and exit 0. For the empty-path case the assumption's "a louder way to fail" is wrong: it is
-silent. What prevents it today is the notes step's `if:` being the exact complement of `Create
-release`'s branch — correct, and untested.
-
-**Docs.** Step 1's worked example is still missing (the README has templates but no example body and
-never points at `v2.4.0.md`). The README's highlight template says `/pull/NNN` where the backfill and
-`CHANGELOG.md` both use `/issues/NNN` for those six numbers. The CHANGELOG link lands on the page
-root rather than the `#version-240-release-on-9-november-2026` anchor. The README says the CI test
-asserts two properties; it asserts three.
+silent. What prevents it is the notes step's `if:` being the exact complement of `Create release`'s
+branch, which `the_notes_path_reaches_create_release` now pins.
 
 §8.5's premise (no `CONTRIBUTING.md`, no docs page) is intact.
 
@@ -691,3 +677,40 @@ CLAUDE.md, so each is now one line stating the constraint it guards.
 
 Comment-only: `actionlint` clean, YAML parses, the four tests pass. **Test hardening is still
 outstanding** — it touches a test file, so it needs an explicit implementation trigger.
+
+### Taken, 2026-11-18 — test hardening and the docs items
+
+**The suite now catches all five escapes**, and one more I found while fixing them. `is_job_header`
+no longer filters job names at all — any two-space key under `jobs:` that is not a comment is a job,
+because GitHub allows `-`, `_` and digits in a job id and a narrower filter silently merges such a
+job into the block above it. `job_parsing_sees_every_job` asserts the **exact nine-job list** rather
+than two memberships, so a new job fails the test until someone adds it and checks its `needs:`.
+
+`release_workflow_cannot_run_past_a_failed_job_zero` replaces the status-function test and covers
+`continue-on-error` at both job and step level. It matches calls by name with any spacing inside the
+parentheses, so `always ()` — which GitHub honours and actionlint accepts — is caught.
+
+`the_notes_path_reaches_create_release` is new, and exists because of §8.2's corrected framing: an
+empty `--notes-file` is not refused, so the chain from the check to the flag is pinned at every link,
+together with the gate keeping the check on exactly the dispatches that take the `--notes-file` arm.
+
+`needs_of` reads block-form `needs:` as well as inline, so that form no longer produces a false
+failure.
+
+**Thirteen mutations, each restored byte-identically.** Twelve behaved correctly on the first run.
+The thirteenth did not, and it is worth recording: renaming `id: notes` to `id: notes_check` passed,
+because `id: notes` is a *prefix* of `id: notes_check` and the assertion used `contains`. That is the
+same class of defect as everything else in §15 — an assertion that cannot fail — reintroduced inside
+the fix for it. The fragment is now line-exact, and the rename is caught by the test as well as by
+actionlint.
+
+**Docs.** The README now points at `v2.4.0.md` as the worked example Step 1 asked for, states what
+the CI test actually asserts (four properties, not two), and links highlights as `/issues/NNN` to
+match the backfill and `CHANGELOG.md`. `v2.4.0.md` links the CHANGELOG section anchor
+(`#version-240-release-on-9-november-2026`, confirmed present in the built site) rather than the page
+root.
+
+**Verification.** 913 tests passing, 0 failed. `cargo fmt --check` clean, clippy clean at
+`-D warnings`, `actionlint` clean.
+
+Everything §15 reported is now either taken or recorded as permanently uncovered (§5 Step 3).
