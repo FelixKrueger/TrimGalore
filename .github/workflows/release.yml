@@ -5,10 +5,16 @@ name: Release
 #   Prefer NOT to push `v*` tags manually — this workflow creates and
 #   pushes the tag itself during the create-tag-and-release job. The
 #   canonical sequence is:
-#     1. Bump version in Cargo.toml (on dev, then FF master)
+#     1. Bump version in Cargo.toml, and for a GA write
+#        .github/release-notes/vX.Y.Z.md (on dev, then FF master)
 #     2. Push master
 #     3. Dispatch this workflow with `--ref master` (workflow_dispatch)
 #   Do NOT `git tag v... && git push origin v...` between step 2 and 3.
+#
+#   GA release notes: check-release refuses a GA dispatch when
+#   .github/release-notes/<version>.md is missing or blank, before
+#   anything is built or published. Prereleases keep --generate-notes.
+#   The policy is in .github/release-notes/README.md.
 #
 #   Idempotency (added after v2.3.0's partial-shipping incident): if the
 #   tag DOES already exist AT the same commit as source-branch HEAD
@@ -145,8 +151,7 @@ jobs:
             echo "Not a release run"
           fi
 
-      # In job 0, which publishes nothing. A check in create-tag-and-release
-      # would fail after the tag push and leave a tag with no release.
+      # Must stay in job 0: a refusal after the tag push strands the tag.
       - name: Require curated GA release notes
         id: notes
         if: steps.check.outputs.is_release == 'true' && steps.check.outputs.is_prerelease == 'false'
@@ -400,8 +405,7 @@ jobs:
         run: |
           echo "Tag ${{ needs.check-release.outputs.version }} already exists at the correct commit; skipping tag create + push."
 
-      # Interpolation only: a shell variable here would expand to empty under
-      # `bash -e` and fail `gh release create` after the tag push.
+      # Interpolation only: no name here can be undefined at run time.
       - name: Create release
         if: needs.check-release.outputs.is_dry_run != 'true'
         env:

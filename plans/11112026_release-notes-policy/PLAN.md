@@ -662,20 +662,13 @@ body and exit 0. For the empty-path case the assumption's "a louder way to fail"
 silent. What prevents it today is the notes step's `if:` being the exact complement of `Create
 release`'s branch — correct, and untested.
 
-**Two comments in `release.yml`.** The `# Interpolation only: a shell variable here would expand to
-empty` comment is wrong as written — a *defined* variable expands fine, the hazard was an *undefined*
-one — and it contradicts `Detect release` twenty lines above, which is built entirely from shell
-variables. Both new comments also restate commit-message paragraphs in source, against CLAUDE.md.
-
 **Docs.** Step 1's worked example is still missing (the README has templates but no example body and
 never points at `v2.4.0.md`). The README's highlight template says `/pull/NNN` where the backfill and
 `CHANGELOG.md` both use `/issues/NNN` for those six numbers. The CHANGELOG link lands on the page
 root rather than the `#version-240-release-on-9-november-2026` anchor. The README says the CI test
 asserts two properties; it asserts three.
 
-**`release.yml:3-33`'s "Release invariant" preamble is the release checklist in practice** and was
-not updated, so its canonical sequence now walks into the job-0 refusal unwarned. §8.5's premise
-(no `CONTRIBUTING.md`, no docs page) is otherwise intact.
+§8.5's premise (no `CONTRIBUTING.md`, no docs page) is intact.
 
 ### Process note
 
@@ -683,3 +676,18 @@ Both reviewers were given the same working tree, so A found `release.yml` mid-mu
 harness. A worked from `git show 8f984ac:...` in `$TMPDIR` and touched nothing; B restored
 byte-identically and its sha256 matched. Concurrent reviewers that mutate a shared tree want
 worktrees or a pinned copy.
+
+### Taken, 2026-11-18 — the preamble and two comments
+
+`release.yml:3-33`'s "Release invariant" block is the release checklist in practice, and its
+canonical sequence would have walked into the job-0 refusal unwarned. Step 1 now names the notes
+file, and a short paragraph states the refusal and points at the policy.
+
+Both comments the review flagged are replaced. `# Interpolation only: a shell variable here would
+expand to empty under bash -e` was wrong as written — a *defined* variable expands fine, the hazard
+was an *undefined* one — and it contradicted `Detect release` twenty lines above, which is built
+entirely from shell variables. Both also restated commit-message paragraphs in source, against
+CLAUDE.md, so each is now one line stating the constraint it guards.
+
+Comment-only: `actionlint` clean, YAML parses, the four tests pass. **Test hardening is still
+outstanding** — it touches a test file, so it needs an explicit implementation trigger.
