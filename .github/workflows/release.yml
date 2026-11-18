@@ -46,9 +46,12 @@ permissions:
   contents: write
   packages: write
 
+# A push and a dispatch on one branch share `github.ref`, so without the event in
+# the group a routine merge cancels an in-flight release. A dispatch is never
+# cancelled: the window from the tag push to `publish-crate` is a partial ship.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   CARGO_TERM_COLOR: always
