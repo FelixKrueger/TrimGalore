@@ -14,6 +14,8 @@ fn main() -> anyhow::Result<()> {
         Some(Path::new(&args[2])),
         1,
         false,
+        // Sniff the format from the extension, as the trimmed-output sites do.
+        None,
     )?;
     Ok(())
 }
