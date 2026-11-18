@@ -56,10 +56,10 @@ draft is not an exception to anything.
       inconsistent. One sentence, matching the file's format.
 - [x] **`README.md:35`** — the FastQC bullet now names both flags and says the two sets reach MultiQC
       as distinct samples without pipeline-side configuration. "post-trimming" is gone.
-- [ ] **`wiki/usage/` does not mention `--fastqc_raw`** — only `wiki/reference/cli-flags.md` does.
-      No page there is its home: `trim-reads.md` does not cover FastQC at all. Either add a short
-      FastQC section or decide the reference page is sufficient and close the item. **Deferred three
-      times; decide rather than defer again.**
+- [x] **Wiki** — the gap was not in `usage/` at all. `wiki/reference/outputs.md` has a "Report names"
+      section that did not mention FastQC in any form, so both report sets are now in its table, with
+      the `_raw` alias and the MultiQC sample-naming reason. `usage/` needed nothing: `cli-flags.md`
+      already carries the flag and no `usage/` page covers FastQC by design.
 
 ## 3. The release-prep commit
 

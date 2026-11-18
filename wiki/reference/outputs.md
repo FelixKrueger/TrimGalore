@@ -5,7 +5,7 @@ description: Where outputs land, how each one is named, whether they are gzipped
 tags: [output, naming, reports, json]
 page_id: outputs
 subject_status: current
-updated: 2026-10-13
+updated: 2026-11-18
 sources:
   - repo: FelixKrueger/TrimGalore
     path: src/io.rs
@@ -13,6 +13,9 @@ sources:
   - repo: FelixKrueger/TrimGalore
     path: src/report.rs
     commit: 51fa55e
+  - repo: FelixKrueger/TrimGalore
+    path: src/main.rs
+    commit: 90d69c3
 ---
 
 ## Summary
@@ -69,6 +72,22 @@ not `sample_trimming_report.txt`.
 | Trimming report, text | `<input filename>_trimming_report.txt` | `io::report_name` |
 | Trimming report, JSON | `<input filename>_trimming_report.json` | `io::json_report_name` |
 | Clumping report | `<input filename>_clumping_report.txt` | `io::clumping_report_name` |
+| FastQC, trimmed output | `<trimmed stem>_fastqc.html` / `.zip` | `fastqc-rust`, from the file it is handed |
+| FastQC, untrimmed input | `<stem>_raw_fastqc.html` / `.zip` | `io::raw_report_names` |
+
+FastQC reports break the rule above: they are named from the stem, not the
+intact filename, because `fastqc-rust` derives them from the file it is given.
+
+`--fastqc_raw` is handed a `<stem>_raw<ext>` symlink rather than the input, so
+the `_raw` marker lands in the `Filename` field inside `fastqc_data.txt`. That
+field is where MultiQC takes its sample name from, so the raw and trimmed
+reports arrive as separate samples. Analysing the input directly would give a
+single-end run the same sample name twice, and MultiQC drops the duplicate
+rather than merging it. The symlink is removed when the pass finishes, and the
+run is refused if its path is already one of the run's own inputs.
+
+One report per input file: two for a paired-end run of two FASTQ files, one for
+`--paired` given a single interleaved uBAM. `--passthrough`'s carrier gets none.
 
 ## What the text report contains
 
