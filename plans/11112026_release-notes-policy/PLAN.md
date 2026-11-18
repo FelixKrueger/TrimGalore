@@ -77,9 +77,12 @@ In order, nothing else:
 
 1. **One line of framing.** What this release is. v2.2.0's "The Clumpify Edition" / v2.3.0's "The
    Formats Edition" line from the CHANGELOG is the register.
-2. **Three to six highlights**, one sentence each, in the CHANGELOG's own voice — `- **Headline**
+2. **Up to six highlights**, one sentence each, in the CHANGELOG's own voice — `- **Headline**
    ([#NNN](url)) — one sentence.` Selected as "a user would change what they do because of this".
-   Dependency bumps, CI, docs and internal refactors are never highlights.
+   Dependency bumps, CI, docs and internal refactors are never highlights, **except a bump that
+   clears a security advisory**. Three to six is the usual shape; write fewer when the release
+   genuinely has fewer. **Both clauses amended 2026-11-18** — see
+   `plans/11182026_v2.6.0-release/RELEASE.md` §1 for the release that forced them.
 3. **A link to the CHANGELOG section** for the full record.
 4. **Contributor acknowledgements**, when the release has first-time contributors, under GitHub's
    own `## New Contributors` heading and wording. **Added in the 2026-11-18 code review** (§15) —

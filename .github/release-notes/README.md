@@ -28,14 +28,22 @@ In order, nothing else.
 **One line of framing.** What this release is. The CHANGELOG's own register — "The Clumpify Edition",
 "The Formats Edition".
 
-**Three to six highlights.** One sentence each, in the CHANGELOG's voice:
+**Up to six highlights.** One sentence each, in the CHANGELOG's voice:
 
 ```
 - **Headline** ([#NNN](https://github.com/FelixKrueger/TrimGalore/issues/NNN)) — one sentence.
 ```
 
 The test for a highlight is whether a user would change what they do because of it. Dependency bumps,
-CI, docs and internal refactors never qualify, however much work they were.
+CI, docs and internal refactors never qualify, however much work they were — with one exception: a
+dependency bump that clears a security advisory does, because that is a thing a user scanning
+advisories acts on. The exclusion is there to stop routine bumps padding the list, not to leave a
+CVE unmentioned.
+
+Three to six is the usual shape. Write **fewer when the release genuinely has fewer** — a small
+release should look like one, and reaching a count by promoting a bump or a docs change is the
+padding this policy exists to prevent. If there is nothing that passes the test at all, that is worth
+noticing before cutting the release rather than writing around.
 
 **A link to the CHANGELOG section** for the full record.
 
@@ -80,12 +88,13 @@ The one-sentence-per-entry rule that governs `CHANGELOG.md` governs this too. It
 asking the same question — *does this upgrade affect me?* — and a body that answers it in 16,000
 characters has not answered it.
 
-A finished body lands near 1,500–2,500 characters. That is a sanity range, not a gate.
+A body for a release of normal size lands near 1,500–2,500 characters. That is a sanity range, not
+a gate, and a genuinely small release lands under it.
 
 ## The worked example
 
 `v2.4.0.md` in this directory is the example to copy: all five components in order, six highlights,
-2,400 characters against the 16,084 that `--generate-notes` produced for the same release.
+around 2,400 characters against the 16,084 that `--generate-notes` produced for the same release.
 
 Link each highlight the way the CHANGELOG entry it restates links — for v2.4.0 that is `/issues/NNN`,
 because those entries cite the issue rather than the PR that closed it. GitHub resolves either.

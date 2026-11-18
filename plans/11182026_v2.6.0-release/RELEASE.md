@@ -19,10 +19,11 @@ No first-time contributors — confirmed by asking `releases/generate-notes` for
 `dev`; every PR in the range is `@FelixKrueger` or `@dependabot[bot]`, and the response carries no
 `## New Contributors` section. The policy's fifth component therefore contributes nothing here.
 
-## 1. Two policy questions this release forces
+## 1. Two policy questions this release forced — **both amended, 2026-11-18**
 
-Both come from drafting `.github/release-notes/v2.6.0.md`, and neither should be settled by quietly
-bending the policy in the body.
+Both came from drafting `.github/release-notes/v2.6.0.md`. Neither was settled by bending the body:
+`.github/release-notes/README.md` and §3 of the release-notes plan now carry both clauses, so the
+drafted body is policy-compliant as it stands.
 
 **The three-highlight floor.** `.github/release-notes/README.md` says "three to six highlights". This
 release has **two** that pass the policy's own test — "a user would change what they do because of
@@ -37,14 +38,14 @@ user scanning advisories would act on. The exclusion exists to stop routine bump
 not to hide security fixes. Recommended amendment: *a dependency bump is not a highlight unless it
 clears a security advisory.* The draft body currently includes it on that reading.
 
-Until these are settled the draft is at 884 characters, below the policy's 1,500–2,500 sanity range —
-correctly, because the release is small. That range is also stated as a sanity range rather than a
-gate, so it needs no amendment.
+The draft is at 884 characters, below the 1,500–2,500 range. That range now says in as many words
+that it describes a release of normal size and that a genuinely small release lands under it, so the
+draft is not an exception to anything.
 
 ## 2. Content and housekeeping, before the version bump
 
-- [ ] **`.github/release-notes/v2.6.0.md`** — drafted, two highlights, pending §1. Verified to pass
-      `check-release`'s condition.
+- [x] **`.github/release-notes/v2.6.0.md`** — drafted, two highlights, policy-compliant after §1's
+      amendments. Verified to pass `check-release`'s condition.
 - [ ] **Its CHANGELOG link points at the page root.** Once the CHANGELOG heading's date is fixed, add
       the section anchor, as `v2.4.0.md` has
       (`#version-240-release-on-9-november-2026`). A wrong anchor degrades to the page top, so this is
