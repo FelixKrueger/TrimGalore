@@ -113,6 +113,10 @@ trim_galore --rrbs --paired file_R1.fastq.gz file_R2.fastq.gz
 # Run FastQC on trimmed output
 trim_galore --fastqc input.fastq.gz
 
+# Run FastQC on the input as well, before trimming. Writes
+# `*_raw_fastqc.html`/`.zip`; MultiQC reads the two sets as separate samples.
+trim_galore --fastqc_raw --fastqc input.fastq.gz
+
 # uBAM (unaligned BAM) input — single-end
 # Auto-detected by content (BAM\1 magic in decompressed payload); no flag needed.
 trim_galore sample.bam
