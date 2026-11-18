@@ -46,16 +46,14 @@ draft is not an exception to anything.
 
 - [x] **`.github/release-notes/v2.6.0.md`** — drafted, two highlights, policy-compliant after §1's
       amendments. Verified to pass `check-release`'s condition.
-- [ ] **Its CHANGELOG link points at the page root.** Once the CHANGELOG heading's date is fixed, add
-      the section anchor, as `v2.4.0.md` has
-      (`#version-240-release-on-9-november-2026`). A wrong anchor degrades to the page top, so this is
-      precision rather than correctness — but leave it right.
-- [ ] **CHANGELOG:** `### Unreleased` → `### Version 2.6.0 (Release on <date>)`, in **both** copies.
-      They must stay byte-identical: `tail -n +3 CHANGELOG.md` vs
-      `tail -n +9 docs/src/content/docs/reference/changelog.md`. Verified identical on 2026-11-18.
-- [ ] **Decide on a CHANGELOG entry for the rustix bump.** `Unreleased` currently holds only the
-      `--fastqc_raw` entry. v2.5.0's section records no dependency or security bumps either, so
-      omitting it matches practice — but see §1. One sentence if yes.
+- [x] **CHANGELOG anchor set** — `#version-260-release-on-18-november-2026`, confirmed against the
+      generated `id=` in the built site rather than inferred from the heading.
+- [x] **CHANGELOG:** heading is `### Version 2.6.0 (Release on 18 November 2026)` in both copies,
+      re-verified byte-identical after the edit. **If the release slips past 18 November, the heading
+      date and the anchor in `v2.6.0.md` both have to change.**
+- [x] **rustix entry added.** §1's amendment makes a security-clearing bump worth telling users
+      about, so leaving it out of the CHANGELOG while listing it in the release body would have been
+      inconsistent. One sentence, matching the file's format.
 - [ ] **`README.md:35`** — the FastQC feature bullet says "optional **post-trimming** quality
       reports", which predates `--fastqc_raw`. The usage example at `:118` already shows the flag, so
       only the bullet needs a few words about before-and-after.
@@ -68,10 +66,17 @@ draft is not an exception to anything.
 
 One commit, per §7 of `plans/11112026_release-notes-policy/PLAN.md`:
 
-- [ ] Version in **`Cargo.toml` and `Cargo.lock`** — both read 2.5.0. `check-release` hard-fails if
-      they disagree.
-- [ ] The CHANGELOG section heading (both copies).
-- [ ] `.github/release-notes/v2.6.0.md`.
+- [x] Version in **`Cargo.toml` and `Cargo.lock`** — both at 2.6.0, the lock synced by a real
+      `cargo build --release` rather than by hand, and the binary reports `trim_galore 2.6.0`.
+- [x] The CHANGELOG section heading (both copies).
+- [x] `.github/release-notes/v2.6.0.md` — committed earlier (`f145ba3`) rather than in the bump
+      commit. §7's single-commit convention is about the version bump and the notes arriving
+      together; the notes landing *first* is the safe order, and 5b being dropped (§13 Open-5) means
+      nothing depends on the absent arm being reachable.
+
+**`check-release`'s own logic was run locally against the bumped tree:** version parses to 2.6.0,
+`is_prerelease` false, lock and toml agree, the notes gate passes, no pre-existing `v2.6.0` tag. A GA
+dispatch would clear job 0.
 
 ## 4. Dispatch
 

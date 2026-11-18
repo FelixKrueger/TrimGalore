@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Unreleased
+### Version 2.6.0 (Release on 18 November 2026)
 
 #### Changes
 
@@ -9,6 +9,10 @@
   ([#576](https://github.com/FelixKrueger/TrimGalore/pull/576)). Reports are written as
   `*_raw_fastqc.html`/`.zip` and carry the `_raw` marker inside the report itself, so MultiQC reads
   them as separate samples from the trimmed set without any configuration.
+
+- **`rustix` moves to 1.1.6, clearing RUSTSEC-2026-0486**
+  ([#575](https://github.com/FelixKrueger/TrimGalore/pull/575)). A transitive dependency; no
+  behaviour change.
 
 ### Version 2.5.0 (Release on 13 November 2026)
 
