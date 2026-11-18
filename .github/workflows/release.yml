@@ -72,6 +72,7 @@ jobs:
       version_major: ${{ steps.check.outputs.version_major }}
       version_minor: ${{ steps.check.outputs.version_minor }}
       tag_preexists: ${{ steps.check.outputs.tag_preexists }}
+      notes_path: ${{ steps.notes.outputs.notes_path }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,6 +144,20 @@ jobs:
             echo "version=" >> "$GITHUB_OUTPUT"
             echo "Not a release run"
           fi
+
+      # In job 0, which publishes nothing. A check in create-tag-and-release
+      # would fail after the tag push and leave a tag with no release.
+      - name: Require curated GA release notes
+        id: notes
+        if: steps.check.outputs.is_release == 'true' && steps.check.outputs.is_prerelease == 'false'
+        run: |
+          NOTES=".github/release-notes/${{ steps.check.outputs.version }}.md"
+          if ! grep -q '[^[:space:]]' "$NOTES" 2>/dev/null; then
+            echo "::error::GA releases require curated notes at $NOTES (see .github/release-notes/README.md)"
+            exit 1
+          fi
+          echo "notes_path=$NOTES" >> "$GITHUB_OUTPUT"
+          echo "Using curated release notes from $NOTES"
 
   # ------------------------------------------------------------------
   # 1. Build binaries for each target (release only)
@@ -385,16 +400,24 @@ jobs:
         run: |
           echo "Tag ${{ needs.check-release.outputs.version }} already exists at the correct commit; skipping tag create + push."
 
+      # Interpolation only: a shell variable here would expand to empty under
+      # `bash -e` and fail `gh release create` after the tag push.
       - name: Create release
         if: needs.check-release.outputs.is_dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PRERELEASE_FLAG: ${{ needs.check-release.outputs.is_prerelease == 'true' && '--prerelease' || '' }}
         run: |
-          gh release create "${{ needs.check-release.outputs.version }}" \
-            --target "${{ github.sha }}" \
-            --title "Trim Galore ${{ needs.check-release.outputs.version }}" \
-            --generate-notes $PRERELEASE_FLAG
+          if [ "${{ needs.check-release.outputs.is_prerelease }}" = "true" ]; then
+            gh release create "${{ needs.check-release.outputs.version }}" \
+              --target "${{ github.sha }}" \
+              --title "Trim Galore ${{ needs.check-release.outputs.version }}" \
+              --generate-notes --prerelease
+          else
+            gh release create "${{ needs.check-release.outputs.version }}" \
+              --target "${{ github.sha }}" \
+              --title "Trim Galore ${{ needs.check-release.outputs.version }}" \
+              --notes-file "${{ needs.check-release.outputs.notes_path }}"
+          fi
 
   # ------------------------------------------------------------------
   # 5. Upload binaries to the release
