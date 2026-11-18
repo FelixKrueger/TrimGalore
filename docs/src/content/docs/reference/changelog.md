@@ -7,6 +7,14 @@ description: Release history for Trim Galore. The canonical source is CHANGELOG.
 The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.com/FelixKrueger/TrimGalore/blob/master/CHANGELOG.md) in the repo root. The version below is a copy synced with the docs.
 :::
 
+### Unreleased
+
+#### Changes
+
+- **New `--fastqc_raw` runs the bundled FastQC on the input files, before trimming.** The reports are
+  written as `*_raw_fastqc.html`/`.zip` and carry the `_raw` marker inside the report itself, so
+  MultiQC reads them as separate samples from the trimmed set without any configuration.
+
 ### Version 2.5.0 (Release on 13 November 2026)
 
 #### Changes

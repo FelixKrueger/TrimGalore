@@ -18,6 +18,7 @@ A few combinations are worth knowing about:
 - **`--trim-n`** is suppressed under `--rrbs` (matches Perl v0.6.x; N-trimming interacts poorly with RRBS end-repair masking).
 - **`--discard_untrimmed`** keeps only reads where at least one adapter match was found. For paired-end, the pair is discarded only if *neither* read had an adapter.
 - **`--fastqc`** (and `--fastqc_args`, which implies it) is rejected on the four specialty modes and on `--paired` given a single interleaved uBAM with FASTQ output. Those paths write no report, so the flag fails loudly rather than being ignored; for the last one, adding `--output-format ubam` does produce a report. See [FastQC](/guide/outputs/#fastqc).
+- **`--fastqc_raw`** runs the same bundled engine on the *input*, before trimming, writing `*_raw_fastqc.html`/`.zip` alongside. It is independent of `--fastqc` — pass both for before-and-after reports — and is accepted on the specialty modes that reject `--fastqc`, because the input is there to analyse whatever the mode does afterwards. The `_raw` marker is carried inside the report, so MultiQC reads the two sets as separate samples without any configuration.
 - **`--poly_g`** is auto-enabled when the data looks like it came from a 2-colour instrument (sequence-based detection on trailing G-runs). Use `--no_poly_g` to force-disable, or `--poly_g` to force-enable. It is independent of `--nextseq` (which is quality-score-based).
 
 ## RRBS-specific guidance

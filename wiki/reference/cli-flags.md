@@ -126,6 +126,7 @@ each owns its output naming.
 | Flag | Effect |
 |---|---|
 | `--fastqc` | Run the bundled FastQC on the trimmed output. |
+| `--fastqc_raw` | Run the bundled FastQC on the input, before trimming. Reports are `*_raw_fastqc.html`/`.zip`, named so MultiQC reads them as separate samples from the trimmed set. Accepted on the specialty modes that refuse `--fastqc`. |
 | `--fastqc_args` | A curated subset of FastQC flags; unknown flags warn and are ignored. `--png` embeds PNG charts instead of SVG; `--svg` is accepted as a no-op. |
 
 `--fastqc` is refused on the four specialty modes and on one interleaved uBAM

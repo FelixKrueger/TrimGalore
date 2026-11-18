@@ -1215,12 +1215,22 @@ fn the_site_inventory_is_complete() {
             .join("main.rs"),
     )
     .unwrap();
-    let calls = src.matches("preflight_output_collisions(").count();
+    // Dispatch arms call `preflight_then_raw_qc`, which pre-flights and then runs
+    // the `--fastqc_raw` pass, so that a refused run cannot have written a report.
+    // It is `#[track_caller]`, so each arm stays individually attributable —
+    // `every_site_is_reached_by_some_case` is what proves that, not this count.
+    let calls = src.matches("preflight_then_raw_qc(").count() - 1; // minus the definition
     assert_eq!(
         calls, 13,
         "main.rs has {calls} pre-flight call sites, not 13. If one was added, give it a \
          case and add its shape to every_site_is_reached_by_some_case, then update this \
          count — do not just update the count."
+    );
+    assert_eq!(
+        src.matches("naming::preflight_output_collisions(").count(),
+        1,
+        "the pre-flight must be reached only through preflight_then_raw_qc: a direct \
+         call would skip the --fastqc_raw pass, or run it before the refusal"
     );
 }
 

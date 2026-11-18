@@ -303,7 +303,14 @@ pub fn clump_only_single(
     // Optional FastQC — new plumbing (specialty modes previously returned
     // before the fastqc::run call in main.rs).
     if fastqc_requested {
-        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1), phred64)?;
+        fastqc::run(
+            &output_path,
+            fastqc_args,
+            output_dir,
+            cores.max(1),
+            phred64,
+            None,
+        )?;
     }
 
     Ok(stats)
@@ -494,8 +501,22 @@ pub fn clump_only_paired(
     }
 
     if fastqc_requested {
-        fastqc::run(&out_r1_path, fastqc_args, output_dir, cores.max(1), phred64)?;
-        fastqc::run(&out_r2_path, fastqc_args, output_dir, cores.max(1), phred64)?;
+        fastqc::run(
+            &out_r1_path,
+            fastqc_args,
+            output_dir,
+            cores.max(1),
+            phred64,
+            None,
+        )?;
+        fastqc::run(
+            &out_r2_path,
+            fastqc_args,
+            output_dir,
+            cores.max(1),
+            phred64,
+            None,
+        )?;
     }
 
     Ok(stats)
@@ -776,7 +797,14 @@ pub fn clump_only_single_to_bam(
         // fastqc-rust reads BAM natively (verified against fastqc-rust-1.1.1
         // src/runner.rs — accepts .bam/.ubam extensions + --format bam).
         // BAM QUAL is raw Phred, so no ASCII offset is declared.
-        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1), false)?;
+        fastqc::run(
+            &output_path,
+            fastqc_args,
+            output_dir,
+            cores.max(1),
+            false,
+            None,
+        )?;
     }
 
     Ok(stats)
@@ -1031,7 +1059,14 @@ pub fn clump_only_paired_to_bam_one_pair(
 
     if fastqc_requested {
         // BAM QUAL is raw Phred, so no ASCII offset is declared.
-        fastqc::run(&output_path, fastqc_args, output_dir, cores.max(1), false)?;
+        fastqc::run(
+            &output_path,
+            fastqc_args,
+            output_dir,
+            cores.max(1),
+            false,
+            None,
+        )?;
     }
 
     Ok(stats)

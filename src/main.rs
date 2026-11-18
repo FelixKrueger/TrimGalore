@@ -80,6 +80,116 @@ fn sanity_check_any(path: &std::path::Path) -> Result<()> {
     }
 }
 
+/// `<stem>_raw<ext>` beside `dir` — the name FastQC is pointed at for a raw report.
+///
+/// The extension is kept so a gzipped FASTQ is still recognised as one.
+fn raw_alias_path(input: &Path, dir: &Path) -> std::path::PathBuf {
+    let name = input.file_name().unwrap_or_default().to_string_lossy();
+    let stem = naming::strip_fastq_extensions(input);
+    let (base, ext) = if stem.len() < name.len() {
+        (stem.as_str(), &name[stem.len()..])
+    } else {
+        // Not a FASTQ-family name — a content-detected uBAM may be called anything.
+        match name.rfind('.') {
+            Some(i) => (&name[..i], &name[i..]),
+            None => (name.as_ref(), ""),
+        }
+    };
+    dir.join(format!("{base}_raw{ext}"))
+}
+
+/// Run the bundled FastQC on each input, before trimming.
+///
+/// FastQC is pointed at a `_raw`-suffixed symlink rather than the input, because
+/// the report's `Filename` field is `path.file_name()` of whatever it was handed
+/// and MultiQC takes its sample name from that field. Analysing the input
+/// directly would name the raw sample identically to the trimmed one in
+/// single-end runs, where MultiQC silently drops the duplicate.
+///
+/// The format is declared rather than left to fastqc-rust's filename sniffing,
+/// which assumes FASTQ for any name it does not recognise.
+fn run_pretrim_fastqc(cli: &Cli) -> Result<()> {
+    // `main`'s pre-dispatch check covers `cli.input[0]` alone; the rest are
+    // validated inside the drivers, which run after this.
+    for input in &cli.input {
+        sanity_check_any(input)?;
+    }
+
+    let output_dir = cli.output_dir.as_deref();
+    naming::ensure_output_dir(output_dir)?;
+    let dir = output_dir.unwrap_or_else(|| Path::new("."));
+
+    for input in &cli.input {
+        let format = match detect_input_format(input)? {
+            InputFormat::UnalignedBam => fastqc::SeqFormat::Bam,
+            InputFormat::FastqPlain | InputFormat::FastqGz => fastqc::SeqFormat::Fastq,
+        };
+
+        let alias = raw_alias_path(input, dir);
+        if alias.exists() {
+            anyhow::bail!(
+                "Cannot stage the raw-FastQC input alias '{}': a file is already there. \
+                 Remove it, or rename the input.",
+                alias.display()
+            );
+        }
+        let target = std::fs::canonicalize(input)
+            .with_context(|| format!("Failed to resolve input path: {}", input.display()))?;
+        std::os::unix::fs::symlink(&target, &alias).with_context(|| {
+            format!(
+                "Failed to create the raw-FastQC input alias '{}'",
+                alias.display()
+            )
+        })?;
+
+        let result = fastqc::run(
+            &alias,
+            cli.fastqc_args.as_deref(),
+            output_dir,
+            cli.cores,
+            cli.phred64,
+            Some(format),
+        );
+
+        // Remove the alias on both paths: a stranded symlink would trip the next
+        // run's output-collision pre-flight.
+        let _ = std::fs::remove_file(&alias);
+        result?;
+    }
+
+    Ok(())
+}
+
+/// Pre-flight the planned outputs, then — only once it has passed — run the
+/// pre-trim FastQC pass.
+///
+/// The two are bundled so the order cannot drift apart: `main.rs`'s pre-flights
+/// exist so that "a rejected run creates nothing", and a raw report written
+/// before the refusal would break that. Every pre-flight site calls this, so no
+/// dispatch branch can acquire one without the other.
+///
+/// The QC runs at most once per process: some drivers reach a pre-flight in more
+/// than one branch, and the inputs are the same either way.
+///
+/// `#[track_caller]` so the dump still names the dispatch arm rather than this
+/// wrapper; `integration_preflight_tripwire` proves each arm stays distinguishable.
+#[track_caller]
+fn preflight_then_raw_qc(
+    cli: &Cli,
+    planned: &[naming::PlannedOutput],
+    inputs: &[std::path::PathBuf],
+    hint: Option<&str>,
+) -> Result<()> {
+    naming::preflight_output_collisions(planned, inputs, hint)?;
+    if cli.fastqc_raw {
+        static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !DONE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            run_pretrim_fastqc(cli)?;
+        }
+    }
+    Ok(())
+}
+
 type AdapterList = Vec<(String, String)>;
 type SetupResult = Result<(String, AdapterList, AdapterList, trimmer::TrimConfig)>;
 type ResolvedAdapter = Result<(String, AdapterList, AdapterList, Option<(usize, usize)>)>;
@@ -390,6 +500,7 @@ fn main() -> Result<()> {
     // below Q31 floor at 0 rather than shifting.
     if cli.phred64
         && (cli.fastqc_requested()
+            || cli.fastqc_raw
             || matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam))
     {
         for input in cli.input.iter().chain(cli.passthrough.iter()) {
@@ -605,7 +716,8 @@ fn main() -> Result<()> {
     // Specialty modes — bypass normal trimming pipeline entirely
     if let Some(n) = cli.hardtrim5 {
         // #383 — collide across all inputs before the first write.
-        naming::preflight_output_collisions(
+        preflight_then_raw_qc(
+            &cli,
             &planned_hardtrim_outputs(&cli, n, specialty::HardtrimEnd::Five, output_dir, gzip),
             &guarded_inputs(&cli),
             Some(CWD_OUTPUT_HINT),
@@ -636,7 +748,8 @@ fn main() -> Result<()> {
     }
     if let Some(n) = cli.hardtrim3 {
         // #383 — collide across all inputs before the first write.
-        naming::preflight_output_collisions(
+        preflight_then_raw_qc(
+            &cli,
             &planned_hardtrim_outputs(&cli, n, specialty::HardtrimEnd::Three, output_dir, gzip),
             &guarded_inputs(&cli),
             Some(CWD_OUTPUT_HINT),
@@ -758,7 +871,8 @@ fn main() -> Result<()> {
         let src = naming::OutputSource::Input(cli.input[0].clone());
         // Ahead of setup_trimming, which scans up to 1 M reads for adapters — a
         // refusal must not arrive after that wait.
-        naming::preflight_output_collisions(
+        preflight_then_raw_qc(
+            &cli,
             &outputs.planned(&src),
             &guarded_inputs(&cli),
             Some(PAIRED_REPORT_HINT),
@@ -872,7 +986,7 @@ fn run_clump_only(
                     &cli.input,
                     output_dir,
                 ));
-                naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), None)?;
                 for input in &cli.input {
                     clump_only::clump_only_single(
                         input,
@@ -918,7 +1032,7 @@ fn run_clump_only(
                         &cli.input,
                         output_dir,
                     ));
-                    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                    preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), None)?;
                     clump_only::clump_only_paired_to_bam_one_pair(
                         &cli.input,
                         output_dir,
@@ -964,7 +1078,7 @@ fn run_clump_only(
                             Some(&pair_dir),
                         ));
                     }
-                    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                    preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), None)?;
                     // Per-pair iteration. Mirrors the trim FASTQ multi-pair
                     // shape (main.rs:651-669) with pair-progress banner +
                     // per-pair sanity-checks + `.with_context()` error
@@ -1021,7 +1135,7 @@ fn run_clump_only(
                     &cli.input,
                     output_dir,
                 ));
-                naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+                preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), None)?;
                 for input in &cli.input {
                     clump_only::clump_only_single_to_bam(
                         input,
@@ -1110,7 +1224,12 @@ fn run_paired_trim(
         }
         planned.extend(candidates);
     }
-    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), Some(PAIRED_REPORT_HINT))?;
+    preflight_then_raw_qc(
+        cli,
+        &planned,
+        &guarded_inputs(cli),
+        Some(PAIRED_REPORT_HINT),
+    )?;
 
     // Adapter detection runs PER PAIR — intentional deviation from Perl
     // v0.6.x (which detected once on $ARGV[0] at trim_galore:2455). Shell-
@@ -1190,7 +1309,7 @@ fn run_single_end_trim(
         .collect();
     let mut planned = planned;
     planned.extend(planned_secondary_outputs(cli, output_dir, gzip)?);
-    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+    preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), None)?;
     for (i, input) in cli.input.iter().enumerate() {
         if i > 0 {
             eprintln!("\n--------------------------------------------------");
@@ -1682,6 +1801,7 @@ fn run_single_file(
             output_dir,
             cli.cores,
             cli.phred64,
+            None,
         )?;
     }
 
@@ -1995,6 +2115,7 @@ fn run_paired(
             output_dir,
             cli.cores,
             cli.phred64,
+            None,
         )?;
         fastqc::run(
             &output_r2,
@@ -2002,6 +2123,7 @@ fn run_paired(
             output_dir,
             cli.cores,
             cli.phred64,
+            None,
         )?;
         // --passthrough: also FastQC the carrier output. Note: cell-barcode
         // reads (16-28 bp of uniformly-structured sequence) will produce a
@@ -2015,6 +2137,7 @@ fn run_paired(
                 output_dir,
                 cli.cores,
                 cli.phred64,
+                None,
             )?;
         }
     }
@@ -2230,7 +2353,8 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
         let src = naming::OutputSource::Input(cli.input[0].clone());
         // Ahead of setup_trimming, which scans up to 1 M reads for adapters — a
         // refusal must not arrive after that wait.
-        naming::preflight_output_collisions(
+        preflight_then_raw_qc(
+            cli,
             &outputs.planned(&src),
             &guarded_inputs(cli),
             Some(PAIRED_REPORT_HINT),
@@ -2276,7 +2400,8 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
                 }
             }
         }
-        naming::preflight_output_collisions(
+        preflight_then_raw_qc(
+            cli,
             &planned,
             &guarded_inputs(cli),
             Some(PAIRED_REPORT_HINT),
@@ -2338,7 +2463,7 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
             planned.push((naming::json_report_name(input, output_dir), src));
         }
     }
-    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), None)?;
+    preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), None)?;
     for (i, input) in cli.input.iter().enumerate() {
         if i > 0 {
             eprintln!("\n--------------------------------------------------");
@@ -2491,6 +2616,7 @@ fn run_ubam_output_single(
             output_dir,
             cli.cores,
             false,
+            None,
         )?;
     }
 
@@ -2667,6 +2793,7 @@ fn run_ubam_output_paired_two_files(
             output_dir,
             cli.cores,
             false,
+            None,
         )?;
     }
 
@@ -2809,6 +2936,7 @@ fn run_ubam_output_paired_single_file(
             output_dir,
             cli.cores,
             false,
+            None,
         )?;
     }
 
@@ -2952,7 +3080,7 @@ where
     for chunk in cli.input.chunks(2) {
         planned.extend(pair_outputs(&chunk[0], &chunk[1]));
     }
-    naming::preflight_output_collisions(&planned, &guarded_inputs(cli), hint)?;
+    preflight_then_raw_qc(cli, &planned, &guarded_inputs(cli), hint)?;
 
     let total_pairs = cli.input.len() / 2;
     for (pair_idx, chunk) in cli.input.chunks(2).enumerate() {
