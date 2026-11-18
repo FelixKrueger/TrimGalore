@@ -54,9 +54,8 @@ draft is not an exception to anything.
 - [x] **rustix entry added.** §1's amendment makes a security-clearing bump worth telling users
       about, so leaving it out of the CHANGELOG while listing it in the release body would have been
       inconsistent. One sentence, matching the file's format.
-- [ ] **`README.md:35`** — the FastQC feature bullet says "optional **post-trimming** quality
-      reports", which predates `--fastqc_raw`. The usage example at `:118` already shows the flag, so
-      only the bullet needs a few words about before-and-after.
+- [x] **`README.md:35`** — the FastQC bullet now names both flags and says the two sets reach MultiQC
+      as distinct samples without pipeline-side configuration. "post-trimming" is gone.
 - [ ] **`wiki/usage/` does not mention `--fastqc_raw`** — only `wiki/reference/cli-flags.md` does.
       No page there is its home: `trim-reads.md` does not cover FastQC at all. Either add a short
       FastQC section or decide the reference page is sufficient and close the item. **Deferred three
