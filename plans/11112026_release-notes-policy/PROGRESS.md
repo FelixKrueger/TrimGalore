@@ -1,15 +1,15 @@
 # Progress: curated GA release notes, and a workflow that cannot ship without them
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-18 (implementation)
 
 ## Status
 
 | Step | Status | Notes |
 |------|--------|-------|
-| Plan | ✅ Complete | `PLAN.md` **revision 2** — Step 3 and Step 5 rewritten after review (§11) |
-| Plan Review | ✅ Complete | `PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md` — 3 Critical found by both, 0 contradictions |
-| Impl Plan | 📋 Planned | — |
-| Implementation | 📋 Planned | — |
+| Plan | ✅ Complete | `PLAN.md` **revision 3** — §13 resolves the three open questions; §11 covers revision 2's rewrite |
+| Plan Review | ✅ Complete | `PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md` — 3 Critical found by both, 0 contradictions. **Revision 3's own changes are un-reviewed** |
+| Impl Plan | ➖ Skipped | §5 carried the outline and the snippets; no separate `IMPL.md` |
+| Implementation | ✅ Complete | Steps 1, 2, 2a, 3, 5a. §14 has the notes, deviations and mutation evidence |
 | Code Review | 📋 Planned | — |
 | Coverage | 📋 Planned | — |
 

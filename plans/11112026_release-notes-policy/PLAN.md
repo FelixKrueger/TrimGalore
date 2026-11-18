@@ -5,10 +5,11 @@
 **Date:** 2026-11-11, manual review 2026-11-13
 **Decision taken:** curated highlights only — drop `--generate-notes` in favour of a committed
 notes file. Chosen over "highlights + folded full list" and "filter the auto list".
-**Status:** **Revision 3** — dual agent review complete (`PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md`),
-findings folded in; see §11. Revision 3 settles §12's three open questions (§13) and corrects one
-claim the plan made twice about `actionlint`. Awaiting re-review or an implementation trigger. No
-implementation.
+**Status:** **Implemented, 2026-11-18** (§14), except Step 4's public `gh release edit`, which the
+plan reserves for explicit go-ahead. Revision 3 settled §12's three open questions (§13) and
+corrected one claim the plan made twice about `actionlint`. Dual agent review covered revision 2
+(`PLAN_REVIEW_A.md`, `PLAN_REVIEW_B.md`, see §11); **revision 3's own changes have not been
+re-reviewed.**
 
 ---
 
@@ -547,3 +548,62 @@ failure against an already-complete release, not a partial one.
 confirmed by mutation (a bogus `github.*` property is reported at that line).
 
 No issue filed: fixed in the same session as Open-6.
+
+## 14. Implementation notes, 2026-11-18
+
+Implemented on `dev` from `ccae784`. Steps 1, 2, 2a, 3 and 5a are done; Step 4's file is written but
+its `gh release edit` is not run.
+
+| Step | What landed |
+| --- | --- |
+| 1 | `.github/release-notes/README.md` — the §3 policy, and the mechanism first, since §8.5 established this is the rule's only home |
+| 2 | `Require curated GA release notes` in `check-release`, after `Detect release` |
+| 2a | `notes_path` declared on `check-release`'s `outputs:`, written by that step |
+| 3 | `Create release` branched on `is_prerelease`; `PRERELEASE_FLAG` dropped |
+| 4 | `.github/release-notes/v2.4.0.md` written — 2,070 chars against the 16,084 the auto-notes produced. **`gh release edit v2.4.0 --notes-file` not run**: a public edit to a shipped release, reserved by §9.1 for go-ahead at the time |
+| 5a | `tests/integration_release_workflow.rs`, four tests |
+
+### Deviations
+
+**Step 2's condition is one `grep`, not two tests.** The plan had
+`[ ! -s "$NOTES" ] || ! grep -q '[^[:space:]]' "$NOTES"`. `grep -q '[^[:space:]]'` already returns
+non-zero for a missing file (exit 2), an empty one and a whitespace-only one, so `-s` was redundant.
+Checked against all four arms — missing, empty, whitespace-only, with content — and the two forms
+agree on every one. The `!` is inside an `if` condition, where it is consumed explicitly, so it is
+not the errexit-exempt form §13 Open-6 describes.
+
+**5a is a Rust test, not a step in `ci.yml`.** §4 left the venue open. It runs under `cargo test`,
+which is the project's primary gate, and it can be mutation-tested precisely. The deciding argument
+is that a shell assertion in `ci.yml` would have been a fourth place to write shell that cannot fail,
+which is the defect Open-6 found twice on the same day.
+
+**5a asserts *direct* `needs`, which is stronger than the plan's wording.** §5 says the other jobs
+"transitively" need `check-release`. They do not — all eight name it directly, so the test asserts
+that, and a job that stops naming it fails even if it keeps an indirect path.
+
+### Mutation evidence
+
+Every assertion was mutated before being trusted, each anchor's match count asserted at 1 first
+(§5: a mutation whose anchor is not unique silently does not apply):
+
+| Mutation | Caught by |
+| --- | --- |
+| the notes step **relocated into `create-tag-and-release`**, present exactly once | `ga_notes_check_lives_in_check_release` |
+| the notes step deleted outright | same test's first assertion |
+| `if: always()` added to `publish-crate` | `release_workflow_has_no_status_functions` |
+| `needs: [check-release]` removed from `build-binaries` | `every_other_job_needs_check_release` |
+| the `jobs:` anchor broken | `job_parsing_sees_the_real_jobs`, plus two others, which is the point of having it |
+
+The relocation case is the one that matters, since deleting the step is not the hazard — a check in
+job 4 that *looks* present is. `release.yml` was restored byte-identically after each.
+
+### Verification
+
+912 tests passing, 0 failed (908 before, plus 5a's four). `cargo fmt --check` clean, clippy clean at
+`-D warnings`, `actionlint` clean. CI green on `ccae784` across all eleven jobs before these changes.
+
+### Not covered
+
+Step 3 still has no CI coverage and cannot acquire any — see §5 Step 3. §8.2 stays unverified: that
+`gh release create --notes-file` rejects a missing file is only testable by making a real release,
+and it is a weak fallback regardless, firing after the tag push.
