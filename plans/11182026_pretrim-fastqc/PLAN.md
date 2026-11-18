@@ -576,10 +576,33 @@ literally instead of deriving them; it fails (exit 101) under the same mutation.
 derived from the code under test cannot test that code** — the tripwire cases are still worth having
 for the rest of the output set, but they are not C1's regression guard.
 
+### V5 — MultiQC verified empirically (2026-11-18)
+
+The last unproven link, and the only one no code review could close. Run on MultiQC **1.14.dev0**
+(older than the 1.35 the reviewers read; the behaviour matched the source reading, so this point is
+stable across both).
+
+**Single-end — the collision case — passes.** Two reports found, two distinct samples:
+
+| Sample | `Filename` |
+| --- | --- |
+| `illumina_10K` | `illumina_10K_trimmed.fq.gz` |
+| `illumina_10K_raw` | `illumina_10K_raw.fastq.gz` |
+
+For exactly the predicted reason: `_trimmed` **is** stripped — it is a terminal match in
+`fn_clean_trim`, hence the bare `illumina_10K` — while `_raw` is not in the strip list at all. That
+settles the half of §7.2 that was read from config rather than observed.
+
+**Paired passes too.** Four reports, four distinct samples: `BS-seq_10K_R{1,2}_raw` and
+`BS-seq_10K_R{1,2}_val_{1,2}`.
+
+**The counterfactual is what makes this evidence.** Rewriting one line — the `Filename` field inside
+the raw report's `fastqc_data.txt`, from `illumina_10K_raw.fastq.gz` back to `illumina_10K.fastq.gz`,
+which is the alias's only effect — collapses it: MultiQC reports *"Found 1 reports"* and a single
+sample survives. **The raw set is dropped silently**, with no warning on stderr. So the alias is
+load-bearing rather than decorative, and the failure it averts is invisible rather than loud.
+
 ### Still open
 
-MultiQC's own parsing remains unverified — all three agents said so independently. What is proven is
-that the report's `Filename` field carries `_raw` (V2, asserted inside the zip). What is not proven
-is that MultiQC reads that field into a distinct sample, and `fn_clean_exts` not stripping `_raw`
-is read from config, not observed. **That is the one thing standing between this and an nf-core
-module bump**, and no further code review will produce it.
+Nothing blocking. The remaining items are §10's Open-1/3/5, M4 (§14), Windows portability, and the
+two doc targets in §13's "Not done".

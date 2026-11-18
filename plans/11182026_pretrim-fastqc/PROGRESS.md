@@ -51,6 +51,11 @@
 
 ## History
 
+- 2026-11-18: **V5 verified empirically** — MultiQC 1.14.dev0 reads raw and trimmed as distinct
+  samples, single-end and paired. Counterfactual confirms the alias is load-bearing: rewriting the
+  report's `Filename` field back collapses it to one sample, dropped silently. The nf-core bump's
+  last evidence gap is closed.
+
 - 2026-11-18: Code Review + Coverage → ✅ (both reports + audit; C1/C2/H1/H2/M1/M2/M3/M5 fixed,
   M4 deliberately unchanged, 904 tests). Both reviewers and the audit independently found the same
   Critical: raw reports pooled into one directory and silently overwrote each other at exit 0.
