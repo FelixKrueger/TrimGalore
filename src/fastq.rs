@@ -603,6 +603,20 @@ enum Sink {
     ParGz(ParCompress<'static, Gzip, File>),
 }
 
+/// Issue the teardown's sync flushes, for both gzip arms.
+///
+/// Generic so the count can be asserted on its own. How many `Z_SYNC_FLUSH`
+/// markers these leave on the wire is flate2's to decide and has changed between
+/// releases — 1.1.11 coalesces across an output buffer boundary where 1.1.10 did
+/// not — but the number of flushes this tool issues is its own contract, and the
+/// one [`PRE_434_GZ_SYNC_FLUSHES`] is about.
+fn sync_flush_for_teardown<W: Write + ?Sized>(w: &mut W) -> std::io::Result<()> {
+    for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
+        w.flush()?;
+    }
+    Ok(())
+}
+
 /// How many `Z_SYNC_FLUSH`es the gzip teardown emits before its trailer, and
 /// **the only reason it is 2 is byte-for-byte compatibility with the output
 /// this tool has always written.**
@@ -652,9 +666,7 @@ impl Sink {
             }
             Sink::Gz(w) => {
                 let mut encoder = w.into_inner().map_err(|e| e.into_error())?;
-                for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
-                    encoder.flush()?;
-                }
+                sync_flush_for_teardown(&mut encoder)?;
                 // The deflate end-of-stream plus the 8-byte CRC/ISIZE trailer.
                 // `flush()` does NOT write these; only `try_finish` does.
                 encoder.try_finish()?;
@@ -664,12 +676,10 @@ impl Sink {
                 // retry it: gzp >= 2.0.3 takes the channels and the join
                 // handle in `recover_send_error` before joining.
                 //
-                // Same markers as the serial arm, same reason — see
+                // Same flushes as the serial arm, same reason — see
                 // `PRE_434_GZ_SYNC_FLUSHES`. `ParCompress::flush` is
                 // `flush_last(false)`.
-                for _ in 0..PRE_434_GZ_SYNC_FLUSHES {
-                    w.flush()?;
-                }
+                sync_flush_for_teardown(&mut w)?;
                 w.finish()?;
             }
         }
@@ -1063,18 +1073,42 @@ mod tests {
             "the sink's teardown must emit the same bytes as the pre-#434 \
              flush-flush-finish sequence; downstream snapshots pin these bytes"
         );
-        // Counted, not merely detected: one marker is exactly the failure that
-        // a single flush produces, and it is the plausible way to get this
-        // wrong. An empty stored block is how `Z_SYNC_FLUSH` shows up on the
-        // wire, and payload this small will not contain that byte string by
-        // chance — a fresh reference is compared above in any case.
-        let markers = ours
-            .windows(5)
-            .filter(|w| *w == [0x00, 0x00, 0x00, 0xff, 0xff])
-            .count();
+        // No marker count here. How many `Z_SYNC_FLUSH` markers a given number of
+        // flushes leaves is flate2's to decide and changes between releases: 1.1.10
+        // emits two for this payload, 1.1.11 coalesces them into one across the
+        // output buffer boundary. Worse, under 1.1.11 the equality above cannot
+        // tell one flush from two either, because the bytes come out the same — so
+        // neither assertion here pins the flush count any more.
+        //
+        // `the_teardown_issues_one_sync_flush_per_pre_434_flush` pins it directly,
+        // and `integration_compressed_output` pins the bytes downstream consumes.
+    }
+
+    /// Counts `flush()` calls and discards everything written.
+    struct FlushCounter {
+        flushes: usize,
+    }
+
+    impl Write for FlushCounter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_teardown_issues_one_sync_flush_per_pre_434_flush() {
+        // The contract `PRE_434_GZ_SYNC_FLUSHES` exists for, asserted on the calls
+        // rather than on their byte residue. Nothing here goes through gzip, so no
+        // flate2 release can make it insensitive the way it did the byte equality.
+        let mut counter = FlushCounter { flushes: 0 };
+        sync_flush_for_teardown(&mut counter).unwrap();
         assert_eq!(
-            markers, PRE_434_GZ_SYNC_FLUSHES,
-            "expected one Z_SYNC_FLUSH marker per pre-#434 flush"
+            counter.flushes, PRE_434_GZ_SYNC_FLUSHES,
+            "the gzip teardown must issue exactly one sync flush per pre-#434 flush"
         );
     }
 

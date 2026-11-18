@@ -55,6 +55,11 @@ bstr = "1"
 # dev-dep so test code can read fastqc_data.txt out of the report archive.
 # Features mirror fastqc-rust's own spec, so the resolved tree is unchanged.
 zip = { version = "9", default-features = false, features = ["deflate", "time"] }
+# Already in the dep graph (transitive via flate2, which uses it for the gzip
+# trailer); promoted to a direct dev-dep so a test can checksum compressed output.
+# CRC32 rather than md5 to avoid a new crate: `python3 -c "import zlib,sys;
+# print(zlib.crc32(open(sys.argv[1],'rb').read()))"` reproduces it by hand.
+crc32fast = "1"
 
 [profile.release]
 opt-level = 3

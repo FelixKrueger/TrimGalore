@@ -1711,6 +1711,7 @@ dependencies = [
  "anyhow",
  "bstr",
  "clap",
+ "crc32fast",
  "env_logger",
  "fastqc-rust",
  "flate2",
