@@ -48,9 +48,10 @@ draft is not an exception to anything.
       amendments. Verified to pass `check-release`'s condition.
 - [x] **CHANGELOG anchor set** — `#version-260-release-on-18-november-2026`, confirmed against the
       generated `id=` in the built site rather than inferred from the heading.
-- [x] **CHANGELOG:** heading is `### Version 2.6.0 (Release on 18 November 2026)` in both copies,
-      re-verified byte-identical after the edit. **If the release slips past 18 November, the heading
-      date and the anchor in `v2.6.0.md` both have to change.**
+- [x] **CHANGELOG:** heading is `### Version 2.6.0 (Release on 19 November 2026)` in both copies,
+      re-verified byte-identical. **Moved from the 18th to the 19th deliberately** — the prep ran up
+      against midnight, so the date is the one it ships on rather than a race. The anchor in
+      `v2.6.0.md` moved with it and was re-checked against the generated `id=` in the built site.
 - [x] **rustix entry added.** §1's amendment makes a security-clearing bump worth telling users
       about, so leaving it out of the CHANGELOG while listing it in the release body would have been
       inconsistent. One sentence, matching the file's format.

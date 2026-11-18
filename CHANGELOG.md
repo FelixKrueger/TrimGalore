@@ -1,7 +1,7 @@
 # Trim Galore Changelog
 
 
-### Version 2.6.0 (Release on 18 November 2026)
+### Version 2.6.0 (Release on 19 November 2026)
 
 #### Changes
 

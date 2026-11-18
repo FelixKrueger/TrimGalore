@@ -7,7 +7,7 @@ description: Release history for Trim Galore. The canonical source is CHANGELOG.
 The canonical source for the changelog lives at [`CHANGELOG.md`](https://github.com/FelixKrueger/TrimGalore/blob/master/CHANGELOG.md) in the repo root. The version below is a copy synced with the docs.
 :::
 
-### Version 2.6.0 (Release on 18 November 2026)
+### Version 2.6.0 (Release on 19 November 2026)
 
 #### Changes
 
