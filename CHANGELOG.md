@@ -1,5 +1,9 @@
 # Trim Galore Changelog
 
+### Unreleased
+
+- JSON trimming reports use a fixed `trim_galore` executable name so their checksums are independent of the invocation path ([#578](https://github.com/FelixKrueger/TrimGalore/issues/578)).
+
 
 ### Version 2.6.0 (Release on 19 November 2026)
 

@@ -427,6 +427,28 @@ fn resolve_clump_layout(cli: &Cli) -> Result<Option<clump::ClumpLayout>> {
     Ok(Some(layout))
 }
 
+struct CommandLines {
+    /// Original invocation, including argv[0].
+    raw: String,
+    /// Invocation with the canonical executable name for reports.
+    report: String,
+}
+
+impl CommandLines {
+    fn from_args(args: &[std::ffi::OsString]) -> Self {
+        let raw = args
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let report = std::iter::once(std::borrow::Cow::Borrowed("trim_galore"))
+            .chain(args.iter().skip(1).map(|arg| arg.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        Self { raw, report }
+    }
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -437,13 +459,7 @@ fn main() -> Result<()> {
     // kinds and route them to stdout with a success code; genuine usage errors
     // keep clap's default stderr + non-zero behaviour.
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    // Command-line as seen by the user (pre-clap-rewrite), for the reports and
-    // the uBAM `@PG CL:`. Lossy because a file name need not be UTF-8.
-    let command_line = args
-        .iter()
-        .map(|a| a.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let command_lines = CommandLines::from_args(&args);
     let cli = match Cli::try_parse_from(rewrite_perl_short_flags(args)) {
         Ok(cli) => cli,
         Err(err) => {
@@ -762,7 +778,7 @@ fn main() -> Result<()> {
                     output_dir,
                     cli.rename,
                     &cli.preserve_tags,
-                    &command_line,
+                    &command_lines.raw,
                     cli.phred_offset(),
                 )?,
             }
@@ -794,7 +810,7 @@ fn main() -> Result<()> {
                     output_dir,
                     cli.rename,
                     &cli.preserve_tags,
-                    &command_line,
+                    &command_lines.raw,
                     cli.phred_offset(),
                 )?,
             }
@@ -856,7 +872,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if cli.clump_only {
-        return run_clump_only(&cli, output_dir, gzip, &command_line);
+        return run_clump_only(&cli, output_dir, gzip, &command_lines.raw);
     }
 
     if cli.discard_untrimmed {
@@ -874,7 +890,7 @@ fn main() -> Result<()> {
     // uBAM output lives on a separate serial code path; the FASTQ path
     // below is the existing parallel-or-serial dispatch, untouched.
     if matches!(cli.output_format, trim_galore::cli::OutputFormat::UBam) {
-        return run_ubam_output(&cli, output_dir, &command_line);
+        return run_ubam_output(&cli, output_dir, &command_lines);
     }
 
     // Paired-uBAM single-file de-interleaved path (T20-PE). The validation
@@ -909,15 +925,15 @@ fn main() -> Result<()> {
             gzip,
             &adapters_r1,
             &adapters_r2,
-            &command_line,
+            &command_lines.report,
         )?;
         return Ok(());
     }
 
     if cli.paired {
-        run_paired_trim(&cli, output_dir, gzip, &command_line)
+        run_paired_trim(&cli, output_dir, gzip, &command_lines.report)
     } else {
-        run_single_end_trim(&cli, output_dir, gzip, &command_line)
+        run_single_end_trim(&cli, output_dir, gzip, &command_lines.report)
     }
 }
 
@@ -2366,7 +2382,11 @@ fn run_paired_ubam_single_file(
 /// The cores-ignored + missing-qual NOTEs are emitted up-front in `main()`
 /// (before specialty dispatch), so they cover both this path and the
 /// hardtrim BAM paths uniformly. Code-review round-2 B-NIT-2.
-fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> Result<()> {
+fn run_ubam_output(
+    cli: &Cli,
+    output_dir: Option<&Path>,
+    command_lines: &CommandLines,
+) -> Result<()> {
     // Paired-uBAM single-file de-interleaved input.
     if cli.paired && cli.input.len() == 1 {
         let outputs =
@@ -2389,7 +2409,7 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
             &outputs,
             &config,
             output_dir,
-            command_line,
+            command_lines,
             &adapters_r1,
             &adapters_r2,
         );
@@ -2448,7 +2468,7 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
                 &chunk[1],
                 &config,
                 output_dir,
-                command_line,
+                command_lines,
                 &adapters_r1,
                 &adapters_r2,
             )
@@ -2493,7 +2513,7 @@ fn run_ubam_output(cli: &Cli, output_dir: Option<&Path>, command_line: &str) -> 
             sanity_check_any(input)?;
         }
         let (_label, adapters_r1, _, config) = setup_trimming(cli, input)?;
-        run_ubam_output_single(cli, input, &config, output_dir, command_line, &adapters_r1)?;
+        run_ubam_output_single(cli, input, &config, output_dir, command_lines, &adapters_r1)?;
     }
     Ok(())
 }
@@ -2506,7 +2526,7 @@ fn run_ubam_output_single(
     input: &Path,
     config: &trimmer::TrimConfig,
     output_dir: Option<&Path>,
-    command_line: &str,
+    command_lines: &CommandLines,
     adapters_r1: &[(String, String)],
 ) -> Result<()> {
     let output_path =
@@ -2529,7 +2549,7 @@ fn run_ubam_output_single(
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             source_header.as_ref(),
-            command_line,
+            &command_lines.raw,
         )?;
         let out = parallel::run_single_end_parallel_to_bam(reader, &mut sink, config, cli.cores)?;
         sink.finish()?;
@@ -2540,7 +2560,7 @@ fn run_ubam_output_single(
             &output_path,
             source_header.as_ref(),
             &cli.preserve_tags,
-            command_line,
+            &command_lines.raw,
             cli.phred_offset(),
         )?;
         let out = trimmer::run_single_end_to_bam(reader.as_mut(), &mut writer, config)?;
@@ -2600,7 +2620,7 @@ fn run_ubam_output_single(
             phred_encoding: cli.phred_offset(),
             poly_a: cli.poly_a,
             poly_g: config.poly_g,
-            command_line: command_line.to_string(),
+            command_line: command_lines.report.clone(),
             input_filename: input_filename.clone(),
             input_filenames: vec![input_filename.clone()],
             library: Some(cli.effective_clips()),
@@ -2656,7 +2676,7 @@ fn run_ubam_output_paired_two_files(
     input_r2: &Path,
     config: &trimmer::TrimConfig,
     output_dir: Option<&Path>,
-    command_line: &str,
+    command_lines: &CommandLines,
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
@@ -2704,7 +2724,7 @@ fn run_ubam_output_paired_two_files(
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             source_header.as_ref(),
-            command_line,
+            &command_lines.raw,
         )?;
         let out = parallel::run_paired_end_parallel_to_bam(
             reader_r1, reader_r2, &mut sink, config, cli.cores,
@@ -2718,7 +2738,7 @@ fn run_ubam_output_paired_two_files(
             &output_path,
             source_header.as_ref(),
             &cli.preserve_tags,
-            command_line,
+            &command_lines.raw,
             cli.phred_offset(),
         )?;
         let out = trimmer::run_paired_end_to_bam(
@@ -2802,7 +2822,7 @@ fn run_ubam_output_paired_two_files(
             adapters_r1,
             adapters_r2,
             None, // --passthrough rejected upstream
-            command_line,
+            &command_lines.report,
         )?;
     }
 
@@ -2833,7 +2853,7 @@ fn run_ubam_output_paired_single_file(
     outputs: &naming::InterleavedBamOutputs,
     config: &trimmer::TrimConfig,
     output_dir: Option<&Path>,
-    command_line: &str,
+    command_lines: &CommandLines,
     adapters_r1: &[(String, String)],
     adapters_r2: &[(String, String)],
 ) -> Result<()> {
@@ -2851,7 +2871,7 @@ fn run_ubam_output_paired_single_file(
         let mut sink = trim_galore::bam::ParallelBamSink::create(
             &output_path,
             Some(&source_header),
-            command_line,
+            &command_lines.raw,
         )?;
         let out = parallel::run_paired_end_parallel_to_bam(
             Box::new(r1),
@@ -2869,7 +2889,7 @@ fn run_ubam_output_paired_single_file(
             &output_path,
             Some(&source_header),
             &cli.preserve_tags,
-            command_line,
+            &command_lines.raw,
             cli.phred_offset(),
         )?;
         let out = trimmer::run_paired_end_to_bam(&mut r1, &mut r2, &mut writer, config)?;
@@ -2945,7 +2965,7 @@ fn run_ubam_output_paired_single_file(
             adapters_r1,
             adapters_r2,
             None,
-            command_line,
+            &command_lines.report,
         )?;
     }
 
@@ -3127,4 +3147,61 @@ where
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod command_line_tests {
+    use super::CommandLines;
+    use std::ffi::OsString;
+
+    #[test]
+    fn report_command_ignores_executable_and_preserves_arguments() {
+        let tail = [
+            "-r1",
+            "20",
+            "-r2=25",
+            "--fastqc_args",
+            "--nogroup",
+            "my \"quoted\" file.fq",
+        ];
+        let expected_tail = tail.join(" ");
+        for executable in [
+            "trim_galore",
+            "./trim_galore",
+            "/opt/bin/trim_galore",
+            "/path with spaces/trim_galore",
+            "renamed-trimmer",
+        ] {
+            let args: Vec<OsString> = std::iter::once(executable)
+                .chain(tail.iter().copied())
+                .map(OsString::from)
+                .collect();
+            let commands = CommandLines::from_args(&args);
+            assert_eq!(commands.report, format!("trim_galore {expected_tail}"));
+            assert_eq!(commands.raw, format!("{executable} {expected_tail}"));
+        }
+    }
+
+    #[test]
+    fn report_command_handles_missing_arguments() {
+        let commands = CommandLines::from_args(&[]);
+        assert_eq!(commands.raw, "");
+        assert_eq!(commands.report, "trim_galore");
+        let commands = CommandLines::from_args(&[OsString::from("/opt/bin/trim_galore")]);
+        assert_eq!(commands.raw, "/opt/bin/trim_galore");
+        assert_eq!(commands.report, "trim_galore");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_lines_keep_lossy_non_utf8_handling() {
+        use std::os::unix::ffi::OsStringExt;
+        let args = [
+            OsString::from_vec(b"/bin/\xff".to_vec()),
+            OsString::from_vec(b"read\xfe.fq".to_vec()),
+        ];
+        let commands = CommandLines::from_args(&args);
+        assert_eq!(commands.raw, "/bin/\u{fffd} read\u{fffd}.fq");
+        assert_eq!(commands.report, "trim_galore read\u{fffd}.fq");
+    }
 }
