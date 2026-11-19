@@ -181,6 +181,7 @@ pub struct TrimConfig {
     pub phred_encoding: u8,
     pub poly_a: bool,
     pub poly_g: bool,
+    /// CLI reports use the canonical executable name; library callers supply this value.
     pub command_line: String,
     /// Input filename (basename only) — used in text report and Cutadapt-compatible section
     pub input_filename: String,

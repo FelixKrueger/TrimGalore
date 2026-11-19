@@ -110,3 +110,9 @@ It is this number, `3,357,967 (0.29%)` at the end of the Read 2 trimming report,
 ## JSON report
 
 Trim Galore also writes a JSON report (`*_trimming_report.json`) alongside the text report. It contains the same statistics as the text report in a structured format (schema v1), designed for native parsing by MultiQC. If you're building a custom dashboard or consuming Trim Galore output programmatically, prefer the JSON file.
+
+## JSON command line
+
+The JSON report's `command_line` starts with the fixed name `trim_galore`, followed by the original arguments in their supplied order, before Perl-style flags such as `-r1` are rewritten. Changing only the executable's installation path or invocation name therefore leaves the report unchanged. Argument values, including input and output paths, are preserved; this field is a space-joined record, not a shell-quoted command.
+
+For example, both `trim_galore --gzip sample.fq` and `/opt/bin/trim_galore --gzip sample.fq` record `trim_galore --gzip sample.fq`. uBAM output keeps the original invocation, including the executable path, in its `@PG CL:` header field.
