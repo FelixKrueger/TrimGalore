@@ -111,9 +111,21 @@ workflow, then check each channel:
 - [ ] **bioconda** — and `about.description` was deliberately queued for the v2.6.0 bump, to avoid a
       three-platform rebuild for prose. Same PR. Note bioconda's title convention is
       `Update <pkg> to <version>`, and an upstream author cannot self-approve.
-- [ ] **nf-core module container bump** — the point of the release. `--fastqc_raw` cannot be
-      referenced until a release carries it, and the module then needs *only* a container bump; the
-      MultiQC behaviour was verified empirically, so no pipeline-side config.
+- [ ] **nf-core module bump — BLOCKED on bioconda #71879 merging, not on the release.** Corrected
+      2026-11-19. The module does **not** use the GHCR image. `modules/nf-core/trimgalore/`
+      pins `bioconda::trim-galore` in `environment.yml` and takes its container from Seqera Wave,
+      built *from that conda package* — on master today,
+      `community.wave.seqera.io/library/trim-galore:2.5.0--e26c3be09dac93c9` plus a
+      `community-cr-prod.seqera.io` singularity blob. So the chain is serial:
+      **bioconda merge → package build → Wave container → module PR.** Releasing v2.6.0 does not
+      unblock it.
+      - The bump is **2.5.0 → 2.6.0** (master is already at 2.5.0 via nf-core/modules#13804; a local
+        clone showing 2.3.0 is stale).
+      - Three strings change: `environment.yml`'s pin, and `main.nf`'s Wave tag and singularity blob.
+      - The GHCR digests used during the beta arc were *pipeline-level overrides for testing*
+        (`rnaseq#1789`), not the module's canonical container. Do not conflate them.
+      - The MultiQC behaviour was verified empirically, so no pipeline-side config is needed once the
+        container exists.
 - [ ] **nf-core/methylseq** after the module.
 - [ ] **Dependabot alert #29** (fflate, medium) clears at the FF — it is computed from the default
       branch and the fix is on `dev`. Still open as of 2026-11-18. Note a plain
