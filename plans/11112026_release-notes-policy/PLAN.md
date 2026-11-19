@@ -567,7 +567,7 @@ its `gh release edit` is not run.
 | 2 | `Require curated GA release notes` in `check-release`, after `Detect release` |
 | 2a | `notes_path` declared on `check-release`'s `outputs:`, written by that step |
 | 3 | `Create release` branched on `is_prerelease`; `PRERELEASE_FLAG` dropped |
-| 4 | `.github/release-notes/v2.4.0.md` written — 2,070 chars against the 16,084 the auto-notes produced. **`gh release edit v2.4.0 --notes-file` not run**: a public edit to a shipped release, reserved by §9.1 for go-ahead at the time |
+| 4 | `.github/release-notes/v2.4.0.md` written, and **applied 2026-11-19** — 2,439 chars against the 16,084 the auto-notes produced, with the three first-time-contributor acknowledgements carried verbatim and verified live afterwards. The superseded body is kept at `v2.4.0_superseded_body.md`: regeneration is not faithful (§15), so overwriting it was otherwise irreversible |
 | 5a | `tests/integration_release_workflow.rs`, four tests |
 
 ### Deviations

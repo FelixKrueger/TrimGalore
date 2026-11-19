@@ -134,10 +134,10 @@ workflow, then check each channel:
 
 ## 7. Carried over, not blocking
 
-- [ ] **Step 4 of the release-notes plan** — `gh release edit v2.4.0 --notes-file
-      .github/release-notes/v2.4.0.md`. The file now carries the three first-time-contributor
-      acknowledgements byte-identically to the published body, so applying it loses nobody's credit.
-      It is a public edit to a shipped release and needs go-ahead at the time.
+- [x] **Step 4 of the release-notes plan — applied 2026-11-19.** v2.4.0's body is now the curated
+      2,439-character version; all three acknowledgements verified live afterwards. The 16,084-byte
+      original is committed at `plans/11112026_release-notes-policy/v2.4.0_superseded_body.md`,
+      because regenerating it returns only two of the three contributors.
 - [ ] `plans/11122026_pr-batch-547-566/` — untracked draft comments for PRs merged without them.
       Moot; keep or drop.
 - [ ] `AGENTS.md` and `SESSION_HANDOFF.md` are untracked at the repo root.
