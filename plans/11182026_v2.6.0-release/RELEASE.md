@@ -108,29 +108,47 @@ workflow, then check each channel:
 
 ## 6. Downstream
 
-- [ ] **bioconda** — and `about.description` was deliberately queued for the v2.6.0 bump, to avoid a
-      three-platform rebuild for prose. Same PR. Note bioconda's title convention is
-      `Update <pkg> to <version>`, and an upstream author cannot self-approve.
-- [ ] **nf-core module bump — BLOCKED on bioconda #71879 merging, not on the release.** Corrected
-      2026-11-19. The module does **not** use the GHCR image. `modules/nf-core/trimgalore/`
-      pins `bioconda::trim-galore` in `environment.yml` and takes its container from Seqera Wave,
-      built *from that conda package* — on master today,
-      `community.wave.seqera.io/library/trim-galore:2.5.0--e26c3be09dac93c9` plus a
-      `community-cr-prod.seqera.io` singularity blob. So the chain is serial:
-      **bioconda merge → package build → Wave container → module PR.** Releasing v2.6.0 does not
-      unblock it.
-      - The bump is **2.5.0 → 2.6.0** (master is already at 2.5.0 via nf-core/modules#13804; a local
-        clone showing 2.3.0 is stale).
-      - Three strings change: `environment.yml`'s pin, and `main.nf`'s Wave tag and singularity blob.
-      - The GHCR digests used during the beta arc were *pipeline-level overrides for testing*
-        (`rnaseq#1789`), not the module's canonical container. Do not conflate them.
-      - The MultiQC behaviour was verified empirically, so no pipeline-side config is needed once the
-        container exists.
-- [ ] **nf-core/methylseq** after the module.
-- [ ] **Dependabot alert #29** (fflate, medium) clears at the FF — it is computed from the default
-      branch and the fix is on `dev`. Still open as of 2026-11-18. Note a plain
-      `gh api .../dependabot/alerts` query misses it: #29 is older than the first page, so
-      `--paginate`, or query `/alerts/29` directly.
+**State as of 2026-11-19.** The chain is complete except for the description PR, which never gated
+anything.
+
+- [x] **bioconda package — 2.6.0 is on the channel.** Not via our PR: `BiocondaBot` autobump opened
+      #71877 about five hours after the tag and `ewels` merged it at 05:43Z, with the same sha256 we
+      had computed. The `Upload` workflow succeeded, so the package built for all three platforms.
+- [ ] **bioconda #71879 — still open, and only carries prose.** Once autobump landed the version, our
+      PR silently reduced to `about.description` plus `build.number` 0→1; retitled
+      `Update trim-galore recipe description`. `thanhleviet` reviewed (COMMENTED, not APPROVED) and
+      asked for Rust third-party licence bundling, which is now in: `cargo-bundle-licenses` as a build
+      dep, the generation step in `build.sh`, and a two-entry `license_file`. CI green on all
+      platforms; `REVIEW_REQUIRED` stands because an upstream author cannot self-approve.
+      - **Open, non-blocking:** `thanhleviet` notes `host: zlib` is unused — `Cargo.lock` carries
+        `zlib-rs`/`libz-rs-sys` 0.6.8 and no `libz-sys`, so the `libzlib` run_export is spurious. It
+        was not always: `host: zlib` came from #65446 when feature unification via
+        `fastqc-rust` → `zip` really did pull C zlib. Left to him to fold in or defer.
+- [x] **nf-core module — MERGED 2026-11-19, by `mashehu`** (nf-core/modules#13831, merge commit
+      `6b4353bb6`). `bioconda::trim-galore=2.6.0`, both container strings, all four `meta.yml`
+      container entries, both conda lock files and the snapshot. Verified on their master afterwards,
+      including that the stub entries survived.
+      - **The earlier "BLOCKED on bioconda #71879" note was wrong**, and the correction it replaced
+        was also wrong. It was never blocked on *our* PR — only on a 2.6.0 package existing, which
+        autobump delivered. The containers are built from `environment.yml` by
+        `nf-core modules containers create`, which **only exists in nf-core/tools 4.x**; hand-editing
+        `meta.yml` is not viable, because the per-architecture `build_id`/`scan_id` fields and the
+        `.conda-lock/` filenames are machine-generated. That command can also half-finish on a
+        transient network error, leaving arm64 absent — re-run it and check all four entries.
+      - **Snapshot gotcha, cost most of the effort.** The JSON report's checksum depends on how the
+        binary was invoked, because `command_line` records `argv[0]` — now
+        [#578](https://github.com/FelixKrueger/TrimGalore/issues/578). A local docker run of the amd64
+        image gives an absolute path; CI through Nextflow gives a bare `trim_galore`. **Take the
+        values from CI's own diff rather than regenerating locally.** And note
+        `nf-test --update-snapshot` **writes a snapshot even when the tests fail to start** — a run
+        whose containers died hollowed both stub entries from ~46 lines to 7, which only showed up as
+        a diff stat too large for the edit made.
+- [ ] **nf-core/methylseq — the last link, not started.** `nf-core modules update trimgalore` in the
+      pipeline repo, which pulls the merged module and updates `modules.json`. Local checkouts:
+      `~/Github/methylseq` and `~/Github/methylseq-pr638`.
+- [x] **Dependabot alert #29** (fflate, medium) — **`fixed`**, cleared by the FF to `master` as
+      predicted. Note a plain `gh api .../dependabot/alerts` query misses it: #29 is older than the
+      first page, so use `--paginate` or query `/alerts/29` directly.
 
 ## 7. Carried over, not blocking
 
