@@ -34,6 +34,8 @@ Trim Galore is archived on Zenodo:
 - **v2.2.0:** [`10.5281/zenodo.20127893`](https://doi.org/10.5281/zenodo.20127893)
 - **v2.3.0:** [`10.5281/zenodo.21235981`](https://doi.org/10.5281/zenodo.21235981)
 - **v2.4.0:** [`10.5281/zenodo.24080702`](https://doi.org/10.5281/zenodo.24080702)
+- **v2.5.0:** [`10.5281/zenodo.24202690`](https://doi.org/10.5281/zenodo.24202690)
+- **v2.6.0:** [`10.5281/zenodo.24355934`](https://doi.org/10.5281/zenodo.24355934)
 
 For older versions, pick the version-specific DOI from the corresponding entry on the [Zenodo concept page](https://doi.org/10.5281/zenodo.5127898) or from the [GitHub release page](https://github.com/FelixKrueger/TrimGalore/releases).
 
